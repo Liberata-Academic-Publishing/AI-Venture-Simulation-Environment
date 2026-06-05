@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from Agent import Agent
 from Paper import Paper
+
+if TYPE_CHECKING:
+    from History import History
 
 AgentFactory = Callable[..., Agent]
 
@@ -19,11 +23,13 @@ class Environment:
         num_agents: int | None = None,
         agent_cls: type[Agent] | AgentFactory | None = None,
         forecast_horizon_days: int = 30,
+        history: "History | None" = None,
     ):
         if agents is not None and num_agents is not None:
             raise ValueError("Pass either agents or num_agents, not both.")
 
         self.forecast_horizon_days = forecast_horizon_days
+        self.history = history
         self.day = 0
 
         if agents is None:
@@ -40,10 +46,12 @@ class Environment:
         self._configure_agent_forecasts()
 
     def agentact(self):
-        """Ask each agent to act once, in order."""
+        """Ask each agent to act once, in order, recording what each one did."""
         self._sync_papers()
         for agent in self.agents:
-            agent.act()
+            record = agent.act()
+            if self.history is not None and record is not None:
+                self.history.record_action(self, agent, record)
         self._sync_papers()
 
     def nextstep(self):
@@ -57,6 +65,9 @@ class Environment:
 
         self.update_agent_capital()
         self.day += 1
+
+        if self.history is not None:
+            self.history.record_step(self)
 
     def run(self, days: int):
         if days < 0:

@@ -164,6 +164,9 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
+# Simulation outputs (CSV/JSON/PNG written by run_simulation.py)
+runs/
+
 # mkdocs documentation
 /site
 

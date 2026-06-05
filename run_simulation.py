@@ -1,62 +1,21 @@
 from __future__ import annotations
 
+import os
 import random
 from collections import Counter
 
 from Agent import Agent
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
+from History import History
 from Paper import Paper
 
-
-class LoggingHeuristicAgent(HeuristicAgent):
-    """Heuristic agent that records each action for demo output."""
-
-    next_id = 1
-    current_day = 0
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = f"Agent {LoggingHeuristicAgent.next_id}"
-        LoggingHeuristicAgent.next_id += 1
-        self.action_history: list[str] = []
-        self.action_categories: list[str] = []
-
-    def act(self):
-        if self.active_review_paper is not None:
-            paper = self.active_review_paper
-            self.advance_active_review()
-            if self.active_review_paper is None:
-                self.record_action("good-faith review completed", paper)
-            else:
-                self.record_action("good-faith review continued", paper)
-            return
-
-        action, paper = self.choose_action()
-        if action == "write_paper":
-            self.record_action("worked on own paper")
-            self.write_paper()
-        elif action == "peer_review":
-            self.record_action("good-faith review started", paper)
-            previous_active_paper = self.active_review_paper
-            self.peer_review(paper)
-            if previous_active_paper is None and self.active_review_paper is None:
-                self.action_categories.pop()
-                self.action_history.pop()
-                self.record_action("review unavailable", paper)
-        elif action == "bad_faith_review":
-            self.record_action("bad-faith review completed", paper)
-            self.bad_faith_review(paper)
-
-    def record_action(self, category: str, paper: Paper | None = None):
-        paper_text = f" of {display_title(paper)}" if paper is not None else ""
-        self.action_categories.append(category)
-        self.action_history.append(
-            f"day {LoggingHeuristicAgent.current_day}: {category}{paper_text}"
-        )
+NUM_AGENTS = 20
+NUM_DAYS = 200
+OUTPUT_DIR = "runs"
 
 
-def seed_initial_papers(agents: list[LoggingHeuristicAgent]):
+def seed_initial_papers(agents: list[Agent]):
     for index, agent in enumerate(agents, start=1):
         paper = Paper(
             author=agent,
@@ -67,34 +26,13 @@ def seed_initial_papers(agents: list[LoggingHeuristicAgent]):
         Agent.all_papers.append(paper)
 
 
-def paper_title(paper: Paper, index: int) -> str:
-    if not hasattr(paper, "title"):
-        paper.title = f"Paper {index}"
-    return paper.title
-
-
-def display_title(paper: Paper) -> str:
-    if not hasattr(paper, "title"):
-        try:
-            paper.title = f"Paper {Agent.all_papers.index(paper) + 1}"
-        except ValueError:
-            paper.title = "Unknown paper"
-    return paper.title
-
-
-def print_summary(env: Environment):
+def print_summary(env: Environment, history: History):
     print(f"\nSimulation finished after {env.day} days")
     print(f"Agents: {len(env.agents)}")
     print(f"Papers: {len(env.papers)}")
 
-    action_categories = Counter(
-        category
-        for agent in env.agents
-        for category in getattr(agent, "action_categories", [])
-    )
-
     print("\nAction counts")
-    for action, count in action_categories.most_common():
+    for action, count in history.action_counts.most_common():
         print(f"- {action}: {count}")
 
     print("\nFinal agent capital")
@@ -108,14 +46,8 @@ def print_summary(env: Environment):
 
     print("\nPapers")
     for index, paper in enumerate(env.papers, start=1):
-        title = paper_title(paper, index)
+        title = getattr(paper, "title", f"Paper {index}")
         author_name = getattr(paper.author, "name", "Unknown")
-        active_reviewer = getattr(paper, "review_in_progress_by", None)
-        active_text = (
-            getattr(active_reviewer, "name", "Unknown")
-            if active_reviewer is not None
-            else "none"
-        )
         reviewers = [
             f"{getattr(agent, 'name', 'Unknown')}={share:.2%}"
             for agent, share in paper.share_distribution.items()
@@ -126,35 +58,60 @@ def print_summary(env: Environment):
             f"- {title}: author={author_name}, AC={paper.current_ac:.2f}, "
             f"rate={paper.accrual_rate:.2f}, total reviews={paper.completed_peer_reviews}, "
             f"good={paper.good_faith_reviews}, bad={paper.bad_faith_reviews}, "
-            f"unique reviewers={len(paper.reviewed_by)}, "
-            f"active review={active_text}, reviewer shares={reviewer_text}"
+            f"unique reviewers={len(paper.reviewed_by)}, reviewer shares={reviewer_text}"
         )
 
     print("\nRecent agent actions")
     for agent in env.agents:
+        recent = history.agent_actions.get(agent.name, [])
+        if not recent:
+            continue
         print(f"\n{agent.name}")
-        for action in agent.action_history[-10:]:
-            print(f"- {action}")
+        for line in recent[-10:]:
+            print(f"- {line}")
+
+
+def save_outputs(history: History):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    csv_path = history.to_csv(os.path.join(OUTPUT_DIR, "history.csv"))
+    json_path = history.to_json(os.path.join(OUTPUT_DIR, "history.json"))
+    print(f"\nWrote time-series to {csv_path} and {json_path}")
+
+    try:
+        import visualize
+    except ImportError as exc:
+        print(f"Skipping charts ({exc}).")
+        print(f"Open {csv_path} in a spreadsheet to plot it instead.")
+        return
+
+    print("Wrote charts:")
+    for _, path in visualize.plot_all(history, OUTPUT_DIR).items():
+        print(f"- {path}")
 
 
 def main():
     random.seed(7)
     Agent.all_papers = []
-    LoggingHeuristicAgent.next_id = 1
 
     agents = [
-        LoggingHeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=30)
-        for _ in range(20)
+        HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Agent {i}")
+        for i in range(1, NUM_AGENTS + 1)
     ]
     seed_initial_papers(agents)
 
-    env = Environment(agents=agents, papers=Agent.all_papers, forecast_horizon_days=30)
-    for _ in range(200):
-        LoggingHeuristicAgent.current_day = env.day + 1
+    history = History()
+    env = Environment(
+        agents=agents,
+        papers=Agent.all_papers,
+        forecast_horizon_days=30,
+        history=history,
+    )
+    for _ in range(NUM_DAYS):
         env.agentact()
         env.nextstep()
 
-    print_summary(env)
+    print_summary(env, history)
+    save_outputs(history)
 
 
 if __name__ == "__main__":

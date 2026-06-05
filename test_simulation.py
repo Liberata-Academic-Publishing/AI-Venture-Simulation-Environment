@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import csv
+import os
+import tempfile
 import unittest
 
 from Agent import Agent
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
+from History import History, gini
 from Paper import Paper
+
+try:
+    import matplotlib  # noqa: F401
+
+    _HAS_MPL = True
+except ImportError:
+    _HAS_MPL = False
 
 
 class DummyAgent(Agent):
@@ -156,6 +167,92 @@ class SimulationTest(unittest.TestCase):
 
         self.assertIn(action, {"peer_review", "bad_faith_review"})
         self.assertIs(paper, high_value)
+
+    def test_act_returns_review_action_records(self):
+        author = DummyAgent("author")
+        paper = Paper(author=author, current_ac=10.0)
+        reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
+        Agent.all_papers = [paper]
+
+        started = reviewer.act()
+        self.assertEqual(started.kind, "review_started")
+        self.assertIs(started.paper, paper)
+
+        kinds = [reviewer.act().kind for _ in range(3)]
+        self.assertEqual(
+            kinds, ["review_continued", "review_continued", "review_completed"]
+        )
+
+    def test_act_returns_write_and_bad_faith_records(self):
+        author = DummyAgent("author")
+        writer = DummyAgent("writer", actions=[("write_paper", None)])
+        self.assertEqual(writer.act().kind, "write_paper")
+
+        paper = Paper(author=author)
+        bad = DummyAgent("bad", actions=[("bad_faith_review", paper)])
+        record = bad.act()
+        self.assertEqual(record.kind, "bad_faith_review")
+        self.assertIs(record.paper, paper)
+
+    def test_environment_records_capital_and_actions(self):
+        author = DummyAgent("author")
+        reviewer = DummyAgent("reviewer")
+        paper = Paper(
+            author=author,
+            current_ac=10.0,
+            accrual_rate=2.0,
+            share_distribution={author: 0.75, reviewer: 0.25},
+        )
+        history = History()
+        env = Environment(agents=[author, reviewer], papers=[paper], history=history)
+
+        env.agentact()
+        env.nextstep()
+
+        self.assertEqual(history.days, [1])
+        self.assertEqual(len(history.actions), 2)  # one entry per agent turn
+        self.assertEqual(len(history.agent_capital["author"]), 1)
+        self.assertEqual(len(history.agent_capital["reviewer"]), 1)
+        self.assertAlmostEqual(history.agent_capital["author"][0], 9.0)
+        self.assertAlmostEqual(history.agent_capital["reviewer"][0], 3.0)
+        self.assertEqual(history.scalars["num_papers"][0], 1.0)
+
+    def test_history_to_csv_has_header_and_one_row_per_day(self):
+        author = DummyAgent("author")
+        paper = Paper(author=author, current_ac=5.0, accrual_rate=1.0)
+        history = History()
+        env = Environment(agents=[author], papers=[paper], history=history)
+        env.run(3)
+
+        path = os.path.join(tempfile.mkdtemp(), "history.csv")
+        history.to_csv(path)
+        with open(path, newline="") as fh:
+            rows = list(csv.reader(fh))
+
+        self.assertEqual(rows[0][0], "day")
+        self.assertIn("total_capital", rows[0])
+        self.assertEqual(len(rows), 1 + 3)  # header + one row per simulated day
+        self.assertEqual([row[0] for row in rows[1:]], ["1", "2", "3"])
+
+    def test_gini_ranges_from_equal_to_unequal(self):
+        self.assertEqual(gini([]), 0.0)
+        self.assertEqual(gini([5.0, 5.0, 5.0]), 0.0)
+        self.assertAlmostEqual(gini([0.0, 0.0, 0.0, 10.0]), 0.75)
+
+    @unittest.skipUnless(_HAS_MPL, "matplotlib not installed")
+    def test_visualize_writes_pngs(self):
+        import visualize
+
+        author = DummyAgent("author")
+        paper = Paper(author=author, current_ac=5.0)
+        history = History()
+        env = Environment(agents=[author], papers=[paper], history=history)
+        env.run(2)
+
+        outdir = tempfile.mkdtemp()
+        paths = visualize.plot_all(history, outdir)
+        for path in paths.values():
+            self.assertTrue(os.path.exists(path))
 
 
 if __name__ == "__main__":

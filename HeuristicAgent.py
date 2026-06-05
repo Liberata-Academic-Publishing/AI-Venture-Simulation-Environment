@@ -22,12 +22,14 @@ class HeuristicAgent(Agent):
         paper_progress: float = 0.0,
         review_progress: float = 0.0,
         forecast_horizon_days: int = 30,
+        name: str | None = None,
     ):
         super().__init__(
             intrinsic_talent=intrinsic_talent,
             academic_capital=academic_capital,
             paper_progress=paper_progress,
             review_progress=review_progress,
+            name=name,
         )
         self.forecast_horizon_days = forecast_horizon_days
 

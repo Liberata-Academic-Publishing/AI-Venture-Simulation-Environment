@@ -1,11 +1,25 @@
 from __future__ import annotations
 import random
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from Paper import Paper
 
 PAPER_THRESHOLD = 10.0
 GOOD_FAITH_REVIEW_DAYS = 4
+
+
+@dataclass(frozen=True)
+class ActionRecord:
+    """What an agent did on a single turn, returned by ``Agent.act()`` so the
+    environment can log it. ``kind`` is one of: ``write_paper``,
+    ``review_started``, ``review_continued``, ``review_completed``,
+    ``bad_faith_review``, ``review_unavailable``, ``idle``.
+    """
+
+    kind: str
+    paper: Paper | None = None
+    published: bool = False
 
 
 class Agent(ABC):
@@ -18,11 +32,13 @@ class Agent(ABC):
         academic_capital: float = 0.0,
         paper_progress: float = 0.0,
         review_progress: float = 0.0,
+        name: str | None = None,
     ):
         self.intrinsic_talent = intrinsic_talent
         self.academic_capital = academic_capital
         self.paper_progress = paper_progress
         self.review_progress = review_progress
+        self.name = name
         self.active_review_paper: Paper | None = None
         self.active_review_days_remaining = 0
         self.active_review_kind: str | None = None
@@ -31,19 +47,35 @@ class Agent(ABC):
     def choose_action(self) -> tuple[str, Paper | None]:
         """Return (action, paper). Paper is None for write_paper, a Paper object for reviews."""
 
-    def act(self):
-        """Called by the environment each step."""
+    def act(self) -> ActionRecord:
+        """Called by the environment each step. Returns a record of what happened
+        this turn so the environment can log it (the environment, not the agent,
+        knows the current day and sees every agent)."""
         if self.active_review_paper is not None:
+            paper = self.active_review_paper
             self.advance_active_review()
-            return
+            kind = (
+                "review_completed"
+                if self.active_review_paper is None
+                else "review_continued"
+            )
+            return ActionRecord(kind, paper)
 
         action, paper = self.choose_action()
         if action == "write_paper":
+            papers_before = len(Agent.all_papers)
             self.write_paper()
-        elif action == "peer_review":
+            published = len(Agent.all_papers) > papers_before
+            return ActionRecord("write_paper", published=published)
+        if action == "peer_review":
             self.peer_review(paper)
-        elif action == "bad_faith_review":
+            if self.active_review_paper is not None:
+                return ActionRecord("review_started", paper)
+            return ActionRecord("review_unavailable", paper)
+        if action == "bad_faith_review":
             self.bad_faith_review(paper)
+            return ActionRecord("bad_faith_review", paper)
+        return ActionRecord("idle")
 
     def write_paper(self):
         """Increment paper progress randomly and publishes once threshold is reached."""
