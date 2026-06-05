@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+import unittest
+
+from Agent import Agent
+from Environment import Environment
+from HeuristicAgent import HeuristicAgent
+from Paper import Paper
+
+
+class DummyAgent(Agent):
+    def __init__(self, name: str = "agent", actions=None):
+        super().__init__(intrinsic_talent=1.0)
+        self.name = name
+        self.actions = list(actions or [])
+
+    def choose_action(self):
+        if self.actions:
+            return self.actions.pop(0)
+        return "write_paper", None
+
+
+class RecordingAgent(DummyAgent):
+    def __init__(self, log: list[str], name: str):
+        super().__init__(name=name)
+        self.log = log
+
+    def act(self):
+        self.log.append(self.name)
+
+
+class SimulationTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_agentact_calls_agents_in_order(self):
+        log: list[str] = []
+        agents = [RecordingAgent(log, "first"), RecordingAgent(log, "second")]
+        env = Environment(agents=agents)
+
+        env.agentact()
+
+        self.assertEqual(log, ["first", "second"])
+
+    def test_nextstep_advances_papers_and_recomputes_agent_capital(self):
+        author = DummyAgent("author")
+        reviewer = DummyAgent("reviewer")
+        paper = Paper(
+            author=author,
+            current_ac=10.0,
+            accrual_rate=2.0,
+            share_distribution={author: 0.75, reviewer: 0.25},
+        )
+        env = Environment(agents=[author, reviewer], papers=[paper])
+
+        env.nextstep()
+
+        self.assertEqual(env.day, 1)
+        self.assertEqual(paper.current_ac, 12.0)
+        self.assertEqual(author.academic_capital, 9.0)
+        self.assertEqual(reviewer.academic_capital, 3.0)
+
+    def test_good_faith_review_blocks_for_four_turns(self):
+        author = DummyAgent("author")
+        reviewer = DummyAgent("reviewer")
+        paper = Paper(author=author, current_ac=100.0)
+
+        reviewer.peer_review(paper)
+        self.assertEqual(reviewer.active_review_days_remaining, 3)
+        self.assertIs(paper.review_in_progress_by, reviewer)
+        self.assertNotIn(reviewer, paper.share_distribution)
+
+        reviewer.act()
+        reviewer.act()
+        reviewer.act()
+
+        self.assertIsNone(reviewer.active_review_paper)
+        self.assertIsNone(paper.review_in_progress_by)
+        self.assertEqual(paper.share_distribution[reviewer], 0.01)
+
+    def test_good_faith_review_lock_blocks_other_reviewers(self):
+        author = DummyAgent("author")
+        first_reviewer = DummyAgent("first reviewer")
+        second_reviewer = DummyAgent("second reviewer")
+        paper = Paper(author=author)
+
+        first_reviewer.peer_review(paper)
+        second_reviewer.bad_faith_review(paper)
+        second_reviewer.peer_review(paper)
+
+        self.assertNotIn(second_reviewer, paper.share_distribution)
+        self.assertIsNone(second_reviewer.active_review_paper)
+        self.assertIs(paper.review_in_progress_by, first_reviewer)
+
+    def test_bad_faith_review_applies_immediately(self):
+        author = DummyAgent("author")
+        reviewer = DummyAgent("reviewer")
+        paper = Paper(author=author)
+
+        reviewer.bad_faith_review(paper)
+
+        self.assertEqual(paper.share_distribution[reviewer], 0.01)
+        self.assertEqual(reviewer.active_review_days_remaining, 0)
+
+    def test_agent_cannot_review_same_paper_twice(self):
+        author = DummyAgent("author")
+        reviewer = DummyAgent("reviewer")
+        paper = Paper(author=author)
+
+        reviewer.bad_faith_review(paper)
+        share_after_first_review = paper.share_distribution[reviewer]
+        rate_after_first_review = paper.accrual_rate
+        reviewer.bad_faith_review(paper)
+        reviewer.peer_review(paper)
+
+        self.assertEqual(paper.completed_peer_reviews, 1)
+        self.assertEqual(paper.share_distribution[reviewer], share_after_first_review)
+        self.assertEqual(paper.accrual_rate, rate_after_first_review)
+        self.assertIsNone(reviewer.active_review_paper)
+
+    def test_review_share_and_accrual_gain_decay_logarithmically(self):
+        author = DummyAgent("author")
+        first_reviewer = DummyAgent("first reviewer")
+        second_reviewer = DummyAgent("second reviewer")
+        paper = Paper(author=author, accrual_rate=1.0)
+
+        first_share = paper.add_share(first_reviewer)
+        first_rate_gain = paper.accrual_rate - 1.0
+        rate_after_first = paper.accrual_rate
+        second_share = paper.add_share(second_reviewer)
+        second_rate_gain = paper.accrual_rate - rate_after_first
+
+        self.assertEqual(first_share, 0.01)
+        self.assertLess(second_share, first_share)
+        self.assertLess(second_rate_gain, first_rate_gain)
+
+    def test_constructor_supports_generated_agents(self):
+        env = Environment(num_agents=2, agent_cls=HeuristicAgent)
+
+        self.assertEqual(len(env.agents), 2)
+        self.assertTrue(all(isinstance(agent, HeuristicAgent) for agent in env.agents))
+
+    def test_heuristic_writes_when_no_papers_are_reviewable(self):
+        agent = HeuristicAgent(intrinsic_talent=1.0)
+
+        self.assertEqual(agent.choose_action(), ("write_paper", None))
+
+    def test_heuristic_selects_highest_value_reviewable_paper(self):
+        author = DummyAgent("author")
+        reviewer = HeuristicAgent(intrinsic_talent=1.0)
+        low_value = Paper(author=author, current_ac=10.0, accrual_rate=1.0)
+        high_value = Paper(author=author, current_ac=200.0, accrual_rate=1.0)
+        Agent.all_papers = [low_value, high_value]
+
+        action, paper = reviewer.choose_action()
+
+        self.assertIn(action, {"peer_review", "bad_faith_review"})
+        self.assertIs(paper, high_value)
+
+
+if __name__ == "__main__":
+    unittest.main()
