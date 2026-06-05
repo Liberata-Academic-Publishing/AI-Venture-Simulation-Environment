@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import random
 from collections import Counter
@@ -161,7 +162,64 @@ def build_simulation(history: History, *, num_agents: int = NUM_AGENTS, num_bad_
     )
 
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Run the venture simulation. By default, after the run it "
+        "asks whether to save it to the docs/ gallery and what to call it."
+    )
+    parser.add_argument(
+        "--name",
+        metavar="TITLE",
+        help="Save with this title and skip the prompt (for scripting).",
+    )
+    parser.add_argument(
+        "--no-archive",
+        action="store_true",
+        help="Skip the prompt and do not save the run.",
+    )
+    return parser.parse_args(argv)
+
+
+def archive_run(history: History, title: str | None) -> None:
+    from export_run import export_run
+
+    run_id = export_run(
+        history,
+        config={
+            "num_agents": NUM_AGENTS,
+            "num_bad_agents": NUM_BAD_AGENTS,
+            "num_days": NUM_DAYS,
+            "seed": 7,
+        },
+        title=title,
+    )
+    print(f"\nArchived run to docs/data/{run_id}/ (visible in the gallery).")
+    print("Publish it with: "
+          "git add docs/data && git commit -m 'Add run' && git push")
+
+
+def prompt_and_archive(history: History) -> None:
+    """Ask whether to save this run and, if so, what to title it."""
+    try:
+        answer = input("\nSave this run to the gallery? [y/N]: ").strip().lower()
+    except EOFError:  # non-interactive (piped/no TTY): default to not saving
+        print("Not archived (no interactive input).")
+        return
+
+    if answer not in ("y", "yes"):
+        print("Not archived.")
+        return
+
+    try:
+        name = input("Name this run (leave blank for an auto name): ").strip()
+    except EOFError:
+        name = ""
+    archive_run(history, name or None)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+
     history = History()
     env = build_simulation(history)
     for _ in range(NUM_DAYS):
@@ -171,6 +229,13 @@ def main():
     print_summary(env, history)
     print_choice_breakdown(env, history)
     save_outputs(history)
+
+    if args.no_archive:
+        print("\nNot archived to the gallery (--no-archive).")
+    elif args.name is not None:
+        archive_run(history, args.name)
+    else:
+        prompt_and_archive(history)
 
 
 if __name__ == "__main__":

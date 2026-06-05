@@ -1,0 +1,38 @@
+[
+  {
+    "id": "2026-06-05_154621",
+    "title": "Bad-majority stress test",
+    "created": "2026-06-05T15:46:21",
+    "num_days": 120,
+    "config": {
+      "num_agents": 10,
+      "num_bad_agents": 30,
+      "num_days": 120,
+      "seed": 42
+    },
+    "summary": {
+      "total_capital": 13654.936,
+      "mean_capital": 341.3734,
+      "capital_gini": 0.1679,
+      "num_papers": 83.0
+    }
+  },
+  {
+    "id": "2026-06-05_152410",
+    "title": "Run 2026-06-05_152410",
+    "created": "2026-06-05T15:24:10",
+    "num_days": 200,
+    "config": {
+      "num_agents": 20,
+      "num_bad_agents": 20,
+      "num_days": 200,
+      "seed": 7
+    },
+    "summary": {
+      "total_capital": 39192.1437,
+      "mean_capital": 979.8036,
+      "capital_gini": 0.2202,
+      "num_papers": 117.0
+    }
+  }
+]
