@@ -78,6 +78,7 @@ class History:
         self.days: list[int] = []
         self.scalars: dict[str, list[float]] = {name: [] for name in self.metrics}
         self.agent_capital: dict[str, list[float]] = {}
+        self.agent_groups: dict[str, str] = {}  # agent label -> class name
         self.paper_ac: dict[str, list[float]] = {}
 
         # Action log: one entry per agent turn.
@@ -136,6 +137,8 @@ class History:
         target_len = len(self.days)
         for entity in entities:
             label = self._label(entity, prefix)
+            if prefix == "Agent":
+                self.agent_groups[label] = type(entity).__name__
             series = store.get(label)
             if series is None:
                 series = [0.0] * (target_len - 1)  # back-fill days before it existed

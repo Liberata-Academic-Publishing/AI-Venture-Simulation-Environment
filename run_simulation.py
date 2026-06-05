@@ -16,6 +16,17 @@ NUM_BAD_AGENTS = 20
 NUM_DAYS = 200
 OUTPUT_DIR = "runs"
 
+# Map raw action kinds to the decision an agent actively made on its turn.
+# Review continuations/completions are follow-through, not fresh choices, so
+# they are excluded from the choice breakdown.
+DECISION_LABELS = {
+    "write_paper": "write_paper",
+    "review_started": "peer_review",
+    "review_unavailable": "peer_review",
+    "bad_faith_review": "bad_faith_review",
+    "idle": "idle",
+}
+
 
 def seed_initial_papers(agents: list[Agent]):
     for index, agent in enumerate(agents, start=1):
@@ -73,6 +84,40 @@ def print_summary(env: Environment, history: History):
             print(f"- {line}")
 
 
+def print_choice_breakdown(env: Environment, history: History):
+    """Show, per cohort, the share of decisions that were write/peer/bad-faith.
+
+    Good = HeuristicAgents, bad = BadFaithAgents. Continuations of an in-progress
+    good-faith review are not counted as fresh choices (see ``DECISION_LABELS``).
+    """
+    label_to_group = {
+        agent.name: ("bad" if isinstance(agent, BadFaithAgent) else "good")
+        for agent in env.agents
+    }
+    group_counts = Counter(label_to_group.values())
+    tallies = {group: Counter() for group in group_counts}
+
+    for _, agent_label, kind, _ in history.actions:
+        decision = DECISION_LABELS.get(kind)
+        group = label_to_group.get(agent_label)
+        if decision is None or group is None:
+            continue
+        tallies[group][decision] += 1
+
+    print("\nChoice breakdown (share of decisions)")
+    for group in sorted(group_counts):
+        counter = tallies[group]
+        total = sum(counter.values())
+        print(f"- {group} agents ({group_counts[group]}):")
+        if total == 0:
+            print("    no decisions recorded")
+            continue
+        for decision in ("write_paper", "peer_review", "bad_faith_review", "idle"):
+            count = counter.get(decision, 0)
+            if count:
+                print(f"    {decision}: {count / total:.1%} ({count})")
+
+
 def save_outputs(history: History):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     csv_path = history.to_csv(os.path.join(OUTPUT_DIR, "history.csv"))
@@ -124,6 +169,7 @@ def main():
         env.nextstep()
 
     print_summary(env, history)
+    print_choice_breakdown(env, history)
     save_outputs(history)
 
 

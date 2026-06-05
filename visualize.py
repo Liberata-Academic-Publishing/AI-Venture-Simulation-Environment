@@ -48,6 +48,48 @@ def plot_agent_capital(history: "History", path: str | None = None, show: bool =
     return _finish(fig, path, show)
 
 
+def plot_agent_capital_by_group(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Academic capital over time, with one color per agent group/class.
+
+    Like ``plot_agent_capital`` but colors agents by their class (e.g. good
+    HeuristicAgents vs bad BadFaithAgents) so the two cohorts stand out, with a
+    single legend entry per group.
+    """
+    groups = history.agent_groups
+    ordered_groups: list[str] = []
+    for label in history.agent_capital:
+        group = groups.get(label, "Agent")
+        if group not in ordered_groups:
+            ordered_groups.append(group)
+
+    cmap = plt.get_cmap("tab10")
+    color_for = {group: cmap(i % 10) for i, group in enumerate(ordered_groups)}
+
+    fig, ax = plt.subplots(figsize=(11, 6))
+    legended: set[str] = set()
+    for label, series in history.agent_capital.items():
+        group = groups.get(label, "Agent")
+        legend_label = group if group not in legended else None
+        legended.add(group)
+        ax.plot(
+            history.days,
+            series,
+            linewidth=1.2,
+            alpha=0.8,
+            color=color_for[group],
+            label=legend_label,
+        )
+    ax.set_xlabel("Day")
+    ax.set_ylabel("Academic capital")
+    ax.set_title("Academic capital per agent over time (by group)")
+    if ordered_groups:
+        ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=9)
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def plot_system_aggregates(history: "History", path: str | None = None, show: bool = False):
     """Total / mean / max capital, with the Gini inequality index on a twin axis."""
     fig, ax = plt.subplots(figsize=(11, 6))
@@ -107,6 +149,9 @@ def plot_all(history: "History", outdir: str = "runs") -> dict[str, str]:
     return {
         "agent_capital": plot_agent_capital(
             history, os.path.join(outdir, "agent_capital.png")
+        ),
+        "agent_capital_by_group": plot_agent_capital_by_group(
+            history, os.path.join(outdir, "agent_capital_by_group.png")
         ),
         "system_aggregates": plot_system_aggregates(
             history, os.path.join(outdir, "system_aggregates.png")

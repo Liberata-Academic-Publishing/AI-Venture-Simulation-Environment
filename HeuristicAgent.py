@@ -15,6 +15,13 @@ EXPECTED_WRITE_PROGRESS = 0.5
 class HeuristicAgent(Agent):
     """Agent that picks the action with the best rough capital forecast."""
 
+    # Review options the agent will consider, as (forecast kind, action name).
+    # Subclasses can narrow this (e.g. a bad-faith-only agent drops good_faith).
+    REVIEW_ACTIONS: tuple[tuple[str, str], ...] = (
+        ("good_faith", "peer_review"),
+        ("bad_faith", "bad_faith_review"),
+    )
+
     def __init__(
         self,
         intrinsic_talent: float,
@@ -48,17 +55,12 @@ class HeuristicAgent(Agent):
         best_score = self._score_write()
 
         for paper in reviewable:
-            good_score = self._score_review(paper, "good_faith")
-            if good_score > best_score:
-                best_action = "peer_review"
-                best_paper = paper
-                best_score = good_score
-
-            bad_score = self._score_review(paper, "bad_faith")
-            if bad_score > best_score:
-                best_action = "bad_faith_review"
-                best_paper = paper
-                best_score = bad_score
+            for kind, action in self.REVIEW_ACTIONS:
+                score = self._score_review(paper, kind)
+                if score > best_score:
+                    best_action = action
+                    best_paper = paper
+                    best_score = score
 
         return best_action, best_paper
 
