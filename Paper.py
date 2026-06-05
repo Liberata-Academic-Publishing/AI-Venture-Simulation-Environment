@@ -1,125 +1,249 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from Agent import Agent
-
-DEFAULT_ACCRUAL_RATE = 1.0
-DEFAULT_REVIEW_SHARE = 0.01
-GOOD_FAITH_ACCRUAL_BUMP = 0.25
-BAD_FAITH_ACCRUAL_BUMP = 0.05
-
+from typing import Any
 
 class Paper:
-    """Minimal paper model for the first peer-review marketplace iteration."""
 
     def __init__(
         self,
-        author: Agent,
-        accrual_rate: float = DEFAULT_ACCRUAL_RATE,
+        author: Any,
         current_ac: float = 0.0,
-        share_distribution: dict[Agent, float] | None = None,
+        ac_accrual_rate: float | None = None,
         completion_progress: float = 1.0,
         review_available: bool = True,
-    ):
+        reviewer_ac_threshold: float = 10.0,
+        low_ac_good_share: float = 0.03,
+        high_ac_good_share: float = 0.05,
+        low_ac_bad_share: float = 0.003,
+        high_ac_bad_share: float = 0.005,
+        review_share_log_decay: float = 0.25,
+        max_total_reviewer_share: float = 0.25,
+        good_review_effort: float = 1.0,
+        bad_review_effort: float = 0.05,
+        max_review_boost: float = 0.50,
+    ) -> None:
+        if author is None:
+            raise ValueError("Paper author cannot be None.")
+
         self.author = author
-        self.accrual_rate = float(accrual_rate)
-        self.current_ac = float(current_ac)
-        self.share_distribution = (
-            {author: 1.0} if share_distribution is None else dict(share_distribution)
+        self.current_ac = self._nonnegative_float(current_ac, "current_ac")
+        self.completion_progress = self._nonnegative_float(
+            completion_progress, "completion_progress"
         )
-        self.completion_progress = completion_progress
-        self.review_available = review_available
-        self.completed_peer_reviews = 0
-        self.good_faith_reviews = 0
-        self.bad_faith_reviews = 0
-        self.review_in_progress_by: Agent | None = None
-        self.reviewed_by: set[Agent] = set()
+        self.review_available = bool(review_available)
 
-    def add_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Transfer a review share from the author and apply a good-faith accrual bump."""
-        review_share = self._add_review_share(agent, share, "good_faith")
-        if review_share > 0.0:
-            self.good_faith_reviews += 1
-        return review_share
+        inferred_rate = self._infer_base_accrual_rate(author)
+        self.base_accrual_rate = self._nonnegative_float(
+            inferred_rate if ac_accrual_rate is None else ac_accrual_rate,
+            "ac_accrual_rate",
+        )
+        self.ac_accrual_rate = self.base_accrual_rate
 
-    def add_bad_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Transfer a review share from the author and apply a bad-faith accrual bump."""
-        review_share = self._add_review_share(agent, share, "bad_faith")
-        if review_share > 0.0:
-            self.bad_faith_reviews += 1
-        return review_share
+        self.reviewer_ac_threshold = self._nonnegative_float(
+            reviewer_ac_threshold, "reviewer_ac_threshold"
+        )
+        self.low_ac_good_share = self._validate_share_value(
+            low_ac_good_share, "low_ac_good_share"
+        )
+        self.high_ac_good_share = self._validate_share_value(
+            high_ac_good_share, "high_ac_good_share"
+        )
+        self.low_ac_bad_share = self._validate_share_value(
+            low_ac_bad_share, "low_ac_bad_share"
+        )
+        self.high_ac_bad_share = self._validate_share_value(
+            high_ac_bad_share, "high_ac_bad_share"
+        )
+        self.review_share_log_decay = self._nonnegative_float(
+            review_share_log_decay, "review_share_log_decay"
+        )
+        self.max_total_reviewer_share = self._validate_share_value(
+            max_total_reviewer_share, "max_total_reviewer_share"
+        )
+        self.good_review_effort = self._nonnegative_float(
+            good_review_effort, "good_review_effort"
+        )
+        self.bad_review_effort = self._nonnegative_float(
+            bad_review_effort, "bad_review_effort"
+        )
+        self.max_review_boost = self._nonnegative_float(
+            max_review_boost, "max_review_boost"
+        )
 
-    def set_share(self, agent: Agent, share: float):
-        self.share_distribution[agent] = max(0.0, float(share))
-        self._refresh_review_available()
+        self.share_distribution: dict[Any, float] = {author: 1.0}
+        self.review_records: list[dict[str, Any]] = []
+        self.num_peer_reviews = 0
+        self.num_good_faith_reviews = 0
+        self.num_bad_faith_reviews = 0
+        self.review_quality_score = 0.0
 
-    def advance_accrual(self, days: int = 1):
-        self.current_ac += self.accrual_rate * days
+    def accrue_ac(self, time_steps: float = 1.0) -> float:
+        """Increase current AC by accrual rate times elapsed timesteps."""
+        elapsed = self._nonnegative_float(time_steps, "time_steps")
+        self.current_ac += self.ac_accrual_rate * elapsed
+        return self.current_ac
 
-    def estimate_review_share(
-        self,
-        agent: Agent,
-        kind: str,
-        share: float = DEFAULT_REVIEW_SHARE,
-    ) -> float:
-        if not self.can_start_review(agent):
-            return 0.0
+    def add_share(self, agent: Any) -> bool:
+        """Add a good-faith peer-review contribution if valid.
+        Returns True when a review is added. Returns False for normal
+        simulation-invalid actions such as duplicate review, self-review,
+        unavailable review slots, or exhausted reviewer share budget.
+        """
+        return self._add_review(agent, review_type="good_faith")
 
-        decayed_share = max(0.0, float(share)) / self._review_damping()
-        author_share = self.share_distribution.get(self.author, 0.0)
-        return min(decayed_share, max(0.0, author_share))
+    def add_bad_share(self, agent: Any) -> bool:
+        """Add a bad-faith peer-review contribution if valid.
+        Bad-faith review uses lower effort and a lower share schedule. This is
+        a provisional MVP distinction, not an official Liberata mechanism.
+        """
+        return self._add_review(agent, review_type="bad_faith")
 
-    def estimate_accrual_rate_after_review(self, kind: str) -> float:
-        return self.accrual_rate * (1.0 + self._review_bump(kind))
+    def set_share(self, agent: Any, share: float) -> bool:
+        """Set a contributor share and keep total paper shares equal to 1.0.
+        Raises:
+            ValueError: if share is outside [0.0, 1.0] or if reviewer shares
+            would exceed 100% of the paper.
+        """
+        if agent is None:
+            raise ValueError("Share agent cannot be None.")
 
-    def can_start_review(self, agent: Agent) -> bool:
-        if agent == self.author or not self.review_available:
-            return False
-        if agent in self.reviewed_by:
-            return False
-        return self.review_in_progress_by in {None, agent}
+        share_value = self._validate_share_value(share, "share")
 
-    def start_review(self, agent: Agent) -> bool:
-        if not self.can_start_review(agent):
-            return False
+        if agent is self.author:
+            reviewer_total = self._total_reviewer_share()
+            if share_value + reviewer_total > 1.0 + 1e-12:
+                raise ValueError("Author share plus reviewer shares exceeds 1.0.")
+            self.share_distribution[self.author] = share_value
+            return True
 
-        self.review_in_progress_by = agent
+        reviewer_total_without_agent = sum(
+            existing_share
+            for contributor, existing_share in self.share_distribution.items()
+            if contributor is not self.author and contributor is not agent
+        )
+        new_reviewer_total = reviewer_total_without_agent + share_value
+        if new_reviewer_total > 1.0 + 1e-12:
+            raise ValueError("Total reviewer shares cannot exceed 1.0.")
+
+        self.share_distribution[agent] = share_value
+        self.share_distribution[self.author] = max(0.0, 1.0 - new_reviewer_total)
         return True
 
-    def finish_review(self, agent: Agent):
-        if self.review_in_progress_by == agent:
-            self.review_in_progress_by = None
+    def _add_review(self, agent: Any, review_type: str) -> bool:
+        if agent is None or agent is self.author:
+            return False
+        if not self.review_available or self._has_reviewed(agent):
+            return False
 
-    def _add_review_share(self, agent: Agent, share: float, kind: str) -> float:
-        review_share = self.estimate_review_share(agent, kind, share)
-        if review_share <= 0.0:
-            return 0.0
+        is_good_faith = review_type == "good_faith"
+        share = self._reviewer_share(agent, is_good_faith=is_good_faith)
+        remaining_share = self.max_total_reviewer_share - self._total_reviewer_share()
+        allocated_share = min(share, max(0.0, remaining_share))
+        if allocated_share <= 0.0:
+            self.review_available = False
+            return False
 
-        self.share_distribution[self.author] = (
-            self.share_distribution.get(self.author, 0.0) - review_share
+        self.set_share(agent, allocated_share)
+
+        effort = self.good_review_effort if is_good_faith else self.bad_review_effort
+        quality_delta = self._review_quality_delta(agent, effort)
+        self.review_quality_score += quality_delta
+        self.num_peer_reviews += 1
+
+        if is_good_faith:
+            self.num_good_faith_reviews += 1
+        else:
+            self.num_bad_faith_reviews += 1
+
+        self.review_records.append(
+            {
+                "reviewer": agent,
+                "type": review_type,
+                "share": allocated_share,
+                "effort": effort,
+                "quality_delta": quality_delta,
+            }
         )
-        self.share_distribution[agent] = (
-            self.share_distribution.get(agent, 0.0) + review_share
+        self._recalculate_accrual_rate()
+
+        if self._total_reviewer_share() >= self.max_total_reviewer_share - 1e-12:
+            self.review_available = False
+
+        return True
+
+    def _reviewer_share(self, agent: Any, is_good_faith: bool) -> float:
+        reviewer_ac = self._agent_number(agent, "academic_capital", default=0.0)
+        if is_good_faith:
+            base_share = (
+                self.high_ac_good_share
+                if reviewer_ac >= self.reviewer_ac_threshold
+                else self.low_ac_good_share
+            )
+        else:
+            base_share = (
+                self.high_ac_bad_share
+                if reviewer_ac >= self.reviewer_ac_threshold
+                else self.low_ac_bad_share
+            )
+
+        discount = 1.0 + self.review_share_log_decay * math.log1p(self.num_peer_reviews)
+        return base_share / discount
+
+    def _review_quality_delta(self, agent: Any, effort: float) -> float:
+        experience = self._agent_number(agent, "intrinsic_talent", default=0.0)
+        if experience == 0.0:
+            experience = self._agent_number(agent, "academic_capital", default=0.0)
+
+        effort_component = math.log1p(max(0.0, effort))
+        experience_component = math.log1p(max(0.0, experience))
+        return effort_component * experience_component
+
+    def _recalculate_accrual_rate(self) -> None:
+        # Provisional, not official: saturating boost from accumulated review value.
+        review_boost = self.max_review_boost * (1.0 - math.exp(-self.review_quality_score))
+        self.ac_accrual_rate = self.base_accrual_rate * (1.0 + review_boost)
+
+    def _has_reviewed(self, agent: Any) -> bool:
+        return any(record["reviewer"] is agent for record in self.review_records)
+
+    def _total_reviewer_share(self) -> float:
+        return sum(
+            share
+            for contributor, share in self.share_distribution.items()
+            if contributor is not self.author
         )
-        self.accrual_rate = self.estimate_accrual_rate_after_review(kind)
-        self.completed_peer_reviews += 1
-        self.reviewed_by.add(agent)
-        self._refresh_review_available()
-        return review_share
 
-    def _review_bump(self, kind: str) -> float:
-        base_bump = (
-            BAD_FAITH_ACCRUAL_BUMP
-            if kind in {"bad_faith", "bad_faith_review"}
-            else GOOD_FAITH_ACCRUAL_BUMP
-        )
-        return base_bump / self._review_damping()
+    @staticmethod
+    def _infer_base_accrual_rate(author: Any) -> float:
+        talent = Paper._agent_number(author, "intrinsic_talent", default=1.0)
+        return max(0.0, talent)
 
-    def _review_damping(self) -> float:
-        return math.log2(self.completed_peer_reviews + 2)
+    @staticmethod
+    def _agent_number(agent: Any, attribute: str, default: float) -> float:
+        value = getattr(agent, attribute, default)
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return default
+        if math.isnan(number) or math.isinf(number):
+            return default
+        return number
 
-    def _refresh_review_available(self):
-        self.review_available = self.share_distribution.get(self.author, 0.0) > 0.0
+    @staticmethod
+    def _nonnegative_float(value: float, name: str) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be numeric.") from exc
+        if math.isnan(number) or math.isinf(number) or number < 0.0:
+            raise ValueError(f"{name} must be a finite nonnegative number.")
+        return number
+
+    @staticmethod
+    def _validate_share_value(value: float, name: str) -> float:
+        number = Paper._nonnegative_float(value, name)
+        if number > 1.0:
+            raise ValueError(f"{name} must be between 0.0 and 1.0.")
+        return number
