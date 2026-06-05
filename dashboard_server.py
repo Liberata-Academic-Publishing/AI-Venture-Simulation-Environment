@@ -38,6 +38,15 @@ _MIME = {
 class DashboardHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def handle(self):
+        # A client closing an SSE connection (refresh / navigate away) makes the
+        # keep-alive read or a mid-stream write raise these. They're expected, so
+        # end the thread quietly instead of dumping a traceback to the console.
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def do_GET(self):  # noqa: N802 (stdlib naming)
         if self.path in ("/", "/index.html"):
             self._serve_static("index.html")
@@ -65,10 +74,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     # ---- live SSE stream -------------------------------------------------
     def _stream_events(self):
+        # The stream has no Content-Length and is effectively infinite, so don't
+        # let the handler attempt a second keep-alive request on this socket
+        # afterwards (that follow-up read is what raised the noisy reset).
+        self.close_connection = True
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
+        self.send_header("Connection", "close")
         self.end_headers()
 
         history = StreamingHistory()
