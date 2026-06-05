@@ -11,10 +11,8 @@ GOOD_FAITH_REVIEW_DAYS = 4
 
 @dataclass(frozen=True)
 class ActionRecord:
-    """What an agent did on a single turn, returned by ``Agent.act()`` so the
-    environment can log it. ``kind`` is one of: ``write_paper``,
-    ``review_started``, ``review_continued``, ``review_completed``,
-    ``bad_faith_review``, ``review_unavailable``, ``idle``.
+    """
+    A class to describe what an agent did on a single turn.
     """
 
     kind: str

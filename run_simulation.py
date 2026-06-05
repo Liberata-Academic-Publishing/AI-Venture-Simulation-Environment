@@ -7,10 +7,12 @@ from collections import Counter
 from Agent import Agent
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
+from BadFaithAgent import BadFaithAgent
 from History import History
 from Paper import Paper
 
-NUM_AGENTS = 20
+NUM_AGENTS = 20 #This is meant to be good agents
+NUM_BAD_AGENTS = 20
 NUM_DAYS = 200
 OUTPUT_DIR = "runs"
 
@@ -89,23 +91,34 @@ def save_outputs(history: History):
         print(f"- {path}")
 
 
-def main():
-    random.seed(7)
+def build_simulation(history: History, *, num_agents: int = NUM_AGENTS, num_bad_agents: int =   NUM_BAD_AGENTS, seed: int = 7) -> Environment:
+    """
+    Construct a new simulation
+    """
+    random.seed(seed)
     Agent.all_papers = []
 
     agents = [
         HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Agent {i}")
-        for i in range(1, NUM_AGENTS + 1)
+        for i in range(1, num_agents + 1)
     ]
+    for i in range(num_bad_agents):
+        agents.append(BadFaithAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Bad Agent {i}"))
+
+        
     seed_initial_papers(agents)
 
-    history = History()
-    env = Environment(
+    return Environment(
         agents=agents,
         papers=Agent.all_papers,
         forecast_horizon_days=30,
         history=history,
     )
+
+
+def main():
+    history = History()
+    env = build_simulation(history)
     for _ in range(NUM_DAYS):
         env.agentact()
         env.nextstep()

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Venture Simulation — Live Dashboard</title>
+  <script src="/static/chart.umd.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
+      background: #0f1419; color: #e6e6e6;
+    }
+    header {
+      padding: 14px 22px; border-bottom: 1px solid #232b33;
+      display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    #status { font-size: 13px; color: #8b98a5; }
+    #status.done { color: #4ade80; }
+    .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+    .tile {
+      background: #161d24; border: 1px solid #232b33; border-radius: 8px;
+      padding: 6px 12px; min-width: 92px;
+    }
+    .tile .label { font-size: 11px; color: #8b98a5; text-transform: uppercase; letter-spacing: .04em; }
+    .tile .value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+    main { display: grid; grid-template-columns: 1fr 360px; gap: 16px; padding: 16px 22px; }
+    .panel { background: #161d24; border: 1px solid #232b33; border-radius: 10px; padding: 14px; }
+    .panel h2 { font-size: 13px; margin: 0 0 10px; color: #c4cdd5; font-weight: 600; }
+    .charts { display: grid; gap: 16px; }
+    .feed { max-height: 78vh; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #1f272f; }
+    th { color: #8b98a5; font-weight: 500; position: sticky; top: 0; background: #161d24; }
+    .kind-write_paper { color: #60a5fa; }
+    .kind-peer_review { color: #4ade80; }
+    .kind-bad_faith_review { color: #f87171; }
+    .kind-idle { color: #6b7280; }
+    canvas { max-height: 300px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Venture Simulation</h1>
+    <span id="status">connecting…</span>
+    <div class="tiles">
+      <div class="tile"><div class="label">Total AC</div><div class="value" id="t-total">—</div></div>
+      <div class="tile"><div class="label">Gini</div><div class="value" id="t-gini">—</div></div>
+      <div class="tile"><div class="label">Papers</div><div class="value" id="t-papers">—</div></div>
+      <div class="tile"><div class="label">Good / Bad</div><div class="value" id="t-reviews">—</div></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="charts">
+      <div class="panel"><h2>Academic capital per agent</h2><canvas id="agentChart"></canvas></div>
+      <div class="panel"><h2>System aggregates</h2><canvas id="aggChart"></canvas></div>
+    </div>
+    <div class="panel feed">
+      <h2>Action feed</h2>
+      <table>
+        <thead><tr><th>Day</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
+        <tbody id="feed"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const PALETTE = [
+      "#60a5fa","#4ade80","#f87171","#fbbf24","#a78bfa","#34d399","#f472b6",
+      "#22d3ee","#fb923c","#c084fc","#818cf8","#2dd4bf","#facc15","#fca5a5",
+      "#93c5fd","#86efac","#fdba74","#d8b4fe","#5eead4","#fde047"
+    ];
+    const color = (i) => PALETTE[i % PALETTE.length];
+
+    const baseOpts = {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      interaction: { intersect: false, mode: "index" },
+      scales: {
+        x: { ticks: { color: "#8b98a5" }, grid: { color: "#1f272f" } },
+        y: { ticks: { color: "#8b98a5" }, grid: { color: "#1f272f" } }
+      }
+    };
+
+    let agentChart, aggChart;
+    const statusEl = document.getElementById("status");
+    const feedEl = document.getElementById("feed");
+
+    function setupCharts(agentLabels) {
+      agentChart = new Chart(document.getElementById("agentChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: agentLabels.map((name, i) => ({
+            label: name, data: [], borderColor: color(i),
+            borderWidth: 1.5, pointRadius: 0, tension: 0.15
+          }))
+        },
+        options: { ...baseOpts, plugins: { legend: { display: agentLabels.length <= 20, labels: { color: "#c4cdd5", boxWidth: 10 } } } }
+      });
+
+      aggChart = new Chart(document.getElementById("aggChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            { label: "total_capital", data: [], borderColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+            { label: "mean_capital",  data: [], borderColor: "#4ade80", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+            { label: "max_capital",   data: [], borderColor: "#fbbf24", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+            { label: "capital_gini",  data: [], borderColor: "#f472b6", borderWidth: 1.5, borderDash: [5,4], pointRadius: 0, yAxisID: "y1" }
+          ]
+        },
+        options: {
+          ...baseOpts,
+          plugins: { legend: { labels: { color: "#c4cdd5", boxWidth: 10 } } },
+          scales: {
+            ...baseOpts.scales,
+            y1: { position: "right", min: 0, max: 1, ticks: { color: "#f472b6" }, grid: { drawOnChartArea: false } }
+          }
+        }
+      });
+    }
+
+    function onStep(msg) {
+      statusEl.textContent = `running — day ${msg.day} / ${NUM_DAYS}`;
+
+      agentChart.data.labels.push(msg.day);
+      agentChart.data.datasets.forEach(ds => ds.data.push(msg.agents[ds.label] ?? null));
+      agentChart.update();
+
+      aggChart.data.labels.push(msg.day);
+      aggChart.data.datasets.forEach(ds => ds.data.push(msg.scalars[ds.label] ?? null));
+      aggChart.update();
+
+      const s = msg.scalars;
+      document.getElementById("t-total").textContent  = (s.total_capital ?? 0).toFixed(1);
+      document.getElementById("t-gini").textContent   = (s.capital_gini ?? 0).toFixed(3);
+      document.getElementById("t-papers").textContent = Math.round(s.num_papers ?? 0);
+      document.getElementById("t-reviews").textContent =
+        `${Math.round(s.good_faith_reviews ?? 0)} / ${Math.round(s.bad_faith_reviews ?? 0)}`;
+
+      for (const a of msg.actions) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td>${msg.day}</td><td>${a.agent}</td>` +
+          `<td class="kind-${a.kind}">${a.kind}</td><td>${a.paper ?? ""}</td>`;
+        feedEl.prepend(tr);
+      }
+      while (feedEl.childElementCount > 300) feedEl.lastElementChild.remove();
+    }
+
+    let NUM_DAYS = 0;
+    const es = new EventSource("/events");
+    es.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "meta") { NUM_DAYS = msg.num_days; setupCharts(msg.agents); statusEl.textContent = "running…"; }
+      else if (msg.type === "step") { onStep(msg); }
+      else if (msg.type === "done") { statusEl.textContent = "finished ✓"; statusEl.classList.add("done"); es.close(); }
+    };
+    es.onerror = () => { if (es.readyState === EventSource.CLOSED) statusEl.textContent = "disconnected"; };
+  </script>
+</body>
+</html>
