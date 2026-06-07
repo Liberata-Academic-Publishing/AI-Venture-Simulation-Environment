@@ -81,47 +81,71 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(author.academic_capital, 9.0)
         self.assertEqual(reviewer.academic_capital, 3.0)
 
-    def test_good_faith_review_blocks_for_four_turns(self):
+    def test_review_locks_paper_and_grants_share_on_stop(self):
         author = DummyAgent("author")
-        reviewer = DummyAgent("reviewer")
         paper = Paper(author=author, current_ac=100.0)
+        reviewer = DummyAgent(
+            "reviewer",
+            actions=[
+                ("peer_review", paper),
+                ("peer_review", None),
+                ("stop_peer_review", None),
+            ],
+            review_effort_deltas=[1.0, 1.0],
+        )
 
-        reviewer.peer_review(paper)
-        self.assertEqual(reviewer.active_review_days_remaining, 3)
+        started = reviewer.act()
+        self.assertEqual(started.kind, "review_started")
         self.assertIs(paper.review_in_progress_by, reviewer)
         self.assertNotIn(reviewer, paper.share_distribution)
 
-        reviewer.act()
-        reviewer.act()
-        reviewer.act()
+        self.assertEqual(reviewer.act().kind, "review_continued")
+        stopped = reviewer.act()
 
+        self.assertEqual(stopped.kind, "review_stopped")
         self.assertIsNone(reviewer.active_review_paper)
         self.assertIsNone(paper.review_in_progress_by)
         self.assertEqual(paper.share_distribution[reviewer], 0.01)
+        self.assertEqual(paper.good_faith_reviews, 1)
 
-    def test_good_faith_review_lock_blocks_other_reviewers(self):
+    def test_review_lock_blocks_other_reviewers(self):
         author = DummyAgent("author")
-        first_reviewer = DummyAgent("first reviewer")
-        second_reviewer = DummyAgent("second reviewer")
         paper = Paper(author=author)
+        first = DummyAgent(
+            "first",
+            actions=[("peer_review", paper)],
+            review_effort_deltas=[1.0],
+        )
+        second = DummyAgent(
+            "second",
+            actions=[("peer_review", paper)],
+            review_effort_deltas=[1.0],
+        )
 
-        first_reviewer.peer_review(paper)
-        second_reviewer.bad_faith_review(paper)
-        second_reviewer.peer_review(paper)
+        first.act()
+        unavailable = second.act()
 
-        self.assertNotIn(second_reviewer, paper.share_distribution)
-        self.assertIsNone(second_reviewer.active_review_paper)
-        self.assertIs(paper.review_in_progress_by, first_reviewer)
+        self.assertEqual(unavailable.kind, "review_unavailable")
+        self.assertNotIn(second, paper.share_distribution)
+        self.assertIsNone(second.active_review_paper)
+        self.assertIs(paper.review_in_progress_by, first)
 
     def test_minimum_effort_review_completes_as_bad_faith(self):
         author = DummyAgent("author")
-        reviewer = DummyAgent("reviewer")
         paper = Paper(author=author)
+        reviewer = DummyAgent(
+            "reviewer",
+            actions=[("peer_review", paper), ("stop_peer_review", None)],
+            review_effort_deltas=[MIN_REVIEW_EFFORT_THRESHOLD],
+        )
 
-        reviewer.bad_faith_review(paper)
+        reviewer.act()  # start with exactly the minimum effort
+        stopped = reviewer.act()  # stop and collect
 
+        self.assertEqual(stopped.kind, "review_stopped")
+        self.assertEqual(stopped.review_kind, "bad_faith")
+        self.assertEqual(stopped.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
         self.assertEqual(paper.share_distribution[reviewer], 0.01)
-        self.assertEqual(reviewer.active_review_days_remaining, 0)
         self.assertEqual(paper.bad_faith_reviews, 1)
         self.assertEqual(paper.good_faith_reviews, 0)
         self.assertEqual(
@@ -162,16 +186,17 @@ class SimulationTest(unittest.TestCase):
         reviewer = DummyAgent("reviewer")
         paper = Paper(author=author)
 
-        reviewer.bad_faith_review(paper)
-        share_after_first_review = paper.share_distribution[reviewer]
+        first_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
         rate_after_first_review = paper.accrual_rate
-        reviewer.bad_faith_review(paper)
-        reviewer.peer_review(paper)
+        second_share = paper.add_review(
+            reviewer, GOOD_FAITH_REVIEW_EFFORT_THRESHOLD
+        )
 
+        self.assertGreater(first_share, 0.0)
+        self.assertEqual(second_share, 0.0)
         self.assertEqual(paper.completed_peer_reviews, 1)
-        self.assertEqual(paper.share_distribution[reviewer], share_after_first_review)
+        self.assertEqual(paper.share_distribution[reviewer], first_share)
         self.assertEqual(paper.accrual_rate, rate_after_first_review)
-        self.assertIsNone(reviewer.active_review_paper)
 
     def test_review_share_and_accrual_gain_decay_logarithmically(self):
         author = DummyAgent("author")
@@ -209,13 +234,22 @@ class SimulationTest(unittest.TestCase):
 
         action, paper = reviewer.choose_action()
 
-        self.assertIn(action, {"peer_review", "bad_faith_review"})
+        self.assertEqual(action, "peer_review")
         self.assertIs(paper, high_value)
 
     def test_act_returns_review_action_records(self):
         author = DummyAgent("author")
         paper = Paper(author=author, current_ac=10.0)
-        reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
+        reviewer = DummyAgent(
+            "reviewer",
+            actions=[
+                ("peer_review", paper),
+                ("peer_review", None),
+                ("peer_review", None),
+                ("stop_peer_review", None),
+            ],
+            review_effort_deltas=[0.5, 0.5, 0.5],
+        )
         Agent.all_papers = [paper]
 
         started = reviewer.act()
@@ -224,18 +258,23 @@ class SimulationTest(unittest.TestCase):
 
         kinds = [reviewer.act().kind for _ in range(3)]
         self.assertEqual(
-            kinds, ["review_continued", "review_continued", "review_completed"]
+            kinds, ["review_continued", "review_continued", "review_stopped"]
         )
 
-    def test_act_returns_write_and_bad_faith_records(self):
+    def test_act_returns_write_and_review_records(self):
         author = DummyAgent("author")
         writer = DummyAgent("writer", actions=[("write_paper", None)])
         self.assertEqual(writer.act().kind, "write_paper")
 
         paper = Paper(author=author)
-        bad = DummyAgent("bad", actions=[("bad_faith_review", paper)])
-        record = bad.act()
-        self.assertEqual(record.kind, "bad_faith_review")
+        reviewer = DummyAgent(
+            "reviewer",
+            actions=[("peer_review", paper), ("stop_peer_review", None)],
+            review_effort_deltas=[MIN_REVIEW_EFFORT_THRESHOLD],
+        )
+        self.assertEqual(reviewer.act().kind, "review_started")
+        record = reviewer.act()
+        self.assertEqual(record.kind, "review_stopped")
         self.assertIs(record.paper, paper)
         self.assertEqual(record.review_kind, "bad_faith")
         self.assertEqual(record.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)

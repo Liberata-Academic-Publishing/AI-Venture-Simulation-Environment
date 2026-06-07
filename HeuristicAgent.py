@@ -15,15 +15,18 @@ EXPECTED_WRITE_PROGRESS = 0.5
 
 
 class HeuristicAgent(Agent):
-    """Agent that picks the action with the best rough capital forecast."""
+    """Agent that picks the action with the best rough capital forecast.
 
-    # Review options the agent will consider, as (target effort kind, action name).
-    # Final good/bad faith is classified by the paper once review effort is known.
+    Reviews are open-ended (start / continue / stop). This agent decides up
+    front how much effort a review is worth -- a ``good_faith`` (full) review
+    or a ``bad_faith`` (minimal) one -- then keeps reviewing until it reaches
+    that effort target and stops. A learned policy could stop at any point.
+    """
+
+    # Candidate review effort levels to weigh, by classification kind. The
+    # completed review is ultimately classified by the paper from real effort.
     # Subclasses can narrow this (e.g. a low-effort agent drops good_faith).
-    REVIEW_ACTIONS: tuple[tuple[str, str], ...] = (
-        ("good_faith", "peer_review"),
-        ("bad_faith", "bad_faith_review"),
-    )
+    REVIEW_TARGETS: tuple[str, ...] = ("good_faith", "bad_faith")
 
     def __init__(
         self,
@@ -42,8 +45,15 @@ class HeuristicAgent(Agent):
             name=name,
         )
         self.forecast_horizon_days = forecast_horizon_days
+        self._review_target_effort = 0.0
 
     def choose_action(self) -> tuple[str, Paper | None]:
+        # Mid-review: keep reviewing until the chosen effort target, then stop.
+        if self.active_review_paper is not None:
+            if self.active_review_effort < self._review_target_effort:
+                return "peer_review", self.active_review_paper
+            return "stop_peer_review", None
+
         reviewable = [
             paper
             for paper in Agent.all_papers
@@ -56,16 +66,27 @@ class HeuristicAgent(Agent):
         best_action = "write_paper"
         best_paper = None
         best_score = self._score_write()
+        best_target = 0.0
 
         for paper in reviewable:
-            for kind, action in self.REVIEW_ACTIONS:
+            for kind in self.REVIEW_TARGETS:
                 score = self._score_review(paper, kind)
                 if score > best_score:
-                    best_action = action
+                    best_action = "peer_review"
                     best_paper = paper
                     best_score = score
+                    best_target = self._target_effort_for_kind(kind)
 
+        if best_action == "peer_review":
+            self._review_target_effort = best_target
         return best_action, best_paper
+
+    def _target_effort_for_kind(self, kind: str) -> float:
+        return (
+            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD
+            if kind == "good_faith"
+            else MIN_REVIEW_EFFORT_THRESHOLD
+        )
 
     def _score_write(self) -> float:
         score = self._forecast_capital()

@@ -18,13 +18,13 @@ NUM_DAYS = 200
 OUTPUT_DIR = "runs"
 
 # Map raw action kinds to the decision an agent actively made on its turn.
-# Review continuations/completions are follow-through, not fresh choices, so
-# they are excluded from the choice breakdown.
+# Only the choice to *start* a review (or fail to) is a fresh top-level choice;
+# continuing and stopping an in-progress review are follow-through, so they are
+# excluded from the choice breakdown.
 DECISION_LABELS = {
     "write_paper": "write_paper",
     "review_started": "peer_review",
     "review_unavailable": "peer_review",
-    "bad_faith_review": "bad_faith_review",
     "idle": "idle",
 }
 
@@ -86,10 +86,11 @@ def print_summary(env: Environment, history: History):
 
 
 def print_choice_breakdown(env: Environment, history: History):
-    """Show, per cohort, the share of decisions that were write/peer/bad-faith.
+    """Show, per cohort, the share of top-level decisions (write vs. review).
 
-    Good = HeuristicAgents, bad = BadFaithAgents. Continuations of an in-progress
-    good-faith review are not counted as fresh choices (see ``DECISION_LABELS``).
+    Good = HeuristicAgents, bad = BadFaithAgents. Continuing or stopping an
+    in-progress review is follow-through, not a fresh choice, so it is not
+    counted here (see ``DECISION_LABELS``).
     """
     label_to_group = {
         agent.name: ("bad" if isinstance(agent, BadFaithAgent) else "good")
@@ -113,7 +114,7 @@ def print_choice_breakdown(env: Environment, history: History):
         if total == 0:
             print("    no decisions recorded")
             continue
-        for decision in ("write_paper", "peer_review", "bad_faith_review", "idle"):
+        for decision in ("write_paper", "peer_review", "idle"):
             count = counter.get(decision, 0)
             if count:
                 print(f"    {decision}: {count / total:.1%} ({count})")
