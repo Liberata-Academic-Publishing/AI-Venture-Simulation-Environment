@@ -3,28 +3,28 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import sys
 from collections import Counter
 
 from Agent import Agent
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
-from BadFaithAgent import BadFaithAgent
 from History import History
 from Paper import Paper
 
-NUM_AGENTS = 20 #This is meant to be good agents
-NUM_BAD_AGENTS = 20
+NUM_AGENTS = 20
 NUM_DAYS = 200
 OUTPUT_DIR = "runs"
 
 # Map raw action kinds to the decision an agent actively made on its turn.
-# Only the choice to *start* a review (or fail to) is a fresh top-level choice;
-# continuing and stopping an in-progress review are follow-through, so they are
-# excluded from the choice breakdown.
+# Auto-continued locked reviews are follow-through, not fresh choices.
 DECISION_LABELS = {
     "write_paper": "write_paper",
-    "review_started": "peer_review",
-    "review_unavailable": "peer_review",
+    "review_started": "start_review",
+    "review_continued": "continue_review",
+    "review_finished_write": "finish_and_write",
+    "review_finished_peer_review": "finish_and_review",
+    "review_unavailable": "start_review",
     "idle": "idle",
 }
 
@@ -71,7 +71,6 @@ def print_summary(env: Environment, history: History):
         print(
             f"- {title}: author={author_name}, AC={paper.current_ac:.2f}, "
             f"rate={paper.accrual_rate:.2f}, total reviews={paper.completed_peer_reviews}, "
-            f"good={paper.good_faith_reviews}, bad={paper.bad_faith_reviews}, "
             f"unique reviewers={len(paper.reviewed_by)}, reviewer shares={reviewer_text}"
         )
 
@@ -85,42 +84,55 @@ def print_summary(env: Environment, history: History):
             print(f"- {line}")
 
 
-def print_choice_breakdown(env: Environment, history: History):
-    """Show, per cohort, the share of top-level decisions (write vs. review).
+def print_choice_breakdown(history: History):
+    """Show the share of top-level agent decisions (see ``DECISION_LABELS``)."""
+    tallies: Counter[str] = Counter()
 
-    Good = HeuristicAgents, bad = BadFaithAgents. Continuing or stopping an
-    in-progress review is follow-through, not a fresh choice, so it is not
-    counted here (see ``DECISION_LABELS``).
-    """
-    label_to_group = {
-        agent.name: ("bad" if isinstance(agent, BadFaithAgent) else "good")
-        for agent in env.agents
-    }
-    group_counts = Counter(label_to_group.values())
-    tallies = {group: Counter() for group in group_counts}
-
-    for _, agent_label, kind, _ in history.actions:
+    for _, _, kind, _ in history.actions:
         decision = DECISION_LABELS.get(kind)
-        group = label_to_group.get(agent_label)
-        if decision is None or group is None:
-            continue
-        tallies[group][decision] += 1
+        if decision is not None:
+            tallies[decision] += 1
 
     print("\nChoice breakdown (share of decisions)")
-    for group in sorted(group_counts):
-        counter = tallies[group]
-        total = sum(counter.values())
-        print(f"- {group} agents ({group_counts[group]}):")
-        if total == 0:
-            print("    no decisions recorded")
-            continue
-        for decision in ("write_paper", "peer_review", "idle"):
-            count = counter.get(decision, 0)
-            if count:
-                print(f"    {decision}: {count / total:.1%} ({count})")
+    total = sum(tallies.values())
+    if total == 0:
+        print("- no decisions recorded")
+        return
+    for decision in (
+        "write_paper",
+        "start_review",
+        "continue_review",
+        "finish_and_write",
+        "finish_and_review",
+        "idle",
+    ):
+        count = tallies.get(decision, 0)
+        if count:
+            print(f"- {decision}: {count / total:.1%} ({count})")
 
 
-def save_outputs(history: History):
+CHART_DESCRIPTIONS = {
+    "summary": "Overview dashboard (review effort, actions, choices)",
+    "action_mix": "What every agent did each day (stacked bars)",
+    "choice_breakdown": "Agent decisions (write / review / finish)",
+    "review_effort_histogram": "Completed peer reviews by effort level",
+    "review_effort_scatter": "Completed reviews: day vs effort",
+    "review_behavior": "Cumulative completed peer reviews",
+    "paper_ac": "Accrued capital per paper over time",
+}
+
+
+def open_chart(path: str) -> None:
+    """Open a saved chart with the OS default image viewer."""
+    if sys.platform == "win32":
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        os.system(f'open "{path}"')
+    else:
+        os.system(f'xdg-open "{path}"')
+
+
+def save_outputs(history: History, *, show: bool = False, open_charts: bool = True):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     csv_path = history.to_csv(os.path.join(OUTPUT_DIR, "history.csv"))
     json_path = history.to_json(os.path.join(OUTPUT_DIR, "history.json"))
@@ -130,18 +142,26 @@ def save_outputs(history: History):
         import visualize
     except ImportError as exc:
         print(f"Skipping charts ({exc}).")
+        print("Install matplotlib with: python -m pip install matplotlib")
         print(f"Open {csv_path} in a spreadsheet to plot it instead.")
         return
 
-    print("Wrote charts:")
-    for _, path in visualize.plot_all(history, OUTPUT_DIR).items():
-        print(f"- {path}")
+    paths = visualize.plot_all(history, OUTPUT_DIR, show=show)
+    print("\nWrote charts to the runs/ folder:")
+    for name, path in paths.items():
+        description = CHART_DESCRIPTIONS.get(name, name)
+        print(f"- {path}  ({description})")
+
+    summary_path = paths.get("summary")
+    if open_charts and summary_path and os.path.exists(summary_path):
+        print(f"\nOpening summary chart: {summary_path}")
+        open_chart(summary_path)
+    elif summary_path:
+        print(f"\nView the summary chart at: {os.path.abspath(summary_path)}")
 
 
-def build_simulation(history: History, *, num_agents: int = NUM_AGENTS, num_bad_agents: int =   NUM_BAD_AGENTS, seed: int = 7) -> Environment:
-    """
-    Construct a new simulation
-    """
+def build_simulation(history: History, *, num_agents: int = NUM_AGENTS, seed: int = 7) -> Environment:
+    """Construct a new simulation with a single agent type."""
     random.seed(seed)
     Agent.all_papers = []
 
@@ -149,10 +169,7 @@ def build_simulation(history: History, *, num_agents: int = NUM_AGENTS, num_bad_
         HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Agent {i}")
         for i in range(1, num_agents + 1)
     ]
-    for i in range(num_bad_agents):
-        agents.append(BadFaithAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Bad Agent {i}"))
 
-        
     seed_initial_papers(agents)
 
     return Environment(
@@ -178,6 +195,16 @@ def parse_args(argv=None):
         action="store_true",
         help="Skip the prompt and do not save the run.",
     )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Pop up matplotlib chart windows after the run (in addition to saving PNGs).",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not open the summary chart in your default image viewer.",
+    )
     return parser.parse_args(argv)
 
 
@@ -188,7 +215,6 @@ def archive_run(history: History, title: str | None) -> None:
         history,
         config={
             "num_agents": NUM_AGENTS,
-            "num_bad_agents": NUM_BAD_AGENTS,
             "num_days": NUM_DAYS,
             "seed": 7,
         },
@@ -228,8 +254,8 @@ def main(argv=None):
         env.nextstep()
 
     print_summary(env, history)
-    print_choice_breakdown(env, history)
-    save_outputs(history)
+    print_choice_breakdown(history)
+    save_outputs(history, show=args.show, open_charts=not args.no_open)
 
     if args.no_archive:
         print("\nNot archived to the gallery (--no-archive).")

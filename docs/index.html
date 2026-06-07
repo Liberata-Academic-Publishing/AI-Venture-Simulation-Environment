@@ -74,7 +74,7 @@
       <div class="tile"><div class="label">Total AC</div><div class="value" id="t-total">—</div></div>
       <div class="tile"><div class="label">Gini</div><div class="value" id="t-gini">—</div></div>
       <div class="tile"><div class="label">Papers</div><div class="value" id="t-papers">—</div></div>
-      <div class="tile"><div class="label">Good / Bad</div><div class="value" id="t-reviews">—</div></div>
+      <div class="tile"><div class="label">Reviews</div><div class="value" id="t-reviews">—</div></div>
     </div>
   </header>
 
@@ -104,16 +104,16 @@
       "#93c5fd","#86efac","#fdba74","#d8b4fe","#5eead4","#fde047"
     ];
     const color = (i) => PALETTE[i % PALETTE.length];
-    // Bad-faith agents are named "Bad Agent N"; tint them red, good agents blue-green.
-    const isBad = (name) => /^bad\b/i.test(name);
-    const agentColor = (name, i) => isBad(name) ? "#f87171" : color(i % PALETTE.length);
+    const agentColor = (name, i) => color(i % PALETTE.length);
 
     // Stable display order + colors for action kinds (kinds from Agent.py).
     const ACTION_ORDER = ["write_paper", "review_started", "review_continued",
-      "review_completed", "bad_faith_review", "review_unavailable", "idle"];
+      "review_auto_continued", "review_finished_write", "review_finished_peer_review",
+      "review_stopped", "review_unavailable", "idle"];
     const ACTION_COLOR = {
       write_paper: "#60a5fa", review_started: "#4ade80", review_continued: "#34d399",
-      review_completed: "#22d3ee", bad_faith_review: "#f87171",
+      review_auto_continued: "#15803d", review_finished_write: "#f59e0b",
+      review_finished_peer_review: "#a855f7", review_stopped: "#22d3ee",
       review_unavailable: "#fbbf24", idle: "#6b7280"
     };
     // Kinds present in a run, known kinds first (ACTION_ORDER), then any extras.
@@ -260,7 +260,7 @@
       document.getElementById("t-gini").textContent   = v(s.capital_gini).toFixed(3);
       document.getElementById("t-papers").textContent = Math.round(v(s.num_papers));
       document.getElementById("t-reviews").textContent =
-        `${Math.round(v(s.good_faith_reviews))} / ${Math.round(v(s.bad_faith_reviews))}`;
+        Math.round(v(s.completed_peer_reviews));
     }
 
     // Instant render: draw the whole run at once (default when a run is selected).
@@ -422,8 +422,7 @@
     function describe(run) {
       const c = run.config || {};
       const parts = [];
-      if (c.num_agents != null) parts.push(`${c.num_agents} good`);
-      if (c.num_bad_agents != null) parts.push(`${c.num_bad_agents} bad`);
+      if (c.num_agents != null) parts.push(`${c.num_agents} agents`);
       if (run.num_days != null) parts.push(`${run.num_days}d`);
       return parts.length ? `${run.title} (${parts.join(", ")})` : run.title;
     }

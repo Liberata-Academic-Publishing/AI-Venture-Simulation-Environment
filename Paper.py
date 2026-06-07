@@ -8,27 +8,37 @@ if TYPE_CHECKING:
 
 DEFAULT_ACCRUAL_RATE = 1.0
 DEFAULT_REVIEW_SHARE = 0.01
-GOOD_FAITH_ACCRUAL_BUMP = 0.25
-BAD_FAITH_ACCRUAL_BUMP = 0.05
-MIN_REVIEW_EFFORT_THRESHOLD = 0.5
-GOOD_FAITH_REVIEW_EFFORT_THRESHOLD = 2.0
+MIN_REVIEW_EFFORT_THRESHOLD = 10.0
+REVIEW_EFFORT_PER_DAY = 1.0
+BASE_REVIEW_ACCRUAL_BUMP = 0.20
+FIRST_EXTRA_DAY_BUMP = 0.10
+EXTRA_DAY_DECAY = 0.85
 DEFAULT_REVIEWER_AC_THRESHOLD = 10.0
 DEFAULT_HIGH_AC_REVIEW_SHARE = 0.02
 DEFAULT_MAX_REVIEWER_SHARE = 0.25
 
 
-class Paper:
-    """Minimal paper model for the first peer-review marketplace iteration.
+def review_accrual_bump(effort: float) -> float:
+    """Total accrual-rate bump fraction for a review completed at ``effort``.
 
-    Formula status:
-        The accrual and reviewer-share logic here is provisional MVP logic, not
-        the official Liberata AC formula. The project notes call for monotonic,
-        diminishing effects from reviewer effort/experience, but do not provide
-        a fully specified numeric formula yet.
-
-    Share convention:
-        Shares are stored as fractions in [0.0, 1.0], not percentages.
+    Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` yields 0. At exactly 10 the
+    reviewer earns the base bump. Each day past 10 adds a positive marginal
+    bump; each marginal after day 11 is smaller than the previous day's.
     """
+    if effort < MIN_REVIEW_EFFORT_THRESHOLD:
+        return 0.0
+
+    bump = BASE_REVIEW_ACCRUAL_BUMP
+    marginal = FIRST_EXTRA_DAY_BUMP
+    extra_days = int(effort - MIN_REVIEW_EFFORT_THRESHOLD)
+    for _ in range(extra_days):
+        bump += marginal
+        marginal *= EXTRA_DAY_DECAY
+    return bump
+
+
+class Paper:
+    """Minimal paper model for the peer-review marketplace."""
 
     def __init__(
         self,
@@ -75,8 +85,6 @@ class Paper:
             "max_reviewer_share",
         )
         self.completed_peer_reviews = 0
-        self.good_faith_reviews = 0
-        self.bad_faith_reviews = 0
         self.review_in_progress_by: Agent | None = None
         self.reviewed_by: set[Agent] = set()
         self.review_records: list[dict[str, object]] = []
@@ -90,59 +98,25 @@ class Paper:
     def ac_accrual_rate(self, value: float):
         self.accrual_rate = self._nonnegative_float(value, "ac_accrual_rate")
 
+    def is_valid_review_effort(self, effort: float) -> bool:
+        return self._nonnegative_float(effort, "review_effort") >= MIN_REVIEW_EFFORT_THRESHOLD
+
     def add_review(
         self,
         agent: Agent,
         effort: float,
         share: float = DEFAULT_REVIEW_SHARE,
     ) -> float:
-        """Apply a completed review once effort crosses the completion threshold.
-
-        Reviewer share is independent of good-/bad-faith classification. Effort
-        only determines the accrual-rate bump attached to the completed review.
-        """
+        """Apply a completed review once effort is at least the minimum threshold."""
         review_effort = self._nonnegative_float(effort, "review_effort")
-        kind = self.classify_review_effort(review_effort)
-        if kind is None:
+        if not self.is_valid_review_effort(review_effort):
             return 0.0
 
-        review_share = self._add_review_share(
-            agent,
-            share,
-            kind,
-            effort=review_effort,
-        )
-        if review_share > 0.0:
-            if kind == "good_faith":
-                self.good_faith_reviews += 1
-            else:
-                self.bad_faith_reviews += 1
-        return review_share
-
-    def classify_review_effort(self, effort: float) -> str | None:
-        """Return the review classification implied by total review effort."""
-        review_effort = self._nonnegative_float(effort, "review_effort")
-        if review_effort < MIN_REVIEW_EFFORT_THRESHOLD:
-            return None
-        if review_effort < GOOD_FAITH_REVIEW_EFFORT_THRESHOLD:
-            return "bad_faith"
-        return "good_faith"
+        return self._add_review_share(agent, share, effort=review_effort)
 
     def add_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Compatibility wrapper for a good-faith completed review."""
-        return self.add_review(
-            agent,
-            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
-            share,
-        )
-
-    def add_bad_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Compatibility wrapper for a minimum-effort completed review."""
-        return self.add_review(
-            agent,
-            MIN_REVIEW_EFFORT_THRESHOLD,
-            share,
-        )
+        """Compatibility wrapper for a minimum-threshold completed review."""
+        return self.add_review(agent, MIN_REVIEW_EFFORT_THRESHOLD, share)
 
     def set_share(self, agent: Agent, share: float):
         """Set a contributor share.
@@ -178,7 +152,6 @@ class Paper:
     def estimate_review_share(
         self,
         agent: Agent,
-        kind: str,
         share: float = DEFAULT_REVIEW_SHARE,
     ) -> float:
         if not self.can_start_review(agent):
@@ -194,35 +167,41 @@ class Paper:
             max(0.0, remaining_review_budget),
         )
 
-    def estimate_accrual_rate_after_review(self, kind: str) -> float:
-        return self.accrual_rate * (1.0 + self._review_bump(kind))
+    def estimate_accrual_rate_after_review(self, effort: float) -> float:
+        bump = review_accrual_bump(effort) / self._review_damping()
+        return self.accrual_rate * (1.0 + bump)
 
     def can_start_review(self, agent: Agent) -> bool:
-        if agent == self.author or not self.review_available:
+        if agent == self.author:
             return False
         if agent in self.reviewed_by:
             return False
-        return self.review_in_progress_by in {None, agent}
+        if self.review_in_progress_by == agent:
+            return True
+        if not self.review_available or self.review_in_progress_by is not None:
+            return False
+        return True
 
     def start_review(self, agent: Agent) -> bool:
         if not self.can_start_review(agent):
             return False
 
         self.review_in_progress_by = agent
+        self.review_available = False
         return True
 
     def finish_review(self, agent: Agent):
         if self.review_in_progress_by == agent:
             self.review_in_progress_by = None
+            self._refresh_review_available()
 
     def _add_review_share(
         self,
         agent: Agent,
         share: float,
-        kind: str,
-        effort: float | None = None,
+        effort: float,
     ) -> float:
-        review_share = self.estimate_review_share(agent, kind, share)
+        review_share = self.estimate_review_share(agent, share)
         if review_share <= 0.0:
             return 0.0
 
@@ -232,30 +211,20 @@ class Paper:
         self.share_distribution[agent] = (
             self.share_distribution.get(agent, 0.0) + review_share
         )
-        self.accrual_rate = self.estimate_accrual_rate_after_review(kind)
+        self.accrual_rate = self.estimate_accrual_rate_after_review(effort)
         self.completed_peer_reviews += 1
         self.reviewed_by.add(agent)
         self.review_records.append(
             {
                 "reviewer": agent,
-                "kind": kind,
                 "share": review_share,
                 "effort": effort,
+                "accrual_bump": review_accrual_bump(effort) / self._review_damping(),
                 "accrual_rate": self.accrual_rate,
             }
         )
         self._refresh_review_available()
         return review_share
-
-    def _review_bump(self, kind: str) -> float:
-        # Provisional, not official: good-faith reviews add more value than
-        # bad-faith reviews, and both effects diminish with prior review count.
-        base_bump = (
-            BAD_FAITH_ACCRUAL_BUMP
-            if kind in {"bad_faith", "bad_faith_review"}
-            else GOOD_FAITH_ACCRUAL_BUMP
-        )
-        return base_bump / self._review_damping()
 
     def _review_damping(self) -> float:
         return math.log2(self.completed_peer_reviews + 2)

@@ -19,7 +19,15 @@ if TYPE_CHECKING:
     from Agent import ActionRecord
     from Environment import Environment
 
+from Paper import MIN_REVIEW_EFFORT_THRESHOLD
+
 MetricFn = Callable[["Environment"], float]
+
+COMPLETED_REVIEW_KINDS = frozenset({
+    "review_finished_write",
+    "review_finished_peer_review",
+    "review_stopped",
+})
 
 
 def gini(values: Iterable[float]) -> float:
@@ -47,11 +55,8 @@ def default_metrics() -> dict[str, MetricFn]:
         ),
         "capital_gini": lambda env: gini(a.academic_capital for a in env.agents),
         "num_papers": lambda env: float(len(env.papers)),
-        "good_faith_reviews": lambda env: float(
-            sum(getattr(p, "good_faith_reviews", 0) for p in env.papers)
-        ),
-        "bad_faith_reviews": lambda env: float(
-            sum(getattr(p, "bad_faith_reviews", 0) for p in env.papers)
+        "completed_peer_reviews": lambda env: float(
+            sum(getattr(p, "completed_peer_reviews", 0) for p in env.papers)
         ),
     }
 
@@ -84,6 +89,7 @@ class History:
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
         self.review_efforts: list[tuple[int, str, str | None, float, str | None]] = []
+        self.completed_reviews: list[tuple[int, str, str | None, float]] = []
         self.action_counts: Counter[str] = Counter()
         self.agent_actions: dict[str, list[str]] = {}
 
@@ -133,6 +139,15 @@ class History:
                     record.review_kind,
                 )
             )
+        if (
+            record.review_effort is not None
+            and record.kind in COMPLETED_REVIEW_KINDS
+        ):
+            effort = float(record.review_effort)
+            if effort >= MIN_REVIEW_EFFORT_THRESHOLD:
+                self.completed_reviews.append(
+                    (day, agent_label, paper_label, effort)
+                )
         suffix = f" of {paper_label}" if paper_label else ""
         self.agent_actions.setdefault(agent_label, []).append(
             f"day {day}: {record.kind}{suffix}"
@@ -200,6 +215,10 @@ class History:
                     "kind": k,
                 }
                 for (d, a, p, e, k) in self.review_efforts
+            ],
+            "completed_reviews": [
+                {"day": d, "agent": a, "paper": p, "effort": e}
+                for (d, a, p, e) in self.completed_reviews
             ],
             "action_counts": dict(self.action_counts),
         }

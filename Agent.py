@@ -5,12 +5,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from Paper import (
-    GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
+    MIN_REVIEW_EFFORT_THRESHOLD,
+    REVIEW_EFFORT_PER_DAY,
     Paper,
 )
 
 PAPER_THRESHOLD = 10.0
-EXPECTED_REVIEW_EFFORT_PER_TURN = 0.5
+EXPECTED_REVIEW_EFFORT_PER_TURN = REVIEW_EFFORT_PER_DAY
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class Agent(ABC):
         self.active_review_effort = 0.0
         self.last_review_effort: float | None = None
         self.last_review_kind: str | None = None
+        self._review_choice_pending = False
 
     @abstractmethod
     def choose_action(self) -> tuple[str, Paper | None]:
@@ -54,38 +56,73 @@ class Agent(ABC):
 
         Actions:
           - ``"write_paper"`` — make progress on a paper (``paper`` is ``None``).
-          - ``"peer_review"`` — spend one turn reviewing. Starts a review on
-            ``paper`` if none is active; otherwise continues the active review
-            (the ``paper`` argument is ignored).
-          - ``"stop_peer_review"`` — finalize the active review and collect the
-            reviewer share + accrual bump. The review is classified good-/bad-faith
-            from the total effort invested (``paper`` is ignored).
+          - ``"peer_review"`` — start or continue a review on ``paper``.
+          - ``"finish_review_write_paper"`` — finalize the active review, then
+            work on own paper the same day (``paper`` is ``None``).
+          - ``"finish_review_peer_review"`` — finalize the active review, then
+            start reviewing ``paper`` the same day.
 
-        See ``available_actions`` for which of these are legal given the agent's
-        current review state.
+        Locked agents (effort below the minimum threshold) are not called; the
+        environment auto-continues their review via ``auto_continue_review``.
         """
+
+    def is_locked_in_review(self) -> bool:
+        """True when the agent is mid-review and not yet eligible to choose."""
+        return (
+            self.active_review_paper is not None
+            and not self._review_choice_pending
+        )
+
+    def should_offer_review_choice(self) -> bool:
+        """True when the agent may choose continue / finish+write / finish+review."""
+        return (
+            self.active_review_paper is not None
+            and self._review_choice_pending
+        )
 
     def available_actions(self) -> tuple[str, ...]:
-        """Legal actions given the agent's current review state.
-
-        While a review is in progress the agent is committed to that paper and
-        may only continue it or stop; otherwise it may write or start a review.
-        """
-        if self.active_review_paper is not None:
-            return ("peer_review", "stop_peer_review")
+        if self.should_offer_review_choice():
+            return (
+                "peer_review",
+                "finish_review_write_paper",
+                "finish_review_peer_review",
+            )
         return ("write_paper", "peer_review")
 
+    def auto_continue_review(self) -> ActionRecord:
+        """Advance a locked in-progress review by one day of effort."""
+        paper = self.active_review_paper
+        if paper is None:
+            return ActionRecord("idle")
+
+        self.active_review_effort += self.review_effort_delta()
+        self.review_progress = self.active_review_effort
+        if self.active_review_effort >= MIN_REVIEW_EFFORT_THRESHOLD:
+            self._review_choice_pending = True
+
+        return ActionRecord(
+            "review_auto_continued",
+            paper,
+            review_effort=self.active_review_effort,
+        )
+
     def act(self) -> ActionRecord:
-        """Called by the environment each step. Returns a record of what happened
-        this turn so the environment can log it (the environment, not the agent,
-        knows the current day and sees every agent)."""
+        """Called by the environment when the agent may choose an action."""
         self._clear_last_review_result()
         action, paper = self.choose_action()
 
         if action == "peer_review":
-            return self._peer_review_turn(paper)
-        if action == "stop_peer_review":
-            return self._stop_peer_review()
+            record = self._peer_review_turn(paper)
+            if (
+                record.kind == "review_continued"
+                and self.active_review_effort >= MIN_REVIEW_EFFORT_THRESHOLD
+            ):
+                self._review_choice_pending = True
+            return record
+        if action == "finish_review_write_paper":
+            return self._finish_review_and_write()
+        if action == "finish_review_peer_review":
+            return self._finish_review_and_start(paper)
         if action == "write_paper":
             papers_before = len(Agent.all_papers)
             self.write_paper()
@@ -107,11 +144,7 @@ class Agent(ABC):
 
     # ---- reviewing -------------------------------------------------------
     def _peer_review_turn(self, paper: Paper | None) -> ActionRecord:
-        """Spend one turn reviewing: start a new review or continue the active one.
-
-        Effort accumulates one ``review_effort_delta`` per turn; nothing is
-        granted until the agent chooses ``stop_peer_review``.
-        """
+        """Start a new review or continue the active one."""
         if self.active_review_paper is not None:
             self.active_review_effort += self.review_effort_delta()
             self.review_progress = self.active_review_effort
@@ -129,22 +162,59 @@ class Agent(ABC):
         self.active_review_paper = paper
         self.active_review_effort = self.review_effort_delta()
         self.review_progress = self.active_review_effort
+        self._review_choice_pending = False
         return ActionRecord(
             "review_started",
             paper,
             review_effort=self.active_review_effort,
         )
 
-    def _stop_peer_review(self) -> ActionRecord:
-        """Finalize the active review and collect its reward (no-op when idle).
+    def _finish_review_and_write(self) -> ActionRecord:
+        finished = self._finalize_active_review()
+        if finished is None:
+            papers_before = len(Agent.all_papers)
+            self.write_paper()
+            return ActionRecord(
+                "write_paper",
+                published=len(Agent.all_papers) > papers_before,
+            )
 
-        The accumulated effort decides whether the completed review counts as
-        good- or bad-faith; too little effort grants nothing (see
-        ``Paper.add_review``).
-        """
+        papers_before = len(Agent.all_papers)
+        self.write_paper()
+        return ActionRecord(
+            "review_finished_write",
+            finished.paper,
+            published=len(Agent.all_papers) > papers_before,
+            review_effort=finished.review_effort,
+            review_kind=finished.review_kind,
+        )
+
+    def _finish_review_and_start(self, paper: Paper | None) -> ActionRecord:
+        finished = self._finalize_active_review()
+        if finished is None:
+            return ActionRecord("idle")
+
+        if paper is None:
+            return finished
+
+        if hasattr(paper, "start_review") and not paper.start_review(self):
+            return ActionRecord("review_unavailable", paper)
+
+        self.active_review_paper = paper
+        self.active_review_effort = self.review_effort_delta()
+        self.review_progress = self.active_review_effort
+        self._review_choice_pending = False
+        return ActionRecord(
+            "review_finished_peer_review",
+            finished.paper,
+            review_effort=finished.review_effort,
+            review_kind=finished.review_kind,
+        )
+
+    def _finalize_active_review(self) -> ActionRecord | None:
         paper = self.active_review_paper
         if paper is None:
-            return ActionRecord("idle")
+            return None
 
         effort = self.active_review_effort
         self.publish_peer_review(paper, effort)
@@ -154,6 +224,8 @@ class Agent(ABC):
         self.active_review_paper = None
         self.active_review_effort = 0.0
         self.review_progress = 0.0
+        self._review_choice_pending = False
+
         return ActionRecord(
             "review_stopped",
             paper,
@@ -164,14 +236,9 @@ class Agent(ABC):
     def publish_peer_review(self, paper: Paper, effort: float | None = None):
         """Register share on the reviewed paper for the effort invested."""
         review_effort = (
-            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD
+            MIN_REVIEW_EFFORT_THRESHOLD
             if effort is None
             else self._clean_effort(effort)
-        )
-        review_kind = (
-            paper.classify_review_effort(review_effort)
-            if hasattr(paper, "classify_review_effort")
-            else "good_faith"
         )
         if hasattr(paper, "add_review"):
             review_share = paper.add_review(self, review_effort)
@@ -179,11 +246,11 @@ class Agent(ABC):
             review_share = paper.add_share(self)
         if review_share > 0.0:
             self.last_review_effort = review_effort
-            self.last_review_kind = review_kind
+            self.last_review_kind = None
 
     def review_effort_delta(self) -> float:
-        """Continuous review effort contributed in one agent turn."""
-        return self._clean_effort(random.random())
+        """Review effort contributed in one agent turn."""
+        return REVIEW_EFFORT_PER_DAY
 
     def _clear_last_review_result(self):
         self.last_review_effort = None

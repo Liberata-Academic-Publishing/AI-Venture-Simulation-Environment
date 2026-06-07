@@ -9,6 +9,7 @@ the CSV/JSON export.
 from __future__ import annotations
 
 import os
+from collections import Counter
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -23,6 +24,38 @@ except ImportError as exc:  # pragma: no cover - exercised only without matplotl
     raise ImportError(
         "visualize requires matplotlib. Install it with: pip install matplotlib"
     ) from exc
+
+ACTION_COLORS = {
+    "write_paper": "#60a5fa",
+    "review_started": "#4ade80",
+    "review_continued": "#22c55e",
+    "review_auto_continued": "#15803d",
+    "review_finished_write": "#f59e0b",
+    "review_finished_peer_review": "#a855f7",
+    "review_stopped": "#16a34a",
+    "review_unavailable": "#a78bfa",
+    "idle": "#6b7280",
+}
+
+# Top-level decisions (matches run_simulation.DECISION_LABELS).
+DECISION_LABELS = {
+    "write_paper": "write_paper",
+    "review_started": "start_review",
+    "review_continued": "continue_review",
+    "review_finished_write": "finish_and_write",
+    "review_finished_peer_review": "finish_and_review",
+    "review_unavailable": "start_review",
+    "idle": "idle",
+}
+
+DECISION_COLORS = {
+    "write_paper": "#60a5fa",
+    "start_review": "#4ade80",
+    "continue_review": "#22c55e",
+    "finish_and_write": "#f59e0b",
+    "finish_and_review": "#a855f7",
+    "idle": "#6b7280",
+}
 
 
 def _finish(fig, path: str | None, show: bool) -> str | None:
@@ -51,11 +84,10 @@ def plot_agent_capital(history: "History", path: str | None = None, show: bool =
 def plot_agent_capital_by_group(
     history: "History", path: str | None = None, show: bool = False
 ):
-    """Academic capital over time, with one color per agent group/class.
+    """Academic capital over time, with one color per agent class.
 
-    Like ``plot_agent_capital`` but colors agents by their class (e.g. good
-    HeuristicAgents vs bad BadFaithAgents) so the two cohorts stand out, with a
-    single legend entry per group.
+    Like ``plot_agent_capital`` but colors agents by their class with a single
+    legend entry per group.
     """
     groups = history.agent_groups
     ordered_groups: list[str] = []
@@ -120,7 +152,7 @@ def plot_review_behavior(history: "History", path: str | None = None, show: bool
     """Cumulative good- vs bad-faith reviews (and paper count) over time."""
     fig, ax = plt.subplots(figsize=(11, 6))
     scalars = history.scalars
-    for key in ("good_faith_reviews", "bad_faith_reviews", "num_papers"):
+    for key in ("completed_peer_reviews", "num_papers"):
         if key in scalars:
             ax.plot(history.days, scalars[key], label=key)
     ax.set_xlabel("Day")
@@ -143,21 +175,229 @@ def plot_paper_ac(history: "History", path: str | None = None, show: bool = Fals
     return _finish(fig, path, show)
 
 
-def plot_all(history: "History", outdir: str = "runs") -> dict[str, str]:
+def _daily_action_counts(history: "History") -> dict[str, list[int]]:
+    """Per-day counts for each raw action kind."""
+    kinds = sorted({kind for _, _, kind, _ in history.actions})
+    counts = {kind: [0] * len(history.days) for kind in kinds}
+    day_index = {day: i for i, day in enumerate(history.days)}
+
+    for day, _, kind, _ in history.actions:
+        idx = day_index.get(day)
+        if idx is not None:
+            counts[kind][idx] += 1
+    return counts
+
+
+def _completed_reviews(history: "History") -> list[tuple[int, float]]:
+    """Return (day, effort) for each completed peer review."""
+    return [(day, effort) for day, _, _, effort in history.completed_reviews]
+
+
+def _effort_histogram(history: "History") -> tuple[list[int], list[int]]:
+    """Bin completed reviews by integer effort level."""
+    counts: Counter[int] = Counter()
+    for _, effort in _completed_reviews(history):
+        counts[int(effort)] += 1
+    if not counts:
+        return [], []
+    efforts = sorted(counts)
+    return efforts, [counts[e] for e in efforts]
+
+
+def _draw_effort_histogram(ax, history: "History") -> None:
+    efforts, values = _effort_histogram(history)
+    if not efforts:
+        ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
+        ax.set_axis_off()
+        return
+    ax.bar(efforts, values, width=0.9, color="#60a5fa", edgecolor="#1e3a5f")
+    ax.set_xlabel("Review effort")
+    ax.set_ylabel("Completed peer reviews")
+    ax.set_xticks(efforts)
+
+
+def _draw_effort_scatter(ax, history: "History") -> None:
+    points = _completed_reviews(history)
+    if not points:
+        ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
+        ax.set_axis_off()
+        return
+    days, efforts = zip(*points)
+    ax.scatter(days, efforts, alpha=0.65, s=28, color="#a855f7", edgecolors="#4c1d95")
+    ax.set_xlabel("Day")
+    ax.set_ylabel("Review effort")
+
+
+def plot_review_effort_histogram(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Histogram of completed peer reviews by effort level."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_effort_histogram(ax, history)
+    ax.set_title("Completed peer reviews by effort")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_review_effort_scatter(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Scatter of each completed review: day vs effort invested."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_effort_scatter(ax, history)
+    ax.set_title("Completed peer reviews over time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def _choice_tallies(history: "History") -> dict[str, int]:
+    """Count top-level decisions across all agents."""
+    tallies: dict[str, int] = {}
+    for _, _, kind, _ in history.actions:
+        decision = DECISION_LABELS.get(kind)
+        if decision is None:
+            continue
+        tallies[decision] = tallies.get(decision, 0) + 1
+    return tallies
+
+
+def _stacked_action_bars(ax, history: "History") -> None:
+    counts = _daily_action_counts(history)
+    if not counts:
+        ax.text(0.5, 0.5, "No actions recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    bottom = [0] * len(history.days)
+    for kind in sorted(
+        counts,
+        key=lambda name: list(ACTION_COLORS).index(name)
+        if name in ACTION_COLORS
+        else len(ACTION_COLORS),
+    ):
+        values = counts[kind]
+        ax.bar(
+            history.days,
+            values,
+            bottom=bottom,
+            label=kind.replace("_", " "),
+            color=ACTION_COLORS.get(kind, "#94a3b8"),
+            width=0.9,
+        )
+        bottom = [b + v for b, v in zip(bottom, values)]
+    ax.set_xlabel("Day")
+    ax.set_ylabel("Actions per day")
+    ax.legend(fontsize=8, ncol=2, loc="upper left")
+
+
+def plot_action_mix_over_time(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Stacked daily counts of every action kind (what agents did each day)."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _stacked_action_bars(ax, history)
+    ax.set_title("What agents did each day (stacked action counts)")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_choice_breakdown(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Bar chart of top-level agent decisions."""
+    tallies = _choice_tallies(history)
+    decisions = (
+        "write_paper",
+        "start_review",
+        "continue_review",
+        "finish_and_write",
+        "finish_and_review",
+        "idle",
+    )
+    labels = [d for d in decisions if tallies.get(d, 0)]
+    values = [tallies[d] for d in labels]
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(
+        range(len(labels)),
+        values,
+        color=[DECISION_COLORS.get(label, "#94a3b8") for label in labels],
+    )
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels([label.replace("_", " ") for label in labels], rotation=20, ha="right")
+    ax.set_ylabel("Decision count")
+    ax.set_title("Agent choices (write / review / finish)")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_run_summary(history: "History", path: str | None = None, show: bool = False):
+    """Single-page dashboard: review effort, actions, and choice breakdown."""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("Simulation summary", fontsize=14, fontweight="bold")
+
+    ax = axes[0, 0]
+    _draw_effort_histogram(ax, history)
+    ax.set_title("Completed peer reviews by effort")
+
+    ax = axes[0, 1]
+    _draw_effort_scatter(ax, history)
+    ax.set_title("Completed peer reviews over time")
+
+    ax = axes[1, 0]
+    _stacked_action_bars(ax, history)
+    ax.set_title("Daily action mix")
+
+    ax = axes[1, 1]
+    tallies = _choice_tallies(history)
+    decisions = (
+        "write_paper",
+        "start_review",
+        "continue_review",
+        "finish_and_write",
+        "finish_and_review",
+        "idle",
+    )
+    labels = [d for d in decisions if tallies.get(d, 0)]
+    values = [tallies[d] for d in labels]
+    ax.bar(
+        range(len(labels)),
+        values,
+        color=[DECISION_COLORS.get(label, "#94a3b8") for label in labels],
+    )
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels([label.replace("_", " ") for label in labels], fontsize=7, rotation=25, ha="right")
+    ax.set_title("Agent choices")
+    ax.set_ylabel("Count")
+
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_all(
+    history: "History", outdir: str = "runs", *, show: bool = False
+) -> dict[str, str]:
     """Render every chart into ``outdir`` and return {name: path}."""
     os.makedirs(outdir, exist_ok=True)
     return {
-        "agent_capital": plot_agent_capital(
-            history, os.path.join(outdir, "agent_capital.png")
+        "summary": plot_run_summary(
+            history, os.path.join(outdir, "summary.png"), show=show
         ),
-        "agent_capital_by_group": plot_agent_capital_by_group(
-            history, os.path.join(outdir, "agent_capital_by_group.png")
+        "action_mix": plot_action_mix_over_time(
+            history, os.path.join(outdir, "action_mix.png"), show=show
         ),
-        "system_aggregates": plot_system_aggregates(
-            history, os.path.join(outdir, "system_aggregates.png")
+        "choice_breakdown": plot_choice_breakdown(
+            history, os.path.join(outdir, "choice_breakdown.png"), show=show
+        ),
+        "review_effort_histogram": plot_review_effort_histogram(
+            history, os.path.join(outdir, "review_effort_histogram.png"), show=show
+        ),
+        "review_effort_scatter": plot_review_effort_scatter(
+            history, os.path.join(outdir, "review_effort_scatter.png"), show=show
         ),
         "review_behavior": plot_review_behavior(
-            history, os.path.join(outdir, "review_behavior.png")
+            history, os.path.join(outdir, "review_behavior.png"), show=show
         ),
-        "paper_ac": plot_paper_ac(history, os.path.join(outdir, "paper_ac.png")),
+        "paper_ac": plot_paper_ac(
+            history, os.path.join(outdir, "paper_ac.png"), show=show
+        ),
     }

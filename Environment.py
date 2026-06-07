@@ -49,7 +49,10 @@ class Environment:
         """Ask each agent to act once, in order, recording what each one did."""
         self._sync_papers()
         for agent in self.agents:
-            record = agent.act()
+            if agent.is_locked_in_review():
+                record = agent.auto_continue_review()
+            else:
+                record = agent.act()
             if self.history is not None and record is not None:
                 self.history.record_action(self, agent, record)
         self._sync_papers()

@@ -10,9 +10,10 @@ from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History, gini
 from Paper import (
-    GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
     MIN_REVIEW_EFFORT_THRESHOLD,
+    REVIEW_EFFORT_PER_DAY,
     Paper,
+    review_accrual_bump,
 )
 
 try:
@@ -24,21 +25,15 @@ except ImportError:
 
 
 class DummyAgent(Agent):
-    def __init__(self, name: str = "agent", actions=None, review_effort_deltas=None):
+    def __init__(self, name: str = "agent", actions=None):
         super().__init__(intrinsic_talent=1.0)
         self.name = name
         self.actions = list(actions or [])
-        self.review_effort_deltas = list(review_effort_deltas or [])
 
     def choose_action(self):
         if self.actions:
             return self.actions.pop(0)
         return "write_paper", None
-
-    def review_effort_delta(self):
-        if self.review_effort_deltas:
-            return self.review_effort_deltas.pop(0)
-        return 0.5
 
 
 class RecordingAgent(DummyAgent):
@@ -48,6 +43,7 @@ class RecordingAgent(DummyAgent):
 
     def act(self):
         self.log.append(self.name)
+        return super().act()
 
 
 class SimulationTest(unittest.TestCase):
@@ -81,46 +77,45 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(author.academic_capital, 9.0)
         self.assertEqual(reviewer.academic_capital, 3.0)
 
-    def test_review_locks_paper_and_grants_share_on_stop(self):
+    def _advance_to_review_choice(self, reviewer: DummyAgent) -> None:
+        """Auto-continue until effort reaches the minimum threshold."""
+        while reviewer.is_locked_in_review():
+            reviewer.auto_continue_review()
+        self.assertTrue(reviewer.should_offer_review_choice())
+        self.assertEqual(reviewer.active_review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
+
+    def test_review_locks_paper_and_grants_share_on_finish(self):
         author = DummyAgent("author")
         paper = Paper(author=author, current_ac=100.0)
         reviewer = DummyAgent(
             "reviewer",
             actions=[
                 ("peer_review", paper),
-                ("peer_review", None),
-                ("stop_peer_review", None),
+                ("finish_review_write_paper", None),
             ],
-            review_effort_deltas=[1.0, 1.0],
         )
 
         started = reviewer.act()
         self.assertEqual(started.kind, "review_started")
+        self.assertEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_DAY)
+        self.assertFalse(paper.review_available)
         self.assertIs(paper.review_in_progress_by, reviewer)
-        self.assertNotIn(reviewer, paper.share_distribution)
 
-        self.assertEqual(reviewer.act().kind, "review_continued")
-        stopped = reviewer.act()
+        self._advance_to_review_choice(reviewer)
+        finished = reviewer.act()
 
-        self.assertEqual(stopped.kind, "review_stopped")
+        self.assertEqual(finished.kind, "review_finished_write")
         self.assertIsNone(reviewer.active_review_paper)
         self.assertIsNone(paper.review_in_progress_by)
+        self.assertTrue(paper.review_available)
         self.assertEqual(paper.share_distribution[reviewer], 0.01)
-        self.assertEqual(paper.good_faith_reviews, 1)
+        self.assertEqual(paper.completed_peer_reviews, 1)
 
     def test_review_lock_blocks_other_reviewers(self):
         author = DummyAgent("author")
         paper = Paper(author=author)
-        first = DummyAgent(
-            "first",
-            actions=[("peer_review", paper)],
-            review_effort_deltas=[1.0],
-        )
-        second = DummyAgent(
-            "second",
-            actions=[("peer_review", paper)],
-            review_effort_deltas=[1.0],
-        )
+        first = DummyAgent("first", actions=[("peer_review", paper)])
+        second = DummyAgent("second", actions=[("peer_review", paper)])
 
         first.act()
         unavailable = second.act()
@@ -129,29 +124,59 @@ class SimulationTest(unittest.TestCase):
         self.assertNotIn(second, paper.share_distribution)
         self.assertIsNone(second.active_review_paper)
         self.assertIs(paper.review_in_progress_by, first)
+        self.assertFalse(paper.review_available)
 
-    def test_minimum_effort_review_completes_as_bad_faith(self):
+    def test_locked_agent_auto_continues_via_environment(self):
+        author = DummyAgent("author")
+        paper = Paper(author=author)
+        reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
+        history = History()
+        env = Environment(agents=[reviewer], history=history)
+
+        reviewer.act()
+        self.assertTrue(reviewer.is_locked_in_review())
+        env.agentact()
+
+        self.assertEqual(reviewer.active_review_effort, 2.0)
+        self.assertEqual(history.actions[-1][2], "review_auto_continued")
+
+    def test_choice_offered_day_after_threshold(self):
+        author = DummyAgent("author")
+        paper = Paper(author=author)
+        reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
+
+        reviewer.act()
+        self.assertEqual(reviewer.active_review_effort, 1.0)
+        for expected in range(2, int(MIN_REVIEW_EFFORT_THRESHOLD)):
+            self.assertTrue(reviewer.is_locked_in_review())
+            reviewer.auto_continue_review()
+            self.assertEqual(reviewer.active_review_effort, float(expected))
+
+        self.assertTrue(reviewer.is_locked_in_review())
+        reviewer.auto_continue_review()
+        self.assertEqual(reviewer.active_review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
+        self.assertFalse(reviewer.is_locked_in_review())
+        self.assertTrue(reviewer.should_offer_review_choice())
+
+    def test_minimum_effort_review_completes(self):
         author = DummyAgent("author")
         paper = Paper(author=author)
         reviewer = DummyAgent(
             "reviewer",
-            actions=[("peer_review", paper), ("stop_peer_review", None)],
-            review_effort_deltas=[MIN_REVIEW_EFFORT_THRESHOLD],
+            actions=[
+                ("peer_review", paper),
+                ("finish_review_write_paper", None),
+            ],
         )
 
-        reviewer.act()  # start with exactly the minimum effort
-        stopped = reviewer.act()  # stop and collect
+        reviewer.act()
+        self._advance_to_review_choice(reviewer)
+        finished = reviewer.act()
 
-        self.assertEqual(stopped.kind, "review_stopped")
-        self.assertEqual(stopped.review_kind, "bad_faith")
-        self.assertEqual(stopped.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
-        self.assertEqual(paper.share_distribution[reviewer], 0.01)
-        self.assertEqual(paper.bad_faith_reviews, 1)
-        self.assertEqual(paper.good_faith_reviews, 0)
-        self.assertEqual(
-            paper.review_records[-1]["effort"],
-            MIN_REVIEW_EFFORT_THRESHOLD,
-        )
+        self.assertEqual(finished.kind, "review_finished_write")
+        self.assertIsNone(finished.review_kind)
+        self.assertEqual(finished.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
+        self.assertEqual(paper.completed_peer_reviews, 1)
 
     def test_review_below_minimum_effort_does_not_complete(self):
         author = DummyAgent("author")
@@ -164,22 +189,30 @@ class SimulationTest(unittest.TestCase):
         self.assertNotIn(reviewer, paper.share_distribution)
         self.assertEqual(paper.completed_peer_reviews, 0)
 
-    def test_share_is_same_for_bad_and_good_faith_reviews(self):
+    def test_review_accrual_bump_increases_with_diminishing_marginals(self):
+        bump_10 = review_accrual_bump(10)
+        bump_11 = review_accrual_bump(11)
+        bump_12 = review_accrual_bump(12)
+        bump_13 = review_accrual_bump(13)
+
+        self.assertGreater(bump_11, bump_10)
+        self.assertGreater(bump_12, bump_11)
+        self.assertGreater(bump_13, bump_12)
+        self.assertGreater(bump_11 - bump_10, bump_12 - bump_11)
+        self.assertGreater(bump_12 - bump_11, bump_13 - bump_12)
+        self.assertEqual(review_accrual_bump(9), 0.0)
+
+    def test_higher_effort_yields_higher_paper_accrual_rate(self):
         author = DummyAgent("author")
-        bad_reviewer = DummyAgent("bad reviewer")
-        good_reviewer = DummyAgent("good reviewer")
-        bad_paper = Paper(author=author)
-        good_paper = Paper(author=author)
+        low_reviewer = DummyAgent("low reviewer")
+        high_reviewer = DummyAgent("high reviewer")
+        low_paper = Paper(author=author, accrual_rate=1.0)
+        high_paper = Paper(author=author, accrual_rate=1.0)
 
-        bad_share = bad_paper.add_review(bad_reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
-        good_share = good_paper.add_review(
-            good_reviewer,
-            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
-        )
+        low_paper.add_review(low_reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
+        high_paper.add_review(high_reviewer, MIN_REVIEW_EFFORT_THRESHOLD + 3)
 
-        self.assertEqual(bad_share, good_share)
-        self.assertEqual(bad_paper.bad_faith_reviews, 1)
-        self.assertEqual(good_paper.good_faith_reviews, 1)
+        self.assertGreater(high_paper.accrual_rate, low_paper.accrual_rate)
 
     def test_agent_cannot_review_same_paper_twice(self):
         author = DummyAgent("author")
@@ -188,9 +221,7 @@ class SimulationTest(unittest.TestCase):
 
         first_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
         rate_after_first_review = paper.accrual_rate
-        second_share = paper.add_review(
-            reviewer, GOOD_FAITH_REVIEW_EFFORT_THRESHOLD
-        )
+        second_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD + 2)
 
         self.assertGreater(first_share, 0.0)
         self.assertEqual(second_share, 0.0)
@@ -237,6 +268,32 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(action, "peer_review")
         self.assertIs(paper, high_value)
 
+    def test_finish_review_and_start_new_review_same_day(self):
+        author = DummyAgent("author")
+        paper_a = Paper(author=author, current_ac=50.0)
+        paper_b = Paper(author=author, current_ac=100.0)
+        reviewer = DummyAgent(
+            "reviewer",
+            actions=[
+                ("peer_review", paper_a),
+                ("finish_review_peer_review", paper_b),
+            ],
+        )
+        Agent.all_papers = [paper_a, paper_b]
+
+        reviewer.act()
+        self._advance_to_review_choice(reviewer)
+        record = reviewer.act()
+
+        self.assertEqual(record.kind, "review_finished_peer_review")
+        self.assertEqual(record.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
+        self.assertIs(record.paper, paper_a)
+        self.assertIs(reviewer.active_review_paper, paper_b)
+        self.assertEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_DAY)
+        self.assertTrue(paper_a.review_available)
+        self.assertFalse(paper_b.review_available)
+        self.assertIn(reviewer, paper_a.share_distribution)
+
     def test_act_returns_review_action_records(self):
         author = DummyAgent("author")
         paper = Paper(author=author, current_ac=10.0)
@@ -244,40 +301,22 @@ class SimulationTest(unittest.TestCase):
             "reviewer",
             actions=[
                 ("peer_review", paper),
-                ("peer_review", None),
-                ("peer_review", None),
-                ("stop_peer_review", None),
+                ("peer_review", paper),
+                ("finish_review_write_paper", None),
             ],
-            review_effort_deltas=[0.5, 0.5, 0.5],
         )
-        Agent.all_papers = [paper]
 
         started = reviewer.act()
         self.assertEqual(started.kind, "review_started")
         self.assertIs(started.paper, paper)
 
-        kinds = [reviewer.act().kind for _ in range(3)]
-        self.assertEqual(
-            kinds, ["review_continued", "review_continued", "review_stopped"]
-        )
+        self._advance_to_review_choice(reviewer)
+        continued = reviewer.act()
+        self.assertEqual(continued.kind, "review_continued")
 
-    def test_act_returns_write_and_review_records(self):
-        author = DummyAgent("author")
-        writer = DummyAgent("writer", actions=[("write_paper", None)])
-        self.assertEqual(writer.act().kind, "write_paper")
-
-        paper = Paper(author=author)
-        reviewer = DummyAgent(
-            "reviewer",
-            actions=[("peer_review", paper), ("stop_peer_review", None)],
-            review_effort_deltas=[MIN_REVIEW_EFFORT_THRESHOLD],
-        )
-        self.assertEqual(reviewer.act().kind, "review_started")
-        record = reviewer.act()
-        self.assertEqual(record.kind, "review_stopped")
-        self.assertIs(record.paper, paper)
-        self.assertEqual(record.review_kind, "bad_faith")
-        self.assertEqual(record.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
+        reviewer._review_choice_pending = True
+        finished = reviewer.act()
+        self.assertEqual(finished.kind, "review_finished_write")
 
     def test_environment_records_capital_and_actions(self):
         author = DummyAgent("author")
@@ -295,7 +334,7 @@ class SimulationTest(unittest.TestCase):
         env.nextstep()
 
         self.assertEqual(history.days, [1])
-        self.assertEqual(len(history.actions), 2)  # one entry per agent turn
+        self.assertEqual(len(history.actions), 2)
         self.assertEqual(len(history.agent_capital["author"]), 1)
         self.assertEqual(len(history.agent_capital["reviewer"]), 1)
         self.assertAlmostEqual(history.agent_capital["author"][0], 9.0)
@@ -316,7 +355,7 @@ class SimulationTest(unittest.TestCase):
 
         self.assertEqual(rows[0][0], "day")
         self.assertIn("total_capital", rows[0])
-        self.assertEqual(len(rows), 1 + 3)  # header + one row per simulated day
+        self.assertEqual(len(rows), 1 + 3)
         self.assertEqual([row[0] for row in rows[1:]], ["1", "2", "3"])
 
     def test_gini_ranges_from_equal_to_unequal(self):

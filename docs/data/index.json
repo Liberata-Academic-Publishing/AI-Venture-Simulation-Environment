@@ -1,5 +1,22 @@
 [
   {
+    "id": "2026-06-06_232634",
+    "title": "first continuous updated sim",
+    "created": "2026-06-06T23:26:34",
+    "num_days": 200,
+    "config": {
+      "num_agents": 20,
+      "num_days": 200,
+      "seed": 7
+    },
+    "summary": {
+      "total_capital": 20284.6928,
+      "mean_capital": 1014.2346,
+      "capital_gini": 0.0836,
+      "num_papers": 20.0
+    }
+  },
+  {
     "id": "2026-06-05_154621",
     "title": "Bad-majority stress test",
     "created": "2026-06-05T15:46:21",
