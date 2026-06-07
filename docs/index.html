@@ -51,6 +51,11 @@
     .kind-bad_faith_review { color: #f87171; }
     .kind-idle, .kind-review_unavailable { color: #6b7280; }
     canvas { max-height: 300px; }
+    .rates { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 12px; }
+    .rate { font-size: 12px; color: #c4cdd5; display: inline-flex; align-items: center; gap: 5px; }
+    .rate .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+    .rate .pct { font-weight: 600; color: #e6e6e6; }
+    .rate .cnt { color: #8b98a5; }
   </style>
 </head>
 <body>
@@ -77,6 +82,11 @@
     <div class="charts">
       <div class="panel"><h2>Academic capital per agent</h2><canvas id="agentChart"></canvas></div>
       <div class="panel"><h2>System aggregates</h2><canvas id="aggChart"></canvas></div>
+      <div class="panel">
+        <h2>Action mix over time</h2>
+        <canvas id="actionChart"></canvas>
+        <div id="actionRates" class="rates"></div>
+      </div>
     </div>
     <div class="panel feed">
       <h2>Action feed</h2>
@@ -98,6 +108,23 @@
     const isBad = (name) => /^bad\b/i.test(name);
     const agentColor = (name, i) => isBad(name) ? "#f87171" : color(i % PALETTE.length);
 
+    // Stable display order + colors for action kinds (kinds from Agent.py).
+    const ACTION_ORDER = ["write_paper", "review_started", "review_continued",
+      "review_completed", "bad_faith_review", "review_unavailable", "idle"];
+    const ACTION_COLOR = {
+      write_paper: "#60a5fa", review_started: "#4ade80", review_continued: "#34d399",
+      review_completed: "#22d3ee", bad_faith_review: "#f87171",
+      review_unavailable: "#fbbf24", idle: "#6b7280"
+    };
+    // Kinds present in a run, known kinds first (ACTION_ORDER), then any extras.
+    function actionKinds(countsObj) {
+      const present = new Set(Object.keys(countsObj || {}));
+      const ordered = ACTION_ORDER.filter(k => present.has(k));
+      for (const k of present) if (!ordered.includes(k)) ordered.push(k);
+      return ordered;
+    }
+    const kindColor = (k, i) => ACTION_COLOR[k] || color(i % PALETTE.length);
+
     const baseOpts = {
       animation: false, responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
@@ -107,8 +134,9 @@
       }
     };
 
-    let agentChart, aggChart;
+    let agentChart, aggChart, actionChart;
     const statusEl = document.getElementById("status");
+    const ratesEl = document.getElementById("actionRates");
     const feedEl = document.getElementById("feed");
     const pickerEl = document.getElementById("runPicker");
     const replayBtn = document.getElementById("replayBtn");
@@ -128,6 +156,58 @@
       statusEl.textContent = text;
       statusEl.className = "";
       if (cls) statusEl.classList.add(cls);
+    }
+
+    // 100%-stacked area: one band per action kind, days on x, % share on y.
+    function setupActionChart(kinds) {
+      if (actionChart) actionChart.destroy();
+      actionChart = new Chart(document.getElementById("actionChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: kinds.map((k, i) => ({
+            label: k, data: [], borderColor: kindColor(k, i),
+            backgroundColor: kindColor(k, i) + "cc", borderWidth: 1,
+            pointRadius: 0, fill: true, stack: "a"
+          }))
+        },
+        options: {
+          ...baseOpts,
+          plugins: { legend: { labels: { color: "#c4cdd5", boxWidth: 10 } } },
+          scales: {
+            ...baseOpts.scales,
+            y: { ...baseOpts.scales.y, stacked: true, min: 0, max: 100,
+                 ticks: { ...baseOpts.scales.y.ticks, callback: (v) => v + "%" } }
+          }
+        }
+      });
+    }
+
+    // Per-day counts of each kind: { day: { kind: n } }.
+    function dayCounts(actions) {
+      const out = {};
+      for (const a of (actions || [])) {
+        const day = out[a.day] || (out[a.day] = {});
+        day[a.kind] = (day[a.kind] || 0) + 1;
+      }
+      return out;
+    }
+
+    // One day's normalized share (0–100) for `kind` given that day's counts.
+    function dayShare(counts, kind) {
+      const total = Object.values(counts || {}).reduce((s, n) => s + n, 0);
+      return total ? (100 * (counts[kind] || 0)) / total : 0;
+    }
+
+    // Overall-rate chips: kind, its % of all actions, and raw count.
+    function renderRates(totals) {
+      const grand = Object.values(totals || {}).reduce((s, n) => s + n, 0);
+      ratesEl.innerHTML = actionKinds(totals).map((k, i) => {
+        const n = totals[k] || 0;
+        const pct = grand ? (100 * n / grand).toFixed(1) : "0.0";
+        return `<span class="rate"><span class="swatch" style="background:${kindColor(k, i)}"></span>` +
+               `${k} <span class="pct">${pct}%</span> <span class="cnt">(${n})</span></span>`;
+      }).join("");
     }
 
     function setupCharts(agentLabels) {
@@ -201,6 +281,22 @@
       aggChart.data.datasets.forEach(ds => { ds.data = (data.scalars && data.scalars[ds.label]) || []; });
       aggChart.update();
 
+      // Action mix: normalize each day's kind-counts to a 0–100% share.
+      const byDay = dayCounts(data.actions);
+      let counts = data.action_counts;
+      if (!counts || !Object.keys(counts).length) {  // older runs: tally from actions
+        counts = {};
+        for (const c of Object.values(byDay))
+          for (const [k, n] of Object.entries(c)) counts[k] = (counts[k] || 0) + n;
+      }
+      setupActionChart(actionKinds(counts));
+      actionChart.data.labels = days;
+      actionChart.data.datasets.forEach(ds => {
+        ds.data = days.map(day => dayShare(byDay[day], ds.label));
+      });
+      actionChart.update();
+      renderRates(counts);
+
       setTiles(data.scalars || {});
 
       // Show the most recent actions (newest first), capped for performance.
@@ -220,7 +316,7 @@
 
     // One animation frame: draw day `replay.i`, then advance it.
     function replayTick() {
-      const { days, s, agentCap, byDay, title } = replay;
+      const { days, s, agentCap, byDay, byDayCounts, runningCounts, title } = replay;
       if (replay.i >= days.length) {       // reached the end
         clearInterval(replayTimer);
         replayTimer = null;
@@ -240,6 +336,13 @@
       aggChart.data.labels.push(day);
       aggChart.data.datasets.forEach(ds => ds.data.push(at(s[ds.label], i)));
       aggChart.update();
+
+      const dayCnt = byDayCounts[day] || {};
+      actionChart.data.labels.push(day);
+      actionChart.data.datasets.forEach(ds => ds.data.push(dayShare(dayCnt, ds.label)));
+      actionChart.update();
+      for (const [k, n] of Object.entries(dayCnt)) runningCounts[k] = (runningCounts[k] || 0) + n;
+      renderRates(runningCounts);
 
       setTiles(s, i);
 
@@ -262,7 +365,9 @@
       stopReplay();
       const data = currentData;
       setupCharts(Object.keys(data.agent_capital || {}));
+      setupActionChart(actionKinds(data.action_counts || {}));
       feedEl.innerHTML = "";
+      ratesEl.innerHTML = "";
 
       // Group actions by day so each frame can append just that day's events.
       const byDay = {};
@@ -273,7 +378,9 @@
 
       replay = {
         days: data.days || [], s: data.scalars || {},
-        agentCap: data.agent_capital || {}, byDay, i: 0, title: currentTitle,
+        agentCap: data.agent_capital || {}, byDay,
+        byDayCounts: dayCounts(data.actions), runningCounts: {},
+        i: 0, title: currentTitle,
       };
       pauseBtn.disabled = false;
       pauseBtn.textContent = "⏸ Pause";

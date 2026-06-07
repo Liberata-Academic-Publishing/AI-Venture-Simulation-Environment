@@ -39,6 +39,11 @@
     .kind-bad_faith_review { color: #f87171; }
     .kind-idle { color: #6b7280; }
     canvas { max-height: 300px; }
+    .rates { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 12px; }
+    .rate { font-size: 12px; color: #c4cdd5; display: inline-flex; align-items: center; gap: 5px; }
+    .rate .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+    .rate .pct { font-weight: 600; color: #e6e6e6; }
+    .rate .cnt { color: #8b98a5; }
   </style>
 </head>
 <body>
@@ -57,6 +62,11 @@
     <div class="charts">
       <div class="panel"><h2>Academic capital per agent</h2><canvas id="agentChart"></canvas></div>
       <div class="panel"><h2>System aggregates</h2><canvas id="aggChart"></canvas></div>
+      <div class="panel">
+        <h2>Action mix over time</h2>
+        <canvas id="actionChart"></canvas>
+        <div id="actionRates" class="rates"></div>
+      </div>
     </div>
     <div class="panel feed">
       <h2>Action feed</h2>
@@ -75,6 +85,33 @@
     ];
     const color = (i) => PALETTE[i % PALETTE.length];
 
+    // Stable display order + colors for action kinds (kinds from Agent.py).
+    const ACTION_ORDER = ["write_paper", "review_started", "review_continued",
+      "review_completed", "bad_faith_review", "review_unavailable", "idle"];
+    const ACTION_COLOR = {
+      write_paper: "#60a5fa", review_started: "#4ade80", review_continued: "#34d399",
+      review_completed: "#22d3ee", bad_faith_review: "#f87171",
+      review_unavailable: "#fbbf24", idle: "#6b7280"
+    };
+    const kindColor = (k, i) => ACTION_COLOR[k] || color(i % PALETTE.length);
+    // Known kinds in order, then any unexpected kind seen at runtime.
+    function actionKinds(extra) {
+      const out = ACTION_ORDER.slice();
+      for (const k of (extra || [])) if (!out.includes(k)) out.push(k);
+      return out;
+    }
+    // Tally a flat list of {kind} into { kind: n }.
+    function countActions(actions) {
+      const out = {};
+      for (const a of (actions || [])) out[a.kind] = (out[a.kind] || 0) + 1;
+      return out;
+    }
+    // One step's normalized share (0–100) for `kind` given that step's counts.
+    function dayShare(counts, kind) {
+      const total = Object.values(counts || {}).reduce((s, n) => s + n, 0);
+      return total ? (100 * (counts[kind] || 0)) / total : 0;
+    }
+
     const baseOpts = {
       animation: false, responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
@@ -84,9 +121,22 @@
       }
     };
 
-    let agentChart, aggChart;
+    let agentChart, aggChart, actionChart;
+    let actionTotals = {};  // running count of each kind across the whole run
     const statusEl = document.getElementById("status");
     const feedEl = document.getElementById("feed");
+    const ratesEl = document.getElementById("actionRates");
+
+    // Overall-rate chips: kind, its % of all actions so far, and raw count.
+    function renderRates(totals) {
+      const grand = Object.values(totals || {}).reduce((s, n) => s + n, 0);
+      ratesEl.innerHTML = actionKinds(Object.keys(totals || {})).map((k, i) => {
+        const n = totals[k] || 0;
+        const pct = grand ? (100 * n / grand).toFixed(1) : "0.0";
+        return `<span class="rate"><span class="swatch" style="background:${kindColor(k, i)}"></span>` +
+               `${k} <span class="pct">${pct}%</span> <span class="cnt">(${n})</span></span>`;
+      }).join("");
+    }
 
     function setupCharts(agentLabels) {
       agentChart = new Chart(document.getElementById("agentChart"), {
@@ -121,6 +171,31 @@
           }
         }
       });
+
+      // 100%-stacked area: one band per action kind, day on x, % share on y.
+      const kinds = actionKinds();
+      actionChart = new Chart(document.getElementById("actionChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: kinds.map((k, i) => ({
+            label: k, data: [], borderColor: kindColor(k, i),
+            backgroundColor: kindColor(k, i) + "cc", borderWidth: 1,
+            pointRadius: 0, fill: true, stack: "a"
+          }))
+        },
+        options: {
+          ...baseOpts,
+          plugins: { legend: { labels: { color: "#c4cdd5", boxWidth: 10 } } },
+          scales: {
+            ...baseOpts.scales,
+            y: { ...baseOpts.scales.y, stacked: true, min: 0, max: 100,
+                 ticks: { ...baseOpts.scales.y.ticks, callback: (v) => v + "%" } }
+          }
+        }
+      });
+      actionTotals = {};
+      ratesEl.innerHTML = "";
     }
 
     function onStep(msg) {
@@ -133,6 +208,14 @@
       aggChart.data.labels.push(msg.day);
       aggChart.data.datasets.forEach(ds => ds.data.push(msg.scalars[ds.label] ?? null));
       aggChart.update();
+
+      // Action mix: this day's kinds normalized to a 0–100% share, plus running rates.
+      const dayCnt = countActions(msg.actions);
+      actionChart.data.labels.push(msg.day);
+      actionChart.data.datasets.forEach(ds => ds.data.push(dayShare(dayCnt, ds.label)));
+      actionChart.update();
+      for (const [k, n] of Object.entries(dayCnt)) actionTotals[k] = (actionTotals[k] || 0) + n;
+      renderRates(actionTotals);
 
       const s = msg.scalars;
       document.getElementById("t-total").textContent  = (s.total_capital ?? 0).toFixed(1);
