@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from Agent import Agent, GOOD_FAITH_REVIEW_DAYS, PAPER_THRESHOLD
+from Agent import Agent, EXPECTED_REVIEW_EFFORT_PER_TURN, PAPER_THRESHOLD
 from Paper import (
     BAD_FAITH_ACCRUAL_BUMP,
     DEFAULT_ACCRUAL_RATE,
     DEFAULT_REVIEW_SHARE,
+    GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
     GOOD_FAITH_ACCRUAL_BUMP,
+    MIN_REVIEW_EFFORT_THRESHOLD,
     Paper,
 )
 
@@ -15,8 +17,9 @@ EXPECTED_WRITE_PROGRESS = 0.5
 class HeuristicAgent(Agent):
     """Agent that picks the action with the best rough capital forecast."""
 
-    # Review options the agent will consider, as (forecast kind, action name).
-    # Subclasses can narrow this (e.g. a bad-faith-only agent drops good_faith).
+    # Review options the agent will consider, as (target effort kind, action name).
+    # Final good/bad faith is classified by the paper once review effort is known.
+    # Subclasses can narrow this (e.g. a low-effort agent drops good_faith).
     REVIEW_ACTIONS: tuple[tuple[str, str], ...] = (
         ("good_faith", "peer_review"),
         ("bad_faith", "bad_faith_review"),
@@ -73,7 +76,7 @@ class HeuristicAgent(Agent):
         return score
 
     def _score_review(self, paper: Paper, kind: str) -> float:
-        delay_days = GOOD_FAITH_REVIEW_DAYS if kind == "good_faith" else 1
+        delay_days = self._review_delay_days(kind)
         remaining_days = max(0, self.forecast_horizon_days - delay_days)
         score = 0.0
 
@@ -96,6 +99,14 @@ class HeuristicAgent(Agent):
                 score += current_share * future_ac
 
         return score
+
+    def _review_delay_days(self, kind: str) -> float:
+        target_effort = (
+            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD
+            if kind == "good_faith"
+            else MIN_REVIEW_EFFORT_THRESHOLD
+        )
+        return max(1.0, target_effort / EXPECTED_REVIEW_EFFORT_PER_TURN)
 
     def _forecast_capital(self) -> float:
         return sum(
