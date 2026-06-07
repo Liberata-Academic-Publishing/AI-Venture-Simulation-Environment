@@ -5,6 +5,12 @@ This project is an agent-based simulation designed to model the incentive struct
 ## Short Term Plan - Simulate bad faith peer review
 The simulation presents the choice of good faith and bad faith peer reviews, and seeks to observe agentic behavior of making these choices.
 
+## Review Effort Model
+
+Peer review quality is modeled through continuous effort. A review must pass `MIN_REVIEW_EFFORT_THRESHOLD` to count as completed. Completed reviews below `GOOD_FAITH_REVIEW_EFFORT_THRESHOLD` are classified as bad faith; completed reviews at or above that threshold are classified as good faith.
+
+Reviewer share does not depend on good-faith/bad-faith classification. The classification only affects the paper's future accrual rate.
+
 ## Features
 Our environment stresses a few main features:
 - Flexible interfaces for agent, environment, market, and paper classes. This allows for multiple implementations of various algorithms.
