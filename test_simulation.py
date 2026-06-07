@@ -9,7 +9,11 @@ from Agent import Agent
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History, gini
-from Paper import Paper
+from Paper import (
+    GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
+    MIN_REVIEW_EFFORT_THRESHOLD,
+    Paper,
+)
 
 try:
     import matplotlib  # noqa: F401
@@ -20,15 +24,21 @@ except ImportError:
 
 
 class DummyAgent(Agent):
-    def __init__(self, name: str = "agent", actions=None):
+    def __init__(self, name: str = "agent", actions=None, review_effort_deltas=None):
         super().__init__(intrinsic_talent=1.0)
         self.name = name
         self.actions = list(actions or [])
+        self.review_effort_deltas = list(review_effort_deltas or [])
 
     def choose_action(self):
         if self.actions:
             return self.actions.pop(0)
         return "write_paper", None
+
+    def review_effort_delta(self):
+        if self.review_effort_deltas:
+            return self.review_effort_deltas.pop(0)
+        return 0.5
 
 
 class RecordingAgent(DummyAgent):
@@ -103,7 +113,7 @@ class SimulationTest(unittest.TestCase):
         self.assertIsNone(second_reviewer.active_review_paper)
         self.assertIs(paper.review_in_progress_by, first_reviewer)
 
-    def test_bad_faith_review_applies_immediately(self):
+    def test_minimum_effort_review_completes_as_bad_faith(self):
         author = DummyAgent("author")
         reviewer = DummyAgent("reviewer")
         paper = Paper(author=author)
@@ -112,6 +122,40 @@ class SimulationTest(unittest.TestCase):
 
         self.assertEqual(paper.share_distribution[reviewer], 0.01)
         self.assertEqual(reviewer.active_review_days_remaining, 0)
+        self.assertEqual(paper.bad_faith_reviews, 1)
+        self.assertEqual(paper.good_faith_reviews, 0)
+        self.assertEqual(
+            paper.review_records[-1]["effort"],
+            MIN_REVIEW_EFFORT_THRESHOLD,
+        )
+
+    def test_review_below_minimum_effort_does_not_complete(self):
+        author = DummyAgent("author")
+        reviewer = DummyAgent("reviewer")
+        paper = Paper(author=author)
+
+        review_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD - 0.01)
+
+        self.assertEqual(review_share, 0.0)
+        self.assertNotIn(reviewer, paper.share_distribution)
+        self.assertEqual(paper.completed_peer_reviews, 0)
+
+    def test_share_is_same_for_bad_and_good_faith_reviews(self):
+        author = DummyAgent("author")
+        bad_reviewer = DummyAgent("bad reviewer")
+        good_reviewer = DummyAgent("good reviewer")
+        bad_paper = Paper(author=author)
+        good_paper = Paper(author=author)
+
+        bad_share = bad_paper.add_review(bad_reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
+        good_share = good_paper.add_review(
+            good_reviewer,
+            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
+        )
+
+        self.assertEqual(bad_share, good_share)
+        self.assertEqual(bad_paper.bad_faith_reviews, 1)
+        self.assertEqual(good_paper.good_faith_reviews, 1)
 
     def test_agent_cannot_review_same_paper_twice(self):
         author = DummyAgent("author")
@@ -193,6 +237,8 @@ class SimulationTest(unittest.TestCase):
         record = bad.act()
         self.assertEqual(record.kind, "bad_faith_review")
         self.assertIs(record.paper, paper)
+        self.assertEqual(record.review_kind, "bad_faith")
+        self.assertEqual(record.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
 
     def test_environment_records_capital_and_actions(self):
         author = DummyAgent("author")

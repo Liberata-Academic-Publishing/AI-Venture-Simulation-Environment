@@ -10,6 +10,8 @@ DEFAULT_ACCRUAL_RATE = 1.0
 DEFAULT_REVIEW_SHARE = 0.01
 GOOD_FAITH_ACCRUAL_BUMP = 0.25
 BAD_FAITH_ACCRUAL_BUMP = 0.05
+MIN_REVIEW_EFFORT_THRESHOLD = 0.5
+GOOD_FAITH_REVIEW_EFFORT_THRESHOLD = 2.0
 DEFAULT_REVIEWER_AC_THRESHOLD = 10.0
 DEFAULT_HIGH_AC_REVIEW_SHARE = 0.02
 DEFAULT_MAX_REVIEWER_SHARE = 0.25
@@ -88,19 +90,59 @@ class Paper:
     def ac_accrual_rate(self, value: float):
         self.accrual_rate = self._nonnegative_float(value, "ac_accrual_rate")
 
-    def add_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Transfer a review share from the author and apply a good-faith accrual bump."""
-        review_share = self._add_review_share(agent, share, "good_faith")
+    def add_review(
+        self,
+        agent: Agent,
+        effort: float,
+        share: float = DEFAULT_REVIEW_SHARE,
+    ) -> float:
+        """Apply a completed review once effort crosses the completion threshold.
+
+        Reviewer share is independent of good-/bad-faith classification. Effort
+        only determines the accrual-rate bump attached to the completed review.
+        """
+        review_effort = self._nonnegative_float(effort, "review_effort")
+        kind = self.classify_review_effort(review_effort)
+        if kind is None:
+            return 0.0
+
+        review_share = self._add_review_share(
+            agent,
+            share,
+            kind,
+            effort=review_effort,
+        )
         if review_share > 0.0:
-            self.good_faith_reviews += 1
+            if kind == "good_faith":
+                self.good_faith_reviews += 1
+            else:
+                self.bad_faith_reviews += 1
         return review_share
 
+    def classify_review_effort(self, effort: float) -> str | None:
+        """Return the review classification implied by total review effort."""
+        review_effort = self._nonnegative_float(effort, "review_effort")
+        if review_effort < MIN_REVIEW_EFFORT_THRESHOLD:
+            return None
+        if review_effort < GOOD_FAITH_REVIEW_EFFORT_THRESHOLD:
+            return "bad_faith"
+        return "good_faith"
+
+    def add_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
+        """Compatibility wrapper for a good-faith completed review."""
+        return self.add_review(
+            agent,
+            GOOD_FAITH_REVIEW_EFFORT_THRESHOLD,
+            share,
+        )
+
     def add_bad_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Transfer a review share from the author and apply a bad-faith accrual bump."""
-        review_share = self._add_review_share(agent, share, "bad_faith")
-        if review_share > 0.0:
-            self.bad_faith_reviews += 1
-        return review_share
+        """Compatibility wrapper for a minimum-effort completed review."""
+        return self.add_review(
+            agent,
+            MIN_REVIEW_EFFORT_THRESHOLD,
+            share,
+        )
 
     def set_share(self, agent: Agent, share: float):
         """Set a contributor share.
@@ -173,7 +215,13 @@ class Paper:
         if self.review_in_progress_by == agent:
             self.review_in_progress_by = None
 
-    def _add_review_share(self, agent: Agent, share: float, kind: str) -> float:
+    def _add_review_share(
+        self,
+        agent: Agent,
+        share: float,
+        kind: str,
+        effort: float | None = None,
+    ) -> float:
         review_share = self.estimate_review_share(agent, kind, share)
         if review_share <= 0.0:
             return 0.0
@@ -192,6 +240,7 @@ class Paper:
                 "reviewer": agent,
                 "kind": kind,
                 "share": review_share,
+                "effort": effort,
                 "accrual_rate": self.accrual_rate,
             }
         )

@@ -83,6 +83,7 @@ class History:
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
+        self.review_efforts: list[tuple[int, str, str | None, float, str | None]] = []
         self.action_counts: Counter[str] = Counter()
         self.agent_actions: dict[str, list[str]] = {}
 
@@ -122,6 +123,16 @@ class History:
         )
         self.actions.append((day, agent_label, record.kind, paper_label))
         self.action_counts[record.kind] += 1
+        if record.review_effort is not None and record.review_kind is not None:
+            self.review_efforts.append(
+                (
+                    day,
+                    agent_label,
+                    paper_label,
+                    float(record.review_effort),
+                    record.review_kind,
+                )
+            )
         suffix = f" of {paper_label}" if paper_label else ""
         self.agent_actions.setdefault(agent_label, []).append(
             f"day {day}: {record.kind}{suffix}"
@@ -179,6 +190,16 @@ class History:
             "actions": [
                 {"day": d, "agent": a, "kind": k, "paper": p}
                 for (d, a, k, p) in self.actions
+            ],
+            "review_efforts": [
+                {
+                    "day": d,
+                    "agent": a,
+                    "paper": p,
+                    "effort": e,
+                    "kind": k,
+                }
+                for (d, a, p, e, k) in self.review_efforts
             ],
             "action_counts": dict(self.action_counts),
         }
