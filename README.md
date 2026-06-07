@@ -11,6 +11,10 @@ Peer review quality is modeled through continuous effort. A review must pass `MI
 
 Reviewer share does not depend on good-faith/bad-faith classification. The classification only affects the paper's future accrual rate.
 
+## Writing Effort Model
+
+Paper writing effort is continuous. Each `write_paper` action contributes a `writing_effort_delta` to the agent's current paper progress. Once cumulative progress reaches `PAPER_THRESHOLD`, the agent publishes a paper and progress resets.
+
 ## Features
 Our environment stresses a few main features:
 - Flexible interfaces for agent, environment, market, and paper classes. This allows for multiple implementations of various algorithms.
