@@ -25,6 +25,7 @@ class ActionRecord:
     published: bool = False
     review_effort: float | None = None
     review_kind: str | None = None
+    writing_effort: float | None = None
 
 
 class Agent(ABC):
@@ -125,17 +126,23 @@ class Agent(ABC):
             return self._finish_review_and_start(paper)
         if action == "write_paper":
             papers_before = len(Agent.all_papers)
-            self.write_paper()
+            writing_effort = self.write_paper()
             published = len(Agent.all_papers) > papers_before
-            return ActionRecord("write_paper", published=published)
+            return ActionRecord(
+                "write_paper",
+                published=published,
+                writing_effort=writing_effort,
+            )
         return ActionRecord("idle")
 
-    def write_paper(self):
+    def write_paper(self) -> float:
         """Increment paper progress randomly and publishes once threshold is reached."""
-        self.paper_progress += random.random()
+        effort = self.writing_effort_delta()
+        self.paper_progress += effort
         if self.paper_progress >= PAPER_THRESHOLD:
             self.paper_progress = 0.0
             self.publish_paper()
+        return effort
 
     def publish_paper(self):
         """Create a new Paper and add it to the shared paper list."""
@@ -173,20 +180,22 @@ class Agent(ABC):
         finished = self._finalize_active_review()
         if finished is None:
             papers_before = len(Agent.all_papers)
-            self.write_paper()
+            writing_effort = self.write_paper()
             return ActionRecord(
                 "write_paper",
                 published=len(Agent.all_papers) > papers_before,
+                writing_effort=writing_effort,
             )
 
         papers_before = len(Agent.all_papers)
-        self.write_paper()
+        writing_effort = self.write_paper()
         return ActionRecord(
             "review_finished_write",
             finished.paper,
             published=len(Agent.all_papers) > papers_before,
             review_effort=finished.review_effort,
             review_kind=finished.review_kind,
+            writing_effort=writing_effort,
         )
 
     def _finish_review_and_start(self, paper: Paper | None) -> ActionRecord:
@@ -251,6 +260,10 @@ class Agent(ABC):
     def review_effort_delta(self) -> float:
         """Review effort contributed in one agent turn."""
         return REVIEW_EFFORT_PER_DAY
+
+    def writing_effort_delta(self) -> float:
+        """Writing effort contributed in one agent turn."""
+        return self._clean_effort(random.random())
 
     def _clear_last_review_result(self):
         self.last_review_effort = None
