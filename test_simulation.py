@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from Agent import Agent
+from Agent import Agent, PAPER_THRESHOLD
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History, gini
@@ -34,6 +34,9 @@ class DummyAgent(Agent):
         if self.actions:
             return self.actions.pop(0)
         return "write_paper", None
+
+    def writing_effort_delta(self):
+        return 0.5
 
 
 class RecordingAgent(DummyAgent):
@@ -176,6 +179,7 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(finished.kind, "review_finished_write")
         self.assertIsNone(finished.review_kind)
         self.assertEqual(finished.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
+        self.assertEqual(finished.writing_effort, 0.5)
         self.assertEqual(paper.completed_peer_reviews, 1)
 
     def test_review_below_minimum_effort_does_not_complete(self):
@@ -317,6 +321,29 @@ class SimulationTest(unittest.TestCase):
         reviewer._review_choice_pending = True
         finished = reviewer.act()
         self.assertEqual(finished.kind, "review_finished_write")
+        self.assertEqual(finished.writing_effort, 0.5)
+
+    def test_write_action_records_writing_effort(self):
+        writer = DummyAgent("writer", actions=[("write_paper", None)])
+
+        record = writer.act()
+
+        self.assertEqual(record.kind, "write_paper")
+        self.assertEqual(record.writing_effort, 0.5)
+        self.assertEqual(writer.paper_progress, 0.5)
+        self.assertFalse(record.published)
+
+    def test_published_write_action_records_writing_effort(self):
+        writer = DummyAgent("writer", actions=[("write_paper", None)])
+        writer.paper_progress = PAPER_THRESHOLD - 0.25
+
+        record = writer.act()
+
+        self.assertEqual(record.kind, "write_paper")
+        self.assertEqual(record.writing_effort, 0.5)
+        self.assertTrue(record.published)
+        self.assertEqual(writer.paper_progress, 0.0)
+        self.assertEqual(len(Agent.all_papers), 1)
 
     def test_environment_records_capital_and_actions(self):
         author = DummyAgent("author")
@@ -340,6 +367,15 @@ class SimulationTest(unittest.TestCase):
         self.assertAlmostEqual(history.agent_capital["author"][0], 9.0)
         self.assertAlmostEqual(history.agent_capital["reviewer"][0], 3.0)
         self.assertEqual(history.scalars["num_papers"][0], 1.0)
+
+    def test_environment_records_writing_effort(self):
+        writer = DummyAgent("writer")
+        history = History()
+        env = Environment(agents=[writer], history=history)
+
+        env.agentact()
+
+        self.assertEqual(history.writing_efforts, [(1, "writer", 0.5, False)])
 
     def test_history_to_csv_has_header_and_one_row_per_day(self):
         author = DummyAgent("author")

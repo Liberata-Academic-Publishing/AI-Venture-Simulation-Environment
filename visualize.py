@@ -193,6 +193,14 @@ def _completed_reviews(history: "History") -> list[tuple[int, float]]:
     return [(day, effort) for day, _, _, effort in history.completed_reviews]
 
 
+def _writing_effort_by_agent(history: "History") -> dict[str, float]:
+    """Total writing effort accumulated by each agent."""
+    totals: dict[str, float] = {}
+    for _, agent, effort, _ in getattr(history, "writing_efforts", []):
+        totals[agent] = totals.get(agent, 0.0) + effort
+    return totals
+
+
 def _effort_histogram(history: "History") -> tuple[list[int], list[int]]:
     """Bin completed reviews by integer effort level."""
     counts: Counter[int] = Counter()
@@ -246,6 +254,26 @@ def plot_review_effort_scatter(
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_effort_scatter(ax, history)
     ax.set_title("Completed peer reviews over time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_writing_effort_distribution(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Histogram of total paper-writing effort accumulated by each agent."""
+    totals = _writing_effort_by_agent(history)
+    fig, ax = plt.subplots(figsize=(11, 6))
+    if not totals:
+        ax.text(0.5, 0.5, "No writing effort recorded", ha="center", va="center")
+        ax.set_axis_off()
+    else:
+        values = list(totals.values())
+        bins = max(1, min(20, len(values)))
+        ax.hist(values, bins=bins, color="#60a5fa", edgecolor="#1e3a5f")
+        ax.set_xlabel("Total writing effort per agent")
+        ax.set_ylabel("Agents")
+        ax.set_title("Distribution of paper-writing effort")
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -393,6 +421,11 @@ def plot_all(
         ),
         "review_effort_scatter": plot_review_effort_scatter(
             history, os.path.join(outdir, "review_effort_scatter.png"), show=show
+        ),
+        "writing_effort_distribution": plot_writing_effort_distribution(
+            history,
+            os.path.join(outdir, "writing_effort_distribution.png"),
+            show=show,
         ),
         "review_behavior": plot_review_behavior(
             history, os.path.join(outdir, "review_behavior.png"), show=show

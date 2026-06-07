@@ -117,6 +117,7 @@ CHART_DESCRIPTIONS = {
     "choice_breakdown": "Agent decisions (write / review / finish)",
     "review_effort_histogram": "Completed peer reviews by effort level",
     "review_effort_scatter": "Completed reviews: day vs effort",
+    "writing_effort_distribution": "Total paper-writing effort by agent",
     "review_behavior": "Cumulative completed peer reviews",
     "paper_ac": "Accrued capital per paper over time",
 }

@@ -90,6 +90,7 @@ class History:
         self.actions: list[tuple[int, str, str, str | None]] = []
         self.review_efforts: list[tuple[int, str, str | None, float, str | None]] = []
         self.completed_reviews: list[tuple[int, str, str | None, float]] = []
+        self.writing_efforts: list[tuple[int, str, float, bool]] = []
         self.action_counts: Counter[str] = Counter()
         self.agent_actions: dict[str, list[str]] = {}
 
@@ -148,6 +149,15 @@ class History:
                 self.completed_reviews.append(
                     (day, agent_label, paper_label, effort)
                 )
+        if record.writing_effort is not None:
+            self.writing_efforts.append(
+                (
+                    day,
+                    agent_label,
+                    float(record.writing_effort),
+                    bool(record.published),
+                )
+            )
         suffix = f" of {paper_label}" if paper_label else ""
         self.agent_actions.setdefault(agent_label, []).append(
             f"day {day}: {record.kind}{suffix}"
@@ -219,6 +229,15 @@ class History:
             "completed_reviews": [
                 {"day": d, "agent": a, "paper": p, "effort": e}
                 for (d, a, p, e) in self.completed_reviews
+            ],
+            "writing_efforts": [
+                {
+                    "day": d,
+                    "agent": a,
+                    "effort": e,
+                    "published": p,
+                }
+                for (d, a, e, p) in self.writing_efforts
             ],
             "action_counts": dict(self.action_counts),
         }
