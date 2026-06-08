@@ -20,6 +20,7 @@ try:
 
     matplotlib.use("Agg")  # headless: render straight to PNG, no display needed
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
 except ImportError as exc:  # pragma: no cover - exercised only without matplotlib
     raise ImportError(
         "visualize requires matplotlib. Install it with: pip install matplotlib"
@@ -221,7 +222,7 @@ def _draw_effort_histogram(ax, history: "History") -> None:
     ax.bar(efforts, values, width=0.9, color="#60a5fa", edgecolor="#1e3a5f")
     ax.set_xlabel("Review effort")
     ax.set_ylabel("Completed peer reviews")
-    ax.set_xticks(efforts)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins="auto"))
 
 
 def _draw_effort_scatter(ax, history: "History") -> None:

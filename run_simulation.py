@@ -7,14 +7,27 @@ import sys
 from collections import Counter
 
 from Agent import Agent
+from config import RL, SIM, default_policy_path
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History
 from Paper import Paper
+from QLearningAgent import QLearningAgent, make_backend
 
-NUM_AGENTS = 20
-NUM_DAYS = 200
-OUTPUT_DIR = "runs"
+# Defaults come from config.py; CLI flags override them at runtime.
+NUM_AGENTS = SIM.num_agents
+NUM_DAYS = SIM.num_days
+NUM_RL_AGENTS = RL.num_agents
+OUTPUT_DIR = SIM.output_dir
+
+
+def _talent_for(index: int, count: int) -> float:
+    """Spread talents across RL agents (inert until the sim uses talent)."""
+    if count <= 1:
+        return RL.talent_min
+    frac = index / (count - 1)
+    return RL.talent_min + frac * (RL.talent_max - RL.talent_min)
+
 
 # Map raw action kinds to the decision an agent actively made on its turn.
 # Auto-continued locked reviews are follow-through, not fresh choices.
@@ -133,7 +146,7 @@ def open_chart(path: str) -> None:
         os.system(f'xdg-open "{path}"')
 
 
-def save_outputs(history: History, *, show: bool = False, open_charts: bool = True):
+def save_outputs(history: History, *, show: bool = False, open_charts: bool = False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     csv_path = history.to_csv(os.path.join(OUTPUT_DIR, "history.csv"))
     json_path = history.to_json(os.path.join(OUTPUT_DIR, "history.json"))
@@ -161,15 +174,76 @@ def save_outputs(history: History, *, show: bool = False, open_charts: bool = Tr
         print(f"\nView the summary chart at: {os.path.abspath(summary_path)}")
 
 
-def build_simulation(history: History, *, num_agents: int = NUM_AGENTS, seed: int = 7) -> Environment:
-    """Construct a new simulation with a single agent type."""
+def build_rl_agents(
+    count: int,
+    *,
+    backend_kind: str,
+    policy_path: str | None,
+    freeze: bool,
+) -> list[QLearningAgent]:
+    """Create independent RL agents (one private backend each).
+
+    Each starts blank or, if ``policy_path`` points at an existing file, from
+    that saved baseline (then they diverge via their own online learning).
+    ``run_simulation.py`` never writes policies back.
+    """
+    if count <= 0:
+        return []
+
+    loaded = bool(policy_path) and os.path.exists(policy_path)
+    if policy_path and not loaded:
+        print(f"RL: policy {policy_path} not found; starting from scratch.")
+
+    agents: list[QLearningAgent] = []
+    for i in range(count):
+        backend = make_backend(backend_kind)
+        if loaded:
+            backend.load(policy_path)
+        agents.append(
+            QLearningAgent(
+                intrinsic_talent=_talent_for(i, count),
+                forecast_horizon_days=30,
+                name=f"RL Agent {i + 1}",
+                backend=backend,
+                epsilon=0.0 if freeze else RL.epsilon,
+                learning=not freeze,
+            )
+        )
+
+    source = (
+        f"loaded baseline {policy_path}" if loaded else "starting from scratch"
+    )
+    mode = "frozen (greedy)" if freeze else "learning online"
+    print(f"RL: {count} independent {backend_kind} agents, {source}, {mode}.")
+    return agents
+
+
+def build_simulation(
+    history: History,
+    *,
+    num_agents: int = NUM_AGENTS,
+    seed: int = SIM.seed,
+    rl_agents: int = NUM_RL_AGENTS,
+    rl_backend: str = RL.backend,
+    rl_policy_path: str | None = None,
+    rl_freeze: bool = False,
+) -> Environment:
+    """Construct a simulation of heuristics plus independent RL agents."""
     random.seed(seed)
     Agent.all_papers = []
 
-    agents = [
+    agents: list[Agent] = [
         HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Agent {i}")
         for i in range(1, num_agents + 1)
     ]
+    agents.extend(
+        build_rl_agents(
+            rl_agents,
+            backend_kind=rl_backend,
+            policy_path=rl_policy_path,
+            freeze=rl_freeze,
+        )
+    )
 
     seed_initial_papers(agents)
 
@@ -202,9 +276,29 @@ def parse_args(argv=None):
         help="Pop up matplotlib chart windows after the run (in addition to saving PNGs).",
     )
     parser.add_argument(
-        "--no-open",
+        "--open",
         action="store_true",
-        help="Do not open the summary chart in your default image viewer.",
+        help="Open the summary chart in your default image viewer after the run.",
+    )
+    parser.add_argument(
+        "--rl-agents", dest="rl_agents", type=int, default=NUM_RL_AGENTS,
+        metavar="N", help="Number of RL agents (0 disables RL).",
+    )
+    parser.add_argument(
+        "--rl-backend", dest="rl_backend", choices=["tabular", "linear"],
+        default=RL.backend, help="Q backend for the RL agents.",
+    )
+    parser.add_argument(
+        "--rl-from-saved", dest="rl_from_saved", action="store_true",
+        help="Initialize RL agents from the train_rl baseline in policies/.",
+    )
+    parser.add_argument(
+        "--rl-policy", dest="rl_policy", metavar="PATH", default=None,
+        help="Explicit baseline policy path (overrides --rl-from-saved).",
+    )
+    parser.add_argument(
+        "--rl-freeze", dest="rl_freeze", action="store_true",
+        help="Run RL agents greedily with no online learning.",
     )
     return parser.parse_args(argv)
 
@@ -216,6 +310,7 @@ def archive_run(history: History, title: str | None) -> None:
         history,
         config={
             "num_agents": NUM_AGENTS,
+            "num_rl_agents": NUM_RL_AGENTS,
             "num_days": NUM_DAYS,
             "seed": 7,
         },
@@ -248,15 +343,25 @@ def prompt_and_archive(history: History) -> None:
 def main(argv=None):
     args = parse_args(argv)
 
+    rl_policy_path = args.rl_policy
+    if rl_policy_path is None and args.rl_from_saved:
+        rl_policy_path = default_policy_path(args.rl_backend)
+
     history = History()
-    env = build_simulation(history)
+    env = build_simulation(
+        history,
+        rl_agents=args.rl_agents,
+        rl_backend=args.rl_backend,
+        rl_policy_path=rl_policy_path,
+        rl_freeze=args.rl_freeze,
+    )
     for _ in range(NUM_DAYS):
         env.agentact()
         env.nextstep()
 
     print_summary(env, history)
     print_choice_breakdown(history)
-    save_outputs(history, show=args.show, open_charts=not args.no_open)
+    save_outputs(history, show=args.show, open_charts=args.open)
 
     if args.no_archive:
         print("\nNot archived to the gallery (--no-archive).")
