@@ -87,6 +87,12 @@
         <canvas id="actionChart"></canvas>
         <div id="actionRates" class="rates"></div>
       </div>
+      <div class="panel" id="panel-review"><h2>Review behavior</h2><canvas id="reviewChart"></canvas></div>
+      <div class="panel" id="panel-paperac"><h2>Per-paper accrued capital</h2><canvas id="paperAcChart"></canvas></div>
+      <div class="panel" id="panel-choices"><h2>Agent choices (write / review / finish)</h2><canvas id="choiceChart"></canvas></div>
+      <div class="panel" id="panel-effort-hist"><h2>Completed peer reviews by effort</h2><canvas id="effortHistChart"></canvas></div>
+      <div class="panel" id="panel-effort-scatter"><h2>Completed peer reviews over time</h2><canvas id="effortScatterChart"></canvas></div>
+      <div class="panel" id="panel-writing"><h2>Writing effort distribution</h2><canvas id="writingChart"></canvas></div>
     </div>
     <div class="panel feed">
       <h2>Action feed</h2>
@@ -125,6 +131,88 @@
     }
     const kindColor = (k, i) => ACTION_COLOR[k] || color(i % PALETTE.length);
 
+    // Top-level decisions: map raw action kinds to a decision (mirrors visualize.py).
+    const DECISION_LABELS = {
+      write_paper: "write_paper", review_started: "start_review",
+      review_continued: "continue_review", review_finished_write: "finish_and_write",
+      review_finished_peer_review: "finish_and_review", review_unavailable: "start_review",
+      idle: "idle",
+    };
+    const DECISION_ORDER = ["write_paper", "start_review", "continue_review",
+      "finish_and_write", "finish_and_review", "idle"];
+    const DECISION_COLOR = {
+      write_paper: "#60a5fa", start_review: "#4ade80", continue_review: "#22c55e",
+      finish_and_write: "#f59e0b", finish_and_review: "#a855f7", idle: "#6b7280",
+    };
+    // Reward threshold for review effort; used to draw a reference line. Runs that
+    // record it in their config override this fallback (Paper.py default is 10).
+    const DEFAULT_REVIEW_THRESHOLD = 10;
+
+    // Inline plugin: stroke one dashed reference line at chart.$threshold = {axis, value}.
+    const thresholdLine = {
+      id: "thresholdLine",
+      afterDraw(chart) {
+        const t = chart.$threshold;
+        if (!t) return;
+        const scale = chart.scales[t.axis];
+        if (!scale) return;
+        const p = scale.getPixelForValue(t.value);
+        const { ctx, chartArea: a } = chart;
+        ctx.save();
+        ctx.strokeStyle = "#dc2626"; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        if (t.axis === "x") { ctx.moveTo(p, a.top); ctx.lineTo(p, a.bottom); }
+        else { ctx.moveTo(a.left, p); ctx.lineTo(a.right, p); }
+        ctx.stroke();
+        ctx.restore();
+      },
+    };
+
+    // ---- pure helpers mirroring visualize.py -----------------------------
+    function choiceTallies(actions) {
+      const t = {};
+      for (const a of (actions || [])) {
+        const d = DECISION_LABELS[a.kind];
+        if (d) t[d] = (t[d] || 0) + 1;
+      }
+      return t;
+    }
+    // Bin completed reviews by integer effort -> [{x: effort, y: count}].
+    function effortHistogram(reviews) {
+      const counts = {};
+      for (const r of (reviews || [])) {
+        const e = Math.trunc(r.effort);
+        counts[e] = (counts[e] || 0) + 1;
+      }
+      return Object.keys(counts).map(Number).sort((a, b) => a - b)
+        .map(e => ({ x: e, y: counts[e] }));
+    }
+    // Total writing effort accumulated per agent -> list of totals.
+    function writingTotals(efforts) {
+      const totals = {};
+      for (const w of (efforts || [])) totals[w.agent] = (totals[w.agent] || 0) + w.effort;
+      return Object.values(totals);
+    }
+    // Equal-width histogram of `values` (<=20 bins) -> [{x: bin center, y: count}].
+    function histogramBins(values) {
+      if (!values.length) return [];
+      const min = Math.min(...values), max = Math.max(...values);
+      if (min === max) return [{ x: min, y: values.length }];
+      const n = Math.max(1, Math.min(20, values.length));
+      const width = (max - min) / n;
+      const bins = Array.from({ length: n }, (_, i) => ({ x: min + width * (i + 0.5), y: 0 }));
+      for (const v of values) {
+        let idx = Math.floor((v - min) / width);
+        if (idx >= n) idx = n - 1;
+        bins[idx].y++;
+      }
+      return bins;
+    }
+
+    const setPanel = (id, visible) => {
+      document.getElementById(id).style.display = visible ? "" : "none";
+    };
+
     const baseOpts = {
       animation: false, responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
@@ -135,6 +223,7 @@
     };
 
     let agentChart, aggChart, actionChart;
+    let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart;
     const statusEl = document.getElementById("status");
     const ratesEl = document.getElementById("actionRates");
     const feedEl = document.getElementById("feed");
@@ -248,6 +337,155 @@
       });
     }
 
+    // ---- new charts (mirroring visualize.py) -----------------------------
+    const legendOpts = { labels: { color: "#c4cdd5", boxWidth: 10 } };
+    const axisTitle = (text) => ({ display: true, text, color: "#8b98a5" });
+
+    // Cumulative completed reviews and paper count over time.
+    function setupReviewChart() {
+      if (reviewChart) reviewChart.destroy();
+      reviewChart = new Chart(document.getElementById("reviewChart"), {
+        type: "line",
+        data: { labels: [], datasets: [
+          { label: "completed_peer_reviews", data: [], borderColor: "#4ade80", borderWidth: 1.5, pointRadius: 0 },
+          { label: "num_papers", data: [], borderColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0 },
+        ]},
+        options: { ...baseOpts, plugins: { legend: legendOpts } },
+      });
+    }
+
+    // One thin line per paper: accrued capital over time (legend suppressed).
+    function setupPaperAcChart(labels) {
+      if (paperAcChart) paperAcChart.destroy();
+      paperAcChart = new Chart(document.getElementById("paperAcChart"), {
+        type: "line",
+        data: { labels: [], datasets: labels.map((name, i) => ({
+          label: name, data: [], borderColor: color(i) + "99", borderWidth: 0.7, pointRadius: 0,
+        }))},
+        options: { ...baseOpts, plugins: { legend: { display: false } } },
+      });
+    }
+
+    // Bar chart of top-level agent decisions.
+    function setupChoiceChart() {
+      if (choiceChart) choiceChart.destroy();
+      choiceChart = new Chart(document.getElementById("choiceChart"), {
+        type: "bar",
+        data: { labels: [], datasets: [{ label: "decisions", data: [], backgroundColor: [] }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, title: axisTitle("Decision count") } } },
+      });
+    }
+
+    // Histogram of completed reviews by integer effort, with reward-threshold line.
+    function setupEffortHistChart() {
+      if (effortHistChart) effortHistChart.destroy();
+      effortHistChart = new Chart(document.getElementById("effortHistChart"), {
+        type: "bar",
+        data: { datasets: [{ label: "completed reviews", data: [],
+          backgroundColor: "#60a5facc", borderColor: "#1e3a5f", borderWidth: 1 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", offset: false, title: axisTitle("Review effort") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Completed peer reviews") } } },
+        plugins: [thresholdLine],
+      });
+    }
+
+    // Scatter of each completed review (day vs effort), with reward-threshold line.
+    function setupEffortScatterChart() {
+      if (effortScatterChart) effortScatterChart.destroy();
+      effortScatterChart = new Chart(document.getElementById("effortScatterChart"), {
+        type: "scatter",
+        data: { datasets: [{ label: "reviews", data: [],
+          backgroundColor: "#a855f7aa", borderColor: "#4c1d95", pointRadius: 3 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Day") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Review effort") } } },
+        plugins: [thresholdLine],
+      });
+    }
+
+    // Histogram of total paper-writing effort accumulated per agent.
+    function setupWritingChart() {
+      if (writingChart) writingChart.destroy();
+      writingChart = new Chart(document.getElementById("writingChart"), {
+        type: "bar",
+        data: { datasets: [{ label: "agents", data: [],
+          backgroundColor: "#60a5facc", borderColor: "#1e3a5f", borderWidth: 1 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Total writing effort per agent") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Agents") } } },
+      });
+    }
+
+    // Draw the six new charts from a loaded run (static: not animated during replay).
+    function renderExtraCharts(data, threshold) {
+      const days = data.days || [];
+      const s = data.scalars || {};
+
+      // Review behavior
+      const hasReview = (s.completed_peer_reviews || []).length || (s.num_papers || []).length;
+      setPanel("panel-review", !!hasReview);
+      if (hasReview) {
+        setupReviewChart();
+        reviewChart.data.labels = days;
+        reviewChart.data.datasets[0].data = s.completed_peer_reviews || [];
+        reviewChart.data.datasets[1].data = s.num_papers || [];
+        reviewChart.update();
+      }
+
+      // Per-paper accrued capital
+      const paperAc = data.paper_ac || {};
+      const paperLabels = Object.keys(paperAc);
+      setPanel("panel-paperac", paperLabels.length > 0);
+      if (paperLabels.length) {
+        setupPaperAcChart(paperLabels);
+        paperAcChart.data.labels = days;
+        paperAcChart.data.datasets.forEach(ds => { ds.data = paperAc[ds.label] || []; });
+        paperAcChart.update();
+      }
+
+      // Agent choices
+      const tallies = choiceTallies(data.actions);
+      const choiceLabels = DECISION_ORDER.filter(d => tallies[d]);
+      setPanel("panel-choices", choiceLabels.length > 0);
+      if (choiceLabels.length) {
+        setupChoiceChart();
+        choiceChart.data.labels = choiceLabels.map(l => l.replace(/_/g, " "));
+        choiceChart.data.datasets[0].data = choiceLabels.map(l => tallies[l]);
+        choiceChart.data.datasets[0].backgroundColor = choiceLabels.map(l => DECISION_COLOR[l] || "#94a3b8");
+        choiceChart.update();
+      }
+
+      // Review effort histogram + scatter (only runs that recorded completed_reviews)
+      const reviews = data.completed_reviews || [];
+      setPanel("panel-effort-hist", reviews.length > 0);
+      setPanel("panel-effort-scatter", reviews.length > 0);
+      if (reviews.length) {
+        setupEffortHistChart();
+        effortHistChart.data.datasets[0].data = effortHistogram(reviews);
+        effortHistChart.$threshold = { axis: "x", value: threshold };
+        effortHistChart.update();
+
+        setupEffortScatterChart();
+        effortScatterChart.data.datasets[0].data = reviews.map(r => ({ x: r.day, y: r.effort }));
+        effortScatterChart.$threshold = { axis: "y", value: threshold };
+        effortScatterChart.update();
+      }
+
+      // Writing effort distribution (only runs that recorded writing_efforts)
+      const writing = writingTotals(data.writing_efforts);
+      setPanel("panel-writing", writing.length > 0);
+      if (writing.length) {
+        setupWritingChart();
+        writingChart.data.datasets[0].data = histogramBins(writing);
+        writingChart.update();
+      }
+    }
+
     const last = (arr) => (arr && arr.length ? arr[arr.length - 1] : 0);
     const at = (arr, i) => (arr && i < arr.length ? arr[i] : 0);
     const actionRow = (a) =>
@@ -264,7 +502,7 @@
     }
 
     // Instant render: draw the whole run at once (default when a run is selected).
-    function renderRun(data, title) {
+    function renderRun(data, title, config) {
       stopReplay();
       currentData = data;
       currentTitle = title;
@@ -302,6 +540,9 @@
       // Show the most recent actions (newest first), capped for performance.
       const actions = data.actions || [];
       feedEl.innerHTML = actions.slice(-FEED_LIMIT).reverse().map(actionRow).join("");
+
+      const threshold = (config && config.min_review_effort_threshold) || DEFAULT_REVIEW_THRESHOLD;
+      renderExtraCharts(data, threshold);
 
       setStatus(`${title} — ${days.length} days`, "done");
     }
@@ -407,13 +648,15 @@
     // Apply a new speed immediately if we're mid-playback (keeps current position).
     speedEl.addEventListener("change", () => { if (replayTimer) armTimer(); });
 
+    let runsById = {};  // id -> manifest entry, so loadRun can read each run's config
+
     async function loadRun(id, title) {
       stopReplay();
       setStatus(`loading ${title}…`);
       try {
         const res = await fetch(`data/${id}/history.json`, { cache: "no-cache" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        renderRun(await res.json(), title);
+        renderRun(await res.json(), title, (runsById[id] || {}).config);
       } catch (err) {
         setStatus(`couldn't load run (${err.message})`, "error");
       }
@@ -441,6 +684,8 @@
         setStatus("no runs yet — run the simulation to add one", "error");
         return;
       }
+
+      runsById = Object.fromEntries(runs.map(r => [r.id, r]));
 
       pickerEl.innerHTML = "";
       for (const run of runs) {

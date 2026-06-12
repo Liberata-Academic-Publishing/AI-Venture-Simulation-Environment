@@ -321,6 +321,7 @@ def archive_run(history: History, title: str | None) -> None:
             "num_rl_agents": NUM_RL_AGENTS,
             "num_days": NUM_DAYS,
             "seed": SIM.seed,
+            "min_review_effort_threshold": SIM.min_review_effort_threshold,
         },
         title=title,
     )
