@@ -298,12 +298,12 @@ def parse_args(argv=None):
         default=SIM.rl_backend, help="Q backend for the RL agents.",
     )
     parser.add_argument(
-        "--rl-from-saved", dest="rl_from_saved", action="store_true",
-        help="Initialize RL agents from the train_rl baseline in policies/.",
+        "--rl-from-scratch", dest="rl_from_scratch", action="store_true",
+        help="Start RL agents from a blank policy instead of the saved baseline.",
     )
     parser.add_argument(
         "--rl-policy", dest="rl_policy", metavar="PATH", default=None,
-        help="Explicit baseline policy path (overrides --rl-from-saved).",
+        help="Explicit baseline policy path (overrides the default baseline).",
     )
     parser.add_argument(
         "--rl-freeze", dest="rl_freeze", action="store_true",
@@ -378,7 +378,7 @@ def main(argv=None):
     args = parse_args(argv)
 
     rl_policy_path = args.rl_policy
-    if rl_policy_path is None and args.rl_from_saved:
+    if rl_policy_path is None and not args.rl_from_scratch:
         rl_policy_path = default_policy_path(args.rl_backend)
 
     history = History()
