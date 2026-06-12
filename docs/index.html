@@ -42,7 +42,18 @@
     .panel { background: #161d24; border: 1px solid #232b33; border-radius: 10px; padding: 14px; }
     .panel h2 { font-size: 13px; margin: 0 0 10px; color: #c4cdd5; font-weight: 600; }
     .charts { display: grid; gap: 16px; }
-    .feed { max-height: 78vh; overflow-y: auto; }
+    .side { display: grid; gap: 16px; align-content: start; }
+    .feed { max-height: 60vh; overflow-y: auto; }
+    #panel-config { max-height: 40vh; overflow-y: auto; }
+    .cfg-group { font-size: 11px; color: #8b98a5; text-transform: uppercase;
+      letter-spacing: .04em; margin: 12px 0 4px; }
+    .cfg-group:first-child { margin-top: 0; }
+    .cfg-row { display: flex; justify-content: space-between; gap: 12px;
+      font-size: 12px; padding: 3px 0; border-bottom: 1px solid #1f272f; }
+    .cfg-row .k { color: #8b98a5; }
+    .cfg-row .v { color: #e6e6e6; font-weight: 600; text-align: right;
+      font-variant-numeric: tabular-nums; }
+    #configList .empty { font-size: 12px; color: #6b7280; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #1f272f; }
     th { color: #8b98a5; font-weight: 500; position: sticky; top: 0; background: #161d24; }
@@ -94,12 +105,18 @@
       <div class="panel" id="panel-effort-scatter"><h2>Completed peer reviews over time</h2><canvas id="effortScatterChart"></canvas></div>
       <div class="panel" id="panel-writing"><h2>Writing effort distribution</h2><canvas id="writingChart"></canvas></div>
     </div>
-    <div class="panel feed">
-      <h2>Action feed</h2>
-      <table>
-        <thead><tr><th>Day</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
-        <tbody id="feed"></tbody>
-      </table>
+    <div class="side">
+      <div class="panel" id="panel-config">
+        <h2>Run configuration</h2>
+        <div id="configList"></div>
+      </div>
+      <div class="panel feed">
+        <h2>Action feed</h2>
+        <table>
+          <thead><tr><th>Day</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
+          <tbody id="feed"></tbody>
+        </table>
+      </div>
     </div>
   </main>
 
@@ -147,6 +164,66 @@
     // Reward threshold for review effort; used to draw a reference line. Runs that
     // record it in their config override this fallback (Paper.py default is 10).
     const DEFAULT_REVIEW_THRESHOLD = 10;
+
+    // Curated grouping + friendly labels for the SimConfig fields a run records,
+    // mirroring the sections in config.py. Keys not listed here still render,
+    // under "Other", so future config fields appear automatically.
+    const CONFIG_GROUPS = [
+      ["World", [
+        ["num_heuristic_agents", "Heuristic agents"],
+        ["num_rl_agents", "RL agents"],
+        ["num_days", "Days"],
+        ["seed", "Seed"],
+        ["forecast_horizon_days", "Forecast horizon (days)"],
+        ["output_dir", "Output dir"],
+      ]],
+      ["Initial papers", [
+        ["init_papers_per_agent", "Papers per agent"],
+        ["init_ac_min", "Initial AC min"],
+        ["init_ac_max", "Initial AC max"],
+        ["init_accrual_min", "Initial accrual min"],
+        ["init_accrual_max", "Initial accrual max"],
+      ]],
+      ["Paper economics", [
+        ["default_accrual_rate", "Accrual rate"],
+        ["default_review_share", "Review share"],
+        ["default_reviewer_ac_threshold", "Reviewer AC threshold"],
+        ["default_high_ac_review_share", "High-AC review share"],
+        ["default_max_reviewer_share", "Max reviewer share"],
+      ]],
+      ["Effort & reward", [
+        ["review_effort_per_day", "Review effort / day"],
+        ["min_review_effort_threshold", "Min review effort"],
+        ["base_review_accrual_bump", "Base accrual bump"],
+        ["first_extra_day_bump", "First extra-day bump"],
+      ]],
+      ["Publishing", [
+        ["paper_threshold", "Paper threshold"],
+      ]],
+      ["Heuristic forecasting", [
+        ["expected_write_progress", "Expected write progress"],
+        ["max_forecast_effort", "Max forecast effort"],
+        ["continue_marginal_weight", "Continue marginal weight"],
+        ["preferred_extra_review_days", "Preferred extra review days"],
+      ]],
+      ["RL agents", [
+        ["rl_backend", "Backend"],
+        ["rl_epsilon", "Epsilon"],
+        ["rl_gamma", "Gamma"],
+        ["talent_min", "Talent min"],
+        ["talent_max", "Talent max"],
+        ["policies_dir", "Policies dir"],
+      ]],
+    ];
+    // Keys we never surface (internal alias / redundant with the labeled fields).
+    const CONFIG_HIDDEN = new Set(["num_agents"]);
+
+    const prettyKey = (k) => k.replace(/_/g, " ");
+    function formatConfigValue(v) {
+      if (typeof v === "boolean") return v ? "yes" : "no";
+      if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(v);
+      return String(v);
+    }
 
     // Inline plugin: stroke one dashed reference line at chart.$threshold = {axis, value}.
     const thresholdLine = {
@@ -227,6 +304,7 @@
     const statusEl = document.getElementById("status");
     const ratesEl = document.getElementById("actionRates");
     const feedEl = document.getElementById("feed");
+    const configListEl = document.getElementById("configList");
     const pickerEl = document.getElementById("runPicker");
     const replayBtn = document.getElementById("replayBtn");
     const pauseBtn = document.getElementById("pauseBtn");
@@ -501,6 +579,39 @@
         Math.round(v(s.completed_peer_reviews));
     }
 
+    // Render a run's recorded simulation config as grouped key/value rows.
+    // Unknown keys (not in CONFIG_GROUPS) are collected under "Other" so any
+    // future config fields still show up without code changes.
+    function renderConfig(config) {
+      if (!config || typeof config !== "object" || !Object.keys(config).length) {
+        configListEl.innerHTML = '<div class="empty">No configuration recorded for this run.</div>';
+        return;
+      }
+
+      const seen = new Set(CONFIG_HIDDEN);
+      const row = (label, value) =>
+        `<div class="cfg-row"><span class="k">${label}</span>` +
+        `<span class="v">${formatConfigValue(value)}</span></div>`;
+
+      let html = "";
+      for (const [groupName, fields] of CONFIG_GROUPS) {
+        const rows = [];
+        for (const [key, label] of fields) {
+          if (key in config) { rows.push(row(label, config[key])); seen.add(key); }
+        }
+        if (rows.length) html += `<div class="cfg-group">${groupName}</div>${rows.join("")}`;
+      }
+
+      const extras = Object.keys(config).filter(k => !seen.has(k));
+      if (extras.length) {
+        html += `<div class="cfg-group">Other</div>` +
+          extras.map(k => row(prettyKey(k), config[k])).join("");
+      }
+
+      configListEl.innerHTML = html ||
+        '<div class="empty">No configuration recorded for this run.</div>';
+    }
+
     // Instant render: draw the whole run at once (default when a run is selected).
     function renderRun(data, title, config) {
       stopReplay();
@@ -543,6 +654,7 @@
 
       const threshold = (config && config.min_review_effort_threshold) || DEFAULT_REVIEW_THRESHOLD;
       renderExtraCharts(data, threshold);
+      renderConfig(config);
 
       setStatus(`${title} — ${days.length} days`, "done");
     }
@@ -665,7 +777,9 @@
     function describe(run) {
       const c = run.config || {};
       const parts = [];
-      if (c.num_agents != null) parts.push(`${c.num_agents} agents`);
+      const heuristic = c.num_heuristic_agents != null ? c.num_heuristic_agents : c.num_agents;
+      if (heuristic != null) parts.push(`${heuristic} heuristic`);
+      if (c.num_rl_agents != null) parts.push(`${c.num_rl_agents} RL`);
       if (run.num_days != null) parts.push(`${run.num_days}d`);
       return parts.length ? `${run.title} (${parts.join(", ")})` : run.title;
     }

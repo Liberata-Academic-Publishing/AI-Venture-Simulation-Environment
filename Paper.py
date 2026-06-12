@@ -16,7 +16,6 @@ MIN_REVIEW_EFFORT_THRESHOLD = SIM.min_review_effort_threshold
 REVIEW_EFFORT_PER_DAY = SIM.review_effort_per_day
 BASE_REVIEW_ACCRUAL_BUMP = SIM.base_review_accrual_bump
 FIRST_EXTRA_DAY_BUMP = SIM.first_extra_day_bump
-EXTRA_DAY_DECAY = SIM.extra_day_decay
 DEFAULT_REVIEWER_AC_THRESHOLD = SIM.default_reviewer_ac_threshold
 DEFAULT_HIGH_AC_REVIEW_SHARE = SIM.default_high_ac_review_share
 DEFAULT_MAX_REVIEWER_SHARE = SIM.default_max_reviewer_share
@@ -26,19 +25,16 @@ def review_accrual_bump(effort: float) -> float:
     """Total accrual-rate bump fraction for a review completed at ``effort``.
 
     Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` yields 0. At exactly 10 the
-    reviewer earns the base bump. Each day past 10 adds a positive marginal
-    bump; each marginal after day 11 is smaller than the previous day's.
+    reviewer earns the base bump. Past 10 the bump grows logarithmically in the
+    extra effort, so each day past 10 still adds a positive marginal bump but
+    each marginal is smaller than the previous day's. Base-2 anchors the first
+    extra day to add exactly ``FIRST_EXTRA_DAY_BUMP``.
     """
     if effort < MIN_REVIEW_EFFORT_THRESHOLD:
         return 0.0
 
-    bump = BASE_REVIEW_ACCRUAL_BUMP
-    marginal = FIRST_EXTRA_DAY_BUMP
-    extra_days = int(effort - MIN_REVIEW_EFFORT_THRESHOLD)
-    for _ in range(extra_days):
-        bump += marginal
-        marginal *= EXTRA_DAY_DECAY
-    return bump
+    extra_days = effort - MIN_REVIEW_EFFORT_THRESHOLD
+    return BASE_REVIEW_ACCRUAL_BUMP + FIRST_EXTRA_DAY_BUMP * math.log2(1 + extra_days)
 
 
 class Paper:

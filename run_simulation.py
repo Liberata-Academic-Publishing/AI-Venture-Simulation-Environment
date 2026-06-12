@@ -5,6 +5,7 @@ import os
 import random
 import sys
 from collections import Counter
+from dataclasses import asdict
 
 from Agent import Agent
 from config import SIM, default_policy_path
@@ -311,18 +312,37 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def archive_run(history: History, title: str | None) -> None:
+def build_run_config(
+    *,
+    rl_agents: int = NUM_RL_AGENTS,
+    rl_backend: str = SIM.rl_backend,
+) -> dict:
+    """Full SimConfig snapshot for this run, with runtime overrides applied.
+
+    Dumps every SimConfig field so the gallery can display the complete set of
+    simulation variables, then patches in the values that CLI flags may have
+    changed for this run. ``num_agents`` is kept as an alias of
+    ``num_heuristic_agents`` for backward compatibility with older gallery data.
+    """
+    config = asdict(SIM)
+    config["num_rl_agents"] = rl_agents
+    config["rl_backend"] = rl_backend
+    config["num_agents"] = config["num_heuristic_agents"]
+    return config
+
+
+def archive_run(
+    history: History,
+    title: str | None,
+    *,
+    rl_agents: int = NUM_RL_AGENTS,
+    rl_backend: str = SIM.rl_backend,
+) -> None:
     from export_run import export_run
 
     run_id = export_run(
         history,
-        config={
-            "num_agents": NUM_AGENTS,
-            "num_rl_agents": NUM_RL_AGENTS,
-            "num_days": NUM_DAYS,
-            "seed": SIM.seed,
-            "min_review_effort_threshold": SIM.min_review_effort_threshold,
-        },
+        config=build_run_config(rl_agents=rl_agents, rl_backend=rl_backend),
         title=title,
     )
     print(f"\nArchived run to docs/data/{run_id}/ (visible in the gallery).")
@@ -330,7 +350,12 @@ def archive_run(history: History, title: str | None) -> None:
           "git add docs/data && git commit -m 'Add run' && git push")
 
 
-def prompt_and_archive(history: History) -> None:
+def prompt_and_archive(
+    history: History,
+    *,
+    rl_agents: int = NUM_RL_AGENTS,
+    rl_backend: str = SIM.rl_backend,
+) -> None:
     """Ask whether to save this run and, if so, what to title it."""
     try:
         answer = input("\nSave this run to the gallery? [y/N]: ").strip().lower()
@@ -346,7 +371,7 @@ def prompt_and_archive(history: History) -> None:
         name = input("Name this run (leave blank for an auto name): ").strip()
     except EOFError:
         name = ""
-    archive_run(history, name or None)
+    archive_run(history, name or None, rl_agents=rl_agents, rl_backend=rl_backend)
 
 
 def main(argv=None):
@@ -375,9 +400,11 @@ def main(argv=None):
     if args.no_archive:
         print("\nNot archived to the gallery (--no-archive).")
     elif args.name is not None:
-        archive_run(history, args.name)
+        archive_run(history, args.name,
+                    rl_agents=args.rl_agents, rl_backend=args.rl_backend)
     else:
-        prompt_and_archive(history)
+        prompt_and_archive(history,
+                           rl_agents=args.rl_agents, rl_backend=args.rl_backend)
 
 
 if __name__ == "__main__":

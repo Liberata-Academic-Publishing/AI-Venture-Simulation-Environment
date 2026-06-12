@@ -54,7 +54,6 @@ class SimConfig:
     min_review_effort_threshold: float = 10.0   # reward cliff: below this earns 0
     base_review_accrual_bump: float = 0.20      # rate bump at exactly the threshold
     first_extra_day_bump: float = 0.10          # added by the first day past threshold
-    extra_day_decay: float = 0.85               # decay of each extra day's marginal bump
 
     # --- Publishing ------------------------------------------------------
     paper_threshold: float = 10.0   # writing effort needed to publish a paper
