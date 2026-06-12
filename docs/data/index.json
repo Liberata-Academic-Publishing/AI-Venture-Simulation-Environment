@@ -1,5 +1,41 @@
 [
   {
+    "id": "2026-06-12_103218",
+    "title": "Only RL agents",
+    "created": "2026-06-12T10:32:19",
+    "num_days": 1000,
+    "config": {
+      "num_agents": 0,
+      "num_rl_agents": 20,
+      "num_days": 1000,
+      "seed": 7
+    },
+    "summary": {
+      "total_capital": 375698.9624,
+      "mean_capital": 18784.9481,
+      "capital_gini": 0.1905,
+      "num_papers": 322.0
+    }
+  },
+  {
+    "id": "2026-06-12_100621",
+    "title": "Simulation starting with 0 papers",
+    "created": "2026-06-12T10:06:22",
+    "num_days": 1000,
+    "config": {
+      "num_agents": 20,
+      "num_rl_agents": 5,
+      "num_days": 1000,
+      "seed": 7
+    },
+    "summary": {
+      "total_capital": 330575.8439,
+      "mean_capital": 13223.0338,
+      "capital_gini": 0.4249,
+      "num_papers": 98.0
+    }
+  },
+  {
     "id": "2026-06-12_095341",
     "title": "RL and Heuristic",
     "created": "2026-06-12T09:53:42",

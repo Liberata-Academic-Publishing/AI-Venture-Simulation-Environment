@@ -6,16 +6,20 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from Agent import Agent
 
-DEFAULT_ACCRUAL_RATE = 1.0
-DEFAULT_REVIEW_SHARE = 0.01
-MIN_REVIEW_EFFORT_THRESHOLD = 10.0
-REVIEW_EFFORT_PER_DAY = 1.0
-BASE_REVIEW_ACCRUAL_BUMP = 0.20
-FIRST_EXTRA_DAY_BUMP = 0.10
-EXTRA_DAY_DECAY = 0.85
-DEFAULT_REVIEWER_AC_THRESHOLD = 10.0
-DEFAULT_HIGH_AC_REVIEW_SHARE = 0.02
-DEFAULT_MAX_REVIEWER_SHARE = 0.25
+from config import SIM
+
+# Bound from SIM (config.py is the single source of truth); names kept for the
+# many internal references and default-argument signatures below.
+DEFAULT_ACCRUAL_RATE = SIM.default_accrual_rate
+DEFAULT_REVIEW_SHARE = SIM.default_review_share
+MIN_REVIEW_EFFORT_THRESHOLD = SIM.min_review_effort_threshold
+REVIEW_EFFORT_PER_DAY = SIM.review_effort_per_day
+BASE_REVIEW_ACCRUAL_BUMP = SIM.base_review_accrual_bump
+FIRST_EXTRA_DAY_BUMP = SIM.first_extra_day_bump
+EXTRA_DAY_DECAY = SIM.extra_day_decay
+DEFAULT_REVIEWER_AC_THRESHOLD = SIM.default_reviewer_ac_threshold
+DEFAULT_HIGH_AC_REVIEW_SHARE = SIM.default_high_ac_review_share
+DEFAULT_MAX_REVIEWER_SHARE = SIM.default_max_reviewer_share
 
 
 def review_accrual_bump(effort: float) -> float:

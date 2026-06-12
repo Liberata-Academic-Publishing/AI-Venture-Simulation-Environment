@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from Agent import Agent, EXPECTED_REVIEW_EFFORT_PER_TURN, PAPER_THRESHOLD
+from config import SIM
 from Paper import (
     DEFAULT_ACCRUAL_RATE,
     DEFAULT_REVIEW_SHARE,
@@ -9,10 +10,10 @@ from Paper import (
     review_accrual_bump,
 )
 
-EXPECTED_WRITE_PROGRESS = 0.5
-MAX_FORECAST_EFFORT = 25
-CONTINUE_MARGINAL_WEIGHT = 0.15
-PREFERRED_EXTRA_REVIEW_DAYS = 4.0
+EXPECTED_WRITE_PROGRESS = SIM.expected_write_progress
+MAX_FORECAST_EFFORT = SIM.max_forecast_effort
+CONTINUE_MARGINAL_WEIGHT = SIM.continue_marginal_weight
+PREFERRED_EXTRA_REVIEW_DAYS = SIM.preferred_extra_review_days
 
 
 class HeuristicAgent(Agent):

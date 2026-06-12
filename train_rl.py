@@ -21,7 +21,7 @@ import os
 import random
 
 from Agent import Agent
-from config import RL, SIM, TRAIN, default_policy_path
+from config import SIM, TRAIN, default_policy_path
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from Paper import Paper
@@ -29,14 +29,20 @@ from QLearningAgent import QLearningAgent, make_backend
 
 
 def seed_initial_papers(agents: list[Agent], rng: random.Random) -> None:
-    for index, agent in enumerate(agents, start=1):
-        paper = Paper(
-            author=agent,
-            current_ac=rng.uniform(5.0, 20.0),
-            accrual_rate=rng.uniform(0.8, 1.5),
-        )
-        paper.title = f"Paper {index}"
-        Agent.all_papers.append(paper)
+    """Seed starting papers per SimConfig (count + AC/accrual ranges)."""
+    index = 0
+    for agent in agents:
+        for _ in range(SIM.init_papers_per_agent):
+            index += 1
+            paper = Paper(
+                author=agent,
+                current_ac=rng.uniform(SIM.init_ac_min, SIM.init_ac_max),
+                accrual_rate=rng.uniform(
+                    SIM.init_accrual_min, SIM.init_accrual_max
+                ),
+            )
+            paper.title = f"Paper {index}"
+            Agent.all_papers.append(paper)
 
 
 def build_env(
@@ -149,7 +155,7 @@ def parse_args(argv=None):
         description="Train the Liberata Q-learning agent."
     )
     p.add_argument("--backend", choices=["tabular", "linear"],
-                   default=RL.backend)
+                   default=SIM.rl_backend)
     p.add_argument("--episodes", type=int, default=TRAIN.episodes)
     p.add_argument("--days", type=int, default=TRAIN.days)
     p.add_argument("--num-rl", dest="num_rl", type=int, default=TRAIN.num_rl)
@@ -158,7 +164,7 @@ def parse_args(argv=None):
     p.add_argument("--horizon", type=int, default=SIM.forecast_horizon_days)
     p.add_argument("--alpha", type=float, default=None,
                    help="learning rate (defaults: 0.1 tabular / 0.01 linear)")
-    p.add_argument("--gamma", type=float, default=RL.gamma)
+    p.add_argument("--gamma", type=float, default=SIM.rl_gamma)
     p.add_argument("--eps-start", dest="eps_start", type=float,
                    default=TRAIN.eps_start)
     p.add_argument("--eps-end", dest="eps_end", type=float,

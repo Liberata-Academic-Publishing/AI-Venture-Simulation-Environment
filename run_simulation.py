@@ -7,7 +7,7 @@ import sys
 from collections import Counter
 
 from Agent import Agent
-from config import RL, SIM, default_policy_path
+from config import SIM, default_policy_path
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History
@@ -15,18 +15,18 @@ from Paper import Paper
 from QLearningAgent import QLearningAgent, make_backend
 
 # Defaults come from config.py; CLI flags override them at runtime.
-NUM_AGENTS = SIM.num_agents
+NUM_AGENTS = SIM.num_heuristic_agents
 NUM_DAYS = SIM.num_days
-NUM_RL_AGENTS = RL.num_agents
+NUM_RL_AGENTS = SIM.num_rl_agents
 OUTPUT_DIR = SIM.output_dir
 
 
 def _talent_for(index: int, count: int) -> float:
     """Spread talents across RL agents (inert until the sim uses talent)."""
     if count <= 1:
-        return RL.talent_min
+        return SIM.talent_min
     frac = index / (count - 1)
-    return RL.talent_min + frac * (RL.talent_max - RL.talent_min)
+    return SIM.talent_min + frac * (SIM.talent_max - SIM.talent_min)
 
 
 # Map raw action kinds to the decision an agent actively made on its turn.
@@ -43,14 +43,20 @@ DECISION_LABELS = {
 
 
 def seed_initial_papers(agents: list[Agent]):
-    for index, agent in enumerate(agents, start=1):
-        paper = Paper(
-            author=agent,
-            current_ac=random.uniform(5.0, 20.0),
-            accrual_rate=random.uniform(0.8, 1.5),
-        )
-        paper.title = f"Paper {index}"
-        Agent.all_papers.append(paper)
+    """Seed starting papers per SimConfig (count + AC/accrual ranges)."""
+    index = 0
+    for agent in agents:
+        for _ in range(SIM.init_papers_per_agent):
+            index += 1
+            paper = Paper(
+                author=agent,
+                current_ac=random.uniform(SIM.init_ac_min, SIM.init_ac_max),
+                accrual_rate=random.uniform(
+                    SIM.init_accrual_min, SIM.init_accrual_max
+                ),
+            )
+            paper.title = f"Paper {index}"
+            Agent.all_papers.append(paper)
 
 
 def print_summary(env: Environment, history: History):
@@ -202,10 +208,10 @@ def build_rl_agents(
         agents.append(
             QLearningAgent(
                 intrinsic_talent=_talent_for(i, count),
-                forecast_horizon_days=30,
+                forecast_horizon_days=SIM.forecast_horizon_days,
                 name=f"RL Agent {i + 1}",
                 backend=backend,
-                epsilon=0.0 if freeze else RL.epsilon,
+                epsilon=0.0 if freeze else SIM.rl_epsilon,
                 learning=not freeze,
             )
         )
@@ -224,7 +230,7 @@ def build_simulation(
     num_agents: int = NUM_AGENTS,
     seed: int = SIM.seed,
     rl_agents: int = NUM_RL_AGENTS,
-    rl_backend: str = RL.backend,
+    rl_backend: str = SIM.rl_backend,
     rl_policy_path: str | None = None,
     rl_freeze: bool = False,
 ) -> Environment:
@@ -233,7 +239,9 @@ def build_simulation(
     Agent.all_papers = []
 
     agents: list[Agent] = [
-        HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=30, name=f"Agent {i}")
+        HeuristicAgent(intrinsic_talent=1.0,
+                       forecast_horizon_days=SIM.forecast_horizon_days,
+                       name=f"Agent {i}")
         for i in range(1, num_agents + 1)
     ]
     agents.extend(
@@ -250,7 +258,7 @@ def build_simulation(
     return Environment(
         agents=agents,
         papers=Agent.all_papers,
-        forecast_horizon_days=30,
+        forecast_horizon_days=SIM.forecast_horizon_days,
         history=history,
     )
 
@@ -286,7 +294,7 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--rl-backend", dest="rl_backend", choices=["tabular", "linear"],
-        default=RL.backend, help="Q backend for the RL agents.",
+        default=SIM.rl_backend, help="Q backend for the RL agents.",
     )
     parser.add_argument(
         "--rl-from-saved", dest="rl_from_saved", action="store_true",
@@ -312,7 +320,7 @@ def archive_run(history: History, title: str | None) -> None:
             "num_agents": NUM_AGENTS,
             "num_rl_agents": NUM_RL_AGENTS,
             "num_days": NUM_DAYS,
-            "seed": 7,
+            "seed": SIM.seed,
         },
         title=title,
     )

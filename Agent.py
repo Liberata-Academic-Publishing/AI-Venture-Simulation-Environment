@@ -4,13 +4,14 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from config import SIM
 from Paper import (
     MIN_REVIEW_EFFORT_THRESHOLD,
     REVIEW_EFFORT_PER_DAY,
     Paper,
 )
 
-PAPER_THRESHOLD = 10.0
+PAPER_THRESHOLD = SIM.paper_threshold
 EXPECTED_REVIEW_EFFORT_PER_TURN = REVIEW_EFFORT_PER_DAY
 
 
