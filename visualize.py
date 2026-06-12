@@ -12,6 +12,8 @@ import os
 from collections import Counter
 from typing import TYPE_CHECKING
 
+from Paper import MIN_REVIEW_EFFORT_THRESHOLD
+
 if TYPE_CHECKING:
     from History import History
 
@@ -30,7 +32,6 @@ ACTION_COLORS = {
     "write_paper": "#60a5fa",
     "review_started": "#4ade80",
     "review_continued": "#22c55e",
-    "review_auto_continued": "#15803d",
     "review_finished_write": "#f59e0b",
     "review_finished_peer_review": "#a855f7",
     "review_stopped": "#16a34a",
@@ -220,9 +221,17 @@ def _draw_effort_histogram(ax, history: "History") -> None:
         ax.set_axis_off()
         return
     ax.bar(efforts, values, width=0.9, color="#60a5fa", edgecolor="#1e3a5f")
+    ax.axvline(
+        MIN_REVIEW_EFFORT_THRESHOLD,
+        color="#dc2626",
+        linestyle="--",
+        linewidth=1,
+        label="reward threshold",
+    )
     ax.set_xlabel("Review effort")
     ax.set_ylabel("Completed peer reviews")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins="auto"))
+    ax.legend(fontsize=8)
 
 
 def _draw_effort_scatter(ax, history: "History") -> None:
@@ -233,8 +242,16 @@ def _draw_effort_scatter(ax, history: "History") -> None:
         return
     days, efforts = zip(*points)
     ax.scatter(days, efforts, alpha=0.65, s=28, color="#a855f7", edgecolors="#4c1d95")
+    ax.axhline(
+        MIN_REVIEW_EFFORT_THRESHOLD,
+        color="#dc2626",
+        linestyle="--",
+        linewidth=1,
+        label="reward threshold",
+    )
     ax.set_xlabel("Day")
     ax.set_ylabel("Review effort")
+    ax.legend(fontsize=8)
 
 
 def plot_review_effort_histogram(

@@ -6,9 +6,10 @@ action space stays tiny and fixed instead of growing with the paper pool).
 
 Action interface (matches Agent.available_actions)
 --------------------------------------------------
-``choose_action()`` is called only when the agent is free or is offered the
-review-fate choice (``should_offer_review_choice()``); the environment
-auto-continues locked, sub-threshold reviews, so those turns never reach here.
+``choose_action()`` runs every turn: when the agent is free, and on *every* day
+of an active review (``should_offer_review_choice()`` is true the whole time).
+There is no forced auto-continue, so the agent observes the continue-vs-stop
+decision at each effort level -- the optimal-stopping signal it must learn.
 
 * free (no active review)  -> ``("write_paper", None)``
                               or ``("peer_review", paper)`` to start a review

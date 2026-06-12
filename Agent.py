@@ -49,7 +49,6 @@ class Agent(ABC):
         self.active_review_effort = 0.0
         self.last_review_effort: float | None = None
         self.last_review_kind: str | None = None
-        self._review_choice_pending = False
 
     @abstractmethod
     def choose_action(self) -> tuple[str, Paper | None]:
@@ -63,23 +62,15 @@ class Agent(ABC):
           - ``"finish_review_peer_review"`` — finalize the active review, then
             start reviewing ``paper`` the same day.
 
-        Locked agents (effort below the minimum threshold) are not called; the
-        environment auto-continues their review via ``auto_continue_review``.
+        Whenever a review is active the agent is offered the continue / finish
+        choice every turn (see ``should_offer_review_choice``); it may stop at
+        any effort level. The minimum-effort reward cliff is not enforced here —
+        agents are free to stop early and simply forfeit the review's value.
         """
-
-    def is_locked_in_review(self) -> bool:
-        """True when the agent is mid-review and not yet eligible to choose."""
-        return (
-            self.active_review_paper is not None
-            and not self._review_choice_pending
-        )
 
     def should_offer_review_choice(self) -> bool:
         """True when the agent may choose continue / finish+write / finish+review."""
-        return (
-            self.active_review_paper is not None
-            and self._review_choice_pending
-        )
+        return self.active_review_paper is not None
 
     def available_actions(self) -> tuple[str, ...]:
         if self.should_offer_review_choice():
@@ -90,36 +81,13 @@ class Agent(ABC):
             )
         return ("write_paper", "peer_review")
 
-    def auto_continue_review(self) -> ActionRecord:
-        """Advance a locked in-progress review by one day of effort."""
-        paper = self.active_review_paper
-        if paper is None:
-            return ActionRecord("idle")
-
-        self.active_review_effort += self.review_effort_delta()
-        self.review_progress = self.active_review_effort
-        if self.active_review_effort >= MIN_REVIEW_EFFORT_THRESHOLD:
-            self._review_choice_pending = True
-
-        return ActionRecord(
-            "review_auto_continued",
-            paper,
-            review_effort=self.active_review_effort,
-        )
-
     def act(self) -> ActionRecord:
         """Called by the environment when the agent may choose an action."""
         self._clear_last_review_result()
         action, paper = self.choose_action()
 
         if action == "peer_review":
-            record = self._peer_review_turn(paper)
-            if (
-                record.kind == "review_continued"
-                and self.active_review_effort >= MIN_REVIEW_EFFORT_THRESHOLD
-            ):
-                self._review_choice_pending = True
-            return record
+            return self._peer_review_turn(paper)
         if action == "finish_review_write_paper":
             return self._finish_review_and_write()
         if action == "finish_review_peer_review":
@@ -169,7 +137,6 @@ class Agent(ABC):
         self.active_review_paper = paper
         self.active_review_effort = self.review_effort_delta()
         self.review_progress = self.active_review_effort
-        self._review_choice_pending = False
         return ActionRecord(
             "review_started",
             paper,
@@ -212,7 +179,6 @@ class Agent(ABC):
         self.active_review_paper = paper
         self.active_review_effort = self.review_effort_delta()
         self.review_progress = self.active_review_effort
-        self._review_choice_pending = False
         return ActionRecord(
             "review_finished_peer_review",
             finished.paper,
@@ -233,7 +199,6 @@ class Agent(ABC):
         self.active_review_paper = None
         self.active_review_effort = 0.0
         self.review_progress = 0.0
-        self._review_choice_pending = False
 
         return ActionRecord(
             "review_stopped",

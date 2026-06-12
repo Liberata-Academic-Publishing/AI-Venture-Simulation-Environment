@@ -81,9 +81,17 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(reviewer.academic_capital, 3.0)
 
     def _advance_to_review_choice(self, reviewer: DummyAgent) -> None:
-        """Auto-continue until effort reaches the minimum threshold."""
-        while reviewer.is_locked_in_review():
-            reviewer.auto_continue_review()
+        """Keep choosing 'continue' until effort reaches the reward threshold.
+
+        The forced lock is gone, so the agent is offered the choice from day 1;
+        this helper just drives the review up to the cliff for tests that assert
+        behavior at exactly the threshold.
+        """
+        while reviewer.active_review_effort < MIN_REVIEW_EFFORT_THRESHOLD:
+            reviewer.actions.insert(
+                0, ("peer_review", reviewer.active_review_paper)
+            )
+            reviewer.act()
         self.assertTrue(reviewer.should_offer_review_choice())
         self.assertEqual(reviewer.active_review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
 
@@ -129,37 +137,38 @@ class SimulationTest(unittest.TestCase):
         self.assertIs(paper.review_in_progress_by, first)
         self.assertFalse(paper.review_available)
 
-    def test_locked_agent_auto_continues_via_environment(self):
+    def test_environment_calls_act_each_review_day(self):
         author = DummyAgent("author")
         paper = Paper(author=author)
-        reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
+        reviewer = DummyAgent(
+            "reviewer",
+            actions=[("peer_review", paper), ("peer_review", paper)],
+        )
         history = History()
         env = Environment(agents=[reviewer], history=history)
 
-        reviewer.act()
-        self.assertTrue(reviewer.is_locked_in_review())
         env.agentact()
+        self.assertEqual(reviewer.active_review_effort, 1.0)
+        self.assertEqual(history.actions[-1][2], "review_started")
 
+        # No auto-continue: the agent itself chooses to continue each day.
+        env.agentact()
         self.assertEqual(reviewer.active_review_effort, 2.0)
-        self.assertEqual(history.actions[-1][2], "review_auto_continued")
+        self.assertEqual(history.actions[-1][2], "review_continued")
 
-    def test_choice_offered_day_after_threshold(self):
+    def test_choice_offered_from_first_review_day(self):
         author = DummyAgent("author")
         paper = Paper(author=author)
         reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
 
         reviewer.act()
         self.assertEqual(reviewer.active_review_effort, 1.0)
-        for expected in range(2, int(MIN_REVIEW_EFFORT_THRESHOLD)):
-            self.assertTrue(reviewer.is_locked_in_review())
-            reviewer.auto_continue_review()
-            self.assertEqual(reviewer.active_review_effort, float(expected))
-
-        self.assertTrue(reviewer.is_locked_in_review())
-        reviewer.auto_continue_review()
-        self.assertEqual(reviewer.active_review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
-        self.assertFalse(reviewer.is_locked_in_review())
+        # The lock is gone, so the continue/finish choice is available from the
+        # first review day -- the agent may stop well below the reward cliff.
         self.assertTrue(reviewer.should_offer_review_choice())
+        self.assertIn(
+            "finish_review_write_paper", reviewer.available_actions()
+        )
 
     def test_minimum_effort_review_completes(self):
         author = DummyAgent("author")
@@ -318,7 +327,6 @@ class SimulationTest(unittest.TestCase):
         continued = reviewer.act()
         self.assertEqual(continued.kind, "review_continued")
 
-        reviewer._review_choice_pending = True
         finished = reviewer.act()
         self.assertEqual(finished.kind, "review_finished_write")
         self.assertEqual(finished.writing_effort, 0.5)

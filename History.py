@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from Agent import ActionRecord
     from Environment import Environment
 
-from Paper import MIN_REVIEW_EFFORT_THRESHOLD
-
 MetricFn = Callable[["Environment"], float]
 
 COMPLETED_REVIEW_KINDS = frozenset({
@@ -88,7 +86,6 @@ class History:
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
-        self.review_efforts: list[tuple[int, str, str | None, float, str | None]] = []
         self.completed_reviews: list[tuple[int, str, str | None, float]] = []
         self.writing_efforts: list[tuple[int, str, float, bool]] = []
         self.action_counts: Counter[str] = Counter()
@@ -130,22 +127,16 @@ class History:
         )
         self.actions.append((day, agent_label, record.kind, paper_label))
         self.action_counts[record.kind] += 1
-        if record.review_effort is not None and record.review_kind is not None:
-            self.review_efforts.append(
-                (
-                    day,
-                    agent_label,
-                    paper_label,
-                    float(record.review_effort),
-                    record.review_kind,
-                )
-            )
         if (
             record.review_effort is not None
             and record.kind in COMPLETED_REVIEW_KINDS
         ):
             effort = float(record.review_effort)
-            if effort >= MIN_REVIEW_EFFORT_THRESHOLD:
+            # Record every finished review, including early stops below the
+            # reward threshold, so the effort distribution shows where agents
+            # actually choose to stop. The reward cliff (sub-threshold reviews
+            # earn nothing) lives in Paper, not in this recording gate.
+            if effort > 0:
                 self.completed_reviews.append(
                     (day, agent_label, paper_label, effort)
                 )
@@ -215,16 +206,6 @@ class History:
             "actions": [
                 {"day": d, "agent": a, "kind": k, "paper": p}
                 for (d, a, k, p) in self.actions
-            ],
-            "review_efforts": [
-                {
-                    "day": d,
-                    "agent": a,
-                    "paper": p,
-                    "effort": e,
-                    "kind": k,
-                }
-                for (d, a, p, e, k) in self.review_efforts
             ],
             "completed_reviews": [
                 {"day": d, "agent": a, "paper": p, "effort": e}

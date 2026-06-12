@@ -110,7 +110,12 @@ class HeuristicAgent(Agent):
         """Forecast value of spending one more day, then finishing at higher effort."""
         current = self.active_review_effort
         if current < MIN_REVIEW_EFFORT_THRESHOLD:
-            return 0.0
+            # Below the reward cliff finishing now is worthless, so value
+            # continuing as the forecast payoff of pushing on to the threshold.
+            days_to_threshold = MIN_REVIEW_EFFORT_THRESHOLD - current
+            return self._score_review_outcome(
+                paper, MIN_REVIEW_EFFORT_THRESHOLD, delay_days=days_to_threshold
+            )
         if current >= MAX_FORECAST_EFFORT:
             return 0.0
 

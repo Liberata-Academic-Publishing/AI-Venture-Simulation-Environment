@@ -19,7 +19,7 @@ class SimConfig:
     """Defaults for a single simulation run (run_simulation.py)."""
 
     num_agents: int = 20            # heuristic agents
-    num_days: int = 200
+    num_days: int = 1000
     seed: int = 7
     forecast_horizon_days: int = 30
     output_dir: str = "runs"

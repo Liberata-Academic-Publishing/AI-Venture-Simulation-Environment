@@ -1,5 +1,23 @@
 [
   {
+    "id": "2026-06-12_095341",
+    "title": "RL and Heuristic",
+    "created": "2026-06-12T09:53:42",
+    "num_days": 1000,
+    "config": {
+      "num_agents": 20,
+      "num_rl_agents": 5,
+      "num_days": 1000,
+      "seed": 7
+    },
+    "summary": {
+      "total_capital": 296858.0914,
+      "mean_capital": 11874.3237,
+      "capital_gini": 0.3943,
+      "num_papers": 106.0
+    }
+  },
+  {
     "id": "2026-06-06_232634",
     "title": "first continuous updated sim",
     "created": "2026-06-06T23:26:34",
