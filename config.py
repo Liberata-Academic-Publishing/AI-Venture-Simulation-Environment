@@ -25,15 +25,15 @@ class SimConfig:
     """Every parameter that defines a single simulation run."""
 
     # --- World -----------------------------------------------------------
-    num_heuristic_agents: int = 0
-    num_rl_agents: int = 20
-    num_days: int = 1000
+    num_heuristic_agents: int = 20
+    num_rl_agents: int = 0
+    num_timesteps: int = 1000
     seed: int = 7
-    forecast_horizon_days: int = 30
+    forecast_horizon_timesteps: int = 30
     output_dir: str = "runs"
 
     # --- Initial papers --------------------------------------------------
-    # Papers seeded before day 1 (bootstraps review material). Set
+    # Papers seeded before timestep 1 (bootstraps review material). Set
     # init_papers_per_agent=0 for no starting papers, or init_ac_min=init_ac_max=0
     # to start every agent at zero capital.
     init_papers_per_agent: int = 0
@@ -43,17 +43,26 @@ class SimConfig:
     init_accrual_max: float = 1.5
 
     # --- Paper economics -------------------------------------------------
-    default_accrual_rate: float = 1.0       # AC gained per day, before bumps
-    default_review_share: float = 0.01      # base ownership share a review grants
-    default_reviewer_ac_threshold: float = 10.0   # reviewer AC for the high share
-    default_high_ac_review_share: float = 0.02     # share for high-AC reviewers
-    default_max_reviewer_share: float = 0.25       # cap on total reviewer share
+    default_accrual_rate: float = 1.0       # base AC gained per timestep, before bumps
+    default_review_share: float = 0.05      # base ownership share a review offer grants
+    default_max_reviewer_share: float = 0.25       # cap on a single review's share
+    min_offer_share: float = 0.005          # floor on a non-zero review offer
+
+    # --- Paper quality ---------------------------------------------------
+    # Each paper's quality is drawn from N(author talent, quality_sigma) and is
+    # known to the author before they start writing it. Quality scales the
+    # paper's base accrual rate and the accrual bump a review can earn, and it
+    # drives the per-reviewer share the author is willing to offer.
+    quality_sigma: float = 0.20
+    min_paper_quality: float = 0.10
+    quality_price_scale: float = 1.0    # higher quality -> smaller offered share
+    history_price_scale: float = 0.5    # better reviewer history -> larger offered share
 
     # --- Effort & reward model -------------------------------------------
-    review_effort_per_day: float = 1.0          # effort added per review day
-    min_review_effort_threshold: float = 10.0   # reward cliff: below this earns 0
+    review_effort_per_timestep: float = 1.0     # effort added per review timestep
+    min_review_effort_threshold: float = 1.0    # reward cliff: below this earns 0
     base_review_accrual_bump: float = 0.20      # rate bump at exactly the threshold
-    first_extra_day_bump: float = 0.10          # added by the first day past threshold
+    first_extra_day_bump: float = 0.10          # added by the first timestep past threshold
 
     # --- Publishing ------------------------------------------------------
     paper_threshold: float = 10.0   # writing effort needed to publish a paper
@@ -62,7 +71,7 @@ class SimConfig:
     expected_write_progress: float = 0.5
     max_forecast_effort: int = 25
     continue_marginal_weight: float = 0.15
-    preferred_extra_review_days: float = 4.0
+    preferred_extra_review_timesteps: float = 4.0
 
     # --- RL agents (part of the simulation) ------------------------------
     rl_backend: str = "tabular"     # "tabular" | "linear"
@@ -79,7 +88,7 @@ class TrainConfig:
     simulation parameters above."""
 
     episodes: int = 200
-    days: int = 200
+    timesteps: int = 200
     num_rl: int = 10
     num_heuristic: int = 10
     eps_start: float = 1.0

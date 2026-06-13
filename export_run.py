@@ -60,7 +60,8 @@ def export_run(
         "id": run_id,
         "title": title or f"Run {run_id}",
         "created": datetime.now().isoformat(timespec="seconds"),
-        "num_days": len(history.days),
+        "num_timesteps": len(history.timesteps),
+        "num_days": len(history.timesteps),  # alias for older gallery builds
         "config": config,
         "summary": _summary(history),
     }

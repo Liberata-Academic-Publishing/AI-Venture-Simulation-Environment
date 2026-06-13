@@ -19,12 +19,12 @@ import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from run_simulation import NUM_DAYS, build_simulation
+from run_simulation import NUM_TIMESTEPS, build_simulation
 from streaming import StreamingHistory
 
 HOST = "127.0.0.1"
 PORT = 8000
-STEP_DELAY = 0.1  # seconds between simulated days, so the run is watchable
+STEP_DELAY = 0.1  # seconds between simulated timesteps, so the run is watchable
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
@@ -92,12 +92,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 {
                     "type": "meta",
                     "agents": list(history_agent_labels(env)),
-                    "num_days": NUM_DAYS,
+                    "num_days": NUM_TIMESTEPS,
                 }
             )
-            for _ in range(NUM_DAYS):
-                env.agentact()
-                env.nextstep()
+            for _ in range(NUM_TIMESTEPS):
+                env.run_timestep()
                 while not history.queue.empty():
                     self._send_event(history.queue.get_nowait())
                 time.sleep(STEP_DELAY)

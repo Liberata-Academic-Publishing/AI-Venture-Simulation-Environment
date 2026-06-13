@@ -27,6 +27,10 @@ COMPLETED_REVIEW_KINDS = frozenset({
     "review_stopped",
 })
 
+# Action kinds that complete a review but carry the *new* review's starting
+# effort, so they must not be logged as a completed-review effort sample.
+_NON_COMPLETION_REVIEW_KINDS = frozenset({"review_started"})
+
 
 def gini(values: Iterable[float]) -> float:
     """Gini coefficient of non-negative values (0 = perfectly equal, →1 = unequal)."""
@@ -40,7 +44,7 @@ def gini(values: Iterable[float]) -> float:
 
 
 def default_metrics() -> dict[str, MetricFn]:
-    """Scalar, per-day metrics recorded by default (system aggregates + review behavior)."""
+    """Scalar, per-timestep metrics recorded by default (aggregates + review behavior)."""
     return {
         "total_capital": lambda env: sum(a.academic_capital for a in env.agents),
         "mean_capital": lambda env: (
@@ -53,8 +57,17 @@ def default_metrics() -> dict[str, MetricFn]:
         ),
         "capital_gini": lambda env: gini(a.academic_capital for a in env.agents),
         "num_papers": lambda env: float(len(env.papers)),
+        "papers_on_market": lambda env: float(
+            sum(1 for p in env.papers if getattr(p, "review_available", False))
+        ),
         "completed_peer_reviews": lambda env: float(
             sum(getattr(p, "completed_peer_reviews", 0) for p in env.papers)
+        ),
+        "mean_peer_review_history": lambda env: (
+            sum(getattr(a, "peer_review_history", 0.0) for a in env.agents)
+            / len(env.agents)
+            if env.agents
+            else 0.0
         ),
     }
 
@@ -78,11 +91,15 @@ class History:
         self.track_agents = track_agents
         self.track_papers = track_papers
 
-        self.days: list[int] = []
+        self.timesteps: list[int] = []
         self.scalars: dict[str, list[float]] = {name: [] for name in self.metrics}
         self.agent_capital: dict[str, list[float]] = {}
+        self.agent_review_history: dict[str, list[float]] = {}
         self.agent_groups: dict[str, str] = {}  # agent label -> class name
         self.paper_ac: dict[str, list[float]] = {}
+        # Per-paper attributes (constant or final snapshot) for outcome charts.
+        self.paper_quality: dict[str, float] = {}
+        self.paper_reviewed: dict[str, bool] = {}
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
@@ -96,10 +113,15 @@ class History:
         self._agent_counter = 0
         self._paper_counter = 0
 
+    @property
+    def days(self) -> list[int]:
+        """Backwards-compatible alias for the timestep axis."""
+        return self.timesteps
+
     # ---- recording -------------------------------------------------------
     def record_step(self, env: "Environment") -> None:
-        """Snapshot per-day metric series. Called from ``Environment.nextstep()``."""
-        self.days.append(env.day)
+        """Snapshot per-timestep metric series. Called from ``run_timestep()``."""
+        self.timesteps.append(env.timestep)
         for name, fn in self.metrics.items():
             self.scalars[name].append(float(fn(env)))
         if self.track_agents:
@@ -109,6 +131,12 @@ class History:
                 lambda a: float(getattr(a, "academic_capital", 0.0)),
                 "Agent",
             )
+            self._record_series(
+                env.agents,
+                self.agent_review_history,
+                lambda a: float(getattr(a, "peer_review_history", 0.0)),
+                "Agent",
+            )
         if self.track_papers:
             self._record_series(
                 env.papers,
@@ -116,20 +144,25 @@ class History:
                 lambda p: float(getattr(p, "current_ac", 0.0)),
                 "Paper",
             )
+            for paper in env.papers:
+                label = self._label(paper, "Paper")
+                self.paper_quality[label] = float(getattr(paper, "quality", 0.0))
+                self.paper_reviewed[label] = bool(getattr(paper, "reviewed", False))
 
     def record_action(self, env: "Environment", agent: Any, record: "ActionRecord") -> None:
-        """Log one agent turn. Called from ``Environment.agentact()`` (before the
-        day is advanced, so the action belongs to the day about to be simulated)."""
-        day = env.day + 1
+        """Log one agent turn. Called during a timestep's marketplace/work phases,
+        so the action belongs to the timestep currently being simulated."""
+        timestep = env.timestep
         agent_label = self._label(agent, "Agent")
         paper_label = (
             self._label(record.paper, "Paper") if record.paper is not None else None
         )
-        self.actions.append((day, agent_label, record.kind, paper_label))
+        self.actions.append((timestep, agent_label, record.kind, paper_label))
         self.action_counts[record.kind] += 1
         if (
             record.review_effort is not None
             and record.kind in COMPLETED_REVIEW_KINDS
+            and record.kind not in _NON_COMPLETION_REVIEW_KINDS
         ):
             effort = float(record.review_effort)
             # Record every finished review, including early stops below the
@@ -138,12 +171,12 @@ class History:
             # earn nothing) lives in Paper, not in this recording gate.
             if effort > 0:
                 self.completed_reviews.append(
-                    (day, agent_label, paper_label, effort)
+                    (timestep, agent_label, paper_label, effort)
                 )
         if record.writing_effort is not None:
             self.writing_efforts.append(
                 (
-                    day,
+                    timestep,
                     agent_label,
                     float(record.writing_effort),
                     bool(record.published),
@@ -151,7 +184,7 @@ class History:
             )
         suffix = f" of {paper_label}" if paper_label else ""
         self.agent_actions.setdefault(agent_label, []).append(
-            f"day {day}: {record.kind}{suffix}"
+            f"timestep {timestep}: {record.kind}{suffix}"
         )
 
     def _record_series(
@@ -198,21 +231,30 @@ class History:
 
     # ---- export ----------------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
+        # ``days``/``day`` are kept as aliases of the timestep axis so the static
+        # gallery (which reads older runs too) keeps working unchanged.
         return {
-            "days": list(self.days),
+            "timesteps": list(self.timesteps),
+            "days": list(self.timesteps),
             "scalars": {k: list(v) for k, v in self.scalars.items()},
             "agent_capital": {k: list(v) for k, v in self.agent_capital.items()},
+            "agent_review_history": {
+                k: list(v) for k, v in self.agent_review_history.items()
+            },
             "paper_ac": {k: list(v) for k, v in self.paper_ac.items()},
+            "paper_quality": dict(self.paper_quality),
+            "paper_reviewed": dict(self.paper_reviewed),
             "actions": [
-                {"day": d, "agent": a, "kind": k, "paper": p}
+                {"timestep": d, "day": d, "agent": a, "kind": k, "paper": p}
                 for (d, a, k, p) in self.actions
             ],
             "completed_reviews": [
-                {"day": d, "agent": a, "paper": p, "effort": e}
+                {"timestep": d, "day": d, "agent": a, "paper": p, "effort": e}
                 for (d, a, p, e) in self.completed_reviews
             ],
             "writing_efforts": [
                 {
+                    "timestep": d,
                     "day": d,
                     "agent": a,
                     "effort": e,
@@ -229,15 +271,15 @@ class History:
         return path
 
     def to_csv(self, path: str) -> str:
-        """Wide time-series: one row per day; columns are scalars + each agent + each paper."""
+        """Wide time-series: one row per timestep; columns are scalars + agents + papers."""
         scalar_names = list(self.scalars)
         agent_names = list(self.agent_capital)
         paper_names = list(self.paper_ac)
         with open(path, "w", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
-            writer.writerow(["day"] + scalar_names + agent_names + paper_names)
-            for i, day in enumerate(self.days):
-                row: list[Any] = [day]
+            writer.writerow(["timestep"] + scalar_names + agent_names + paper_names)
+            for i, timestep in enumerate(self.timesteps):
+                row: list[Any] = [timestep]
                 row += [self.scalars[name][i] for name in scalar_names]
                 row += [self._at(self.agent_capital[name], i) for name in agent_names]
                 row += [self._at(self.paper_ac[name], i) for name in paper_names]

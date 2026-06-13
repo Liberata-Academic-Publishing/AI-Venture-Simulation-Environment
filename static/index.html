@@ -71,7 +71,7 @@
     <div class="panel feed">
       <h2>Action feed</h2>
       <table>
-        <thead><tr><th>Day</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
+        <thead><tr><th>Timestep</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
         <tbody id="feed"></tbody>
       </table>
     </div>
@@ -201,7 +201,7 @@
     }
 
     function onStep(msg) {
-      statusEl.textContent = `running — day ${msg.day} / ${NUM_DAYS}`;
+      statusEl.textContent = `running — timestep ${msg.day} / ${NUM_DAYS}`;
 
       agentChart.data.labels.push(msg.day);
       agentChart.data.datasets.forEach(ds => ds.data.push(msg.agents[ds.label] ?? null));

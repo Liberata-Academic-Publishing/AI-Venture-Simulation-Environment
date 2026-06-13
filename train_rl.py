@@ -29,17 +29,16 @@ from QLearningAgent import QLearningAgent, make_backend
 
 
 def seed_initial_papers(agents: list[Agent], rng: random.Random) -> None:
-    """Seed starting papers per SimConfig (count + AC/accrual ranges)."""
+    """Seed starting papers per SimConfig (listed on the market from timestep 1)."""
     index = 0
     for agent in agents:
         for _ in range(SIM.init_papers_per_agent):
             index += 1
             paper = Paper(
                 author=agent,
+                quality=agent.intrinsic_talent,
                 current_ac=rng.uniform(SIM.init_ac_min, SIM.init_ac_max),
-                accrual_rate=rng.uniform(
-                    SIM.init_accrual_min, SIM.init_accrual_max
-                ),
+                market_listed=True,
             )
             paper.title = f"Paper {index}"
             Agent.all_papers.append(paper)
@@ -63,7 +62,7 @@ def build_env(
     rl_agents = [
         QLearningAgent(
             intrinsic_talent=1.0,
-            forecast_horizon_days=horizon,
+            forecast_horizon_timesteps=horizon,
             name=f"RL {i}",
             backend=backend,
             epsilon=epsilon,
@@ -73,7 +72,7 @@ def build_env(
         for i in range(num_rl)
     ]
     heuristics = [
-        HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_days=horizon,
+        HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_timesteps=horizon,
                        name=f"Heuristic {i}")
         for i in range(num_heuristic)
     ]
@@ -81,7 +80,7 @@ def build_env(
 
     seed_initial_papers(agents, rng)
     env = Environment(agents=agents, papers=Agent.all_papers,
-                      forecast_horizon_days=horizon)
+                      forecast_horizon_timesteps=horizon)
     return env, rl_agents, heuristics
 
 
@@ -102,7 +101,7 @@ def train(args) -> None:
 
     if args.episodes:
         print(f"Training: backend={args.backend} episodes={args.episodes} "
-              f"days={args.days} rl={args.num_rl} heuristic={args.num_heuristic}")
+              f"timesteps={args.timesteps} rl={args.num_rl} heuristic={args.num_heuristic}")
     for episode in range(args.episodes):
         # Linear ε decay from eps_start to eps_end.
         frac = episode / max(1, args.episodes - 1)
@@ -113,7 +112,7 @@ def train(args) -> None:
             num_rl=args.num_rl, num_heuristic=args.num_heuristic,
             horizon=args.horizon, seed=args.seed + episode, gamma=args.gamma,
         )
-        env.run(args.days)
+        env.run(args.timesteps)
         for agent in rl_agents:
             agent.end_episode()
 
@@ -139,7 +138,7 @@ def evaluate(backend, args) -> None:
         num_rl=args.num_rl, num_heuristic=args.num_heuristic,
         horizon=args.horizon, seed=args.seed + 10_000,
     )
-    env.run(args.days)
+    env.run(args.timesteps)
 
     rl_ac = mean_capital(rl_agents)
     heur_ac = mean_capital(heuristics)
@@ -157,11 +156,11 @@ def parse_args(argv=None):
     p.add_argument("--backend", choices=["tabular", "linear"],
                    default=SIM.rl_backend)
     p.add_argument("--episodes", type=int, default=TRAIN.episodes)
-    p.add_argument("--days", type=int, default=TRAIN.days)
+    p.add_argument("--timesteps", dest="timesteps", type=int, default=TRAIN.timesteps)
     p.add_argument("--num-rl", dest="num_rl", type=int, default=TRAIN.num_rl)
     p.add_argument("--num-heuristic", dest="num_heuristic", type=int,
                    default=TRAIN.num_heuristic)
-    p.add_argument("--horizon", type=int, default=SIM.forecast_horizon_days)
+    p.add_argument("--horizon", type=int, default=SIM.forecast_horizon_timesteps)
     p.add_argument("--alpha", type=float, default=None,
                    help="learning rate (defaults: 0.1 tabular / 0.01 linear)")
     p.add_argument("--gamma", type=float, default=SIM.rl_gamma)

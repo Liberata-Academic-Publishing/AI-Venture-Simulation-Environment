@@ -113,7 +113,7 @@
       <div class="panel feed">
         <h2>Action feed</h2>
         <table>
-          <thead><tr><th>Day</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
+          <thead><tr><th>Timestep</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
           <tbody id="feed"></tbody>
         </table>
       </div>
@@ -172,9 +172,9 @@
       ["World", [
         ["num_heuristic_agents", "Heuristic agents"],
         ["num_rl_agents", "RL agents"],
-        ["num_days", "Days"],
+        ["num_days", "Timesteps"],
         ["seed", "Seed"],
-        ["forecast_horizon_days", "Forecast horizon (days)"],
+        ["forecast_horizon_days", "Forecast horizon (timesteps)"],
         ["output_dir", "Output dir"],
       ]],
       ["Initial papers", [
@@ -186,16 +186,21 @@
       ]],
       ["Paper economics", [
         ["default_accrual_rate", "Accrual rate"],
-        ["default_review_share", "Review share"],
-        ["default_reviewer_ac_threshold", "Reviewer AC threshold"],
-        ["default_high_ac_review_share", "High-AC review share"],
+        ["default_review_share", "Base review share"],
         ["default_max_reviewer_share", "Max reviewer share"],
+        ["min_offer_share", "Min offer share"],
+      ]],
+      ["Paper quality", [
+        ["quality_sigma", "Quality sigma"],
+        ["min_paper_quality", "Min paper quality"],
+        ["quality_price_scale", "Quality price scale"],
+        ["history_price_scale", "History price scale"],
       ]],
       ["Effort & reward", [
-        ["review_effort_per_day", "Review effort / day"],
+        ["review_effort_per_day", "Review effort / timestep"],
         ["min_review_effort_threshold", "Min review effort"],
         ["base_review_accrual_bump", "Base accrual bump"],
-        ["first_extra_day_bump", "First extra-day bump"],
+        ["first_extra_day_bump", "First extra-timestep bump"],
       ]],
       ["Publishing", [
         ["paper_threshold", "Paper threshold"],
@@ -203,8 +208,6 @@
       ["Heuristic forecasting", [
         ["expected_write_progress", "Expected write progress"],
         ["max_forecast_effort", "Max forecast effort"],
-        ["continue_marginal_weight", "Continue marginal weight"],
-        ["preferred_extra_review_days", "Preferred extra review days"],
       ]],
       ["RL agents", [
         ["rl_backend", "Backend"],
@@ -479,7 +482,7 @@
           backgroundColor: "#a855f7aa", borderColor: "#4c1d95", pointRadius: 3 }] },
         options: { ...baseOpts, plugins: { legend: { display: false } },
           scales: { ...baseOpts.scales,
-            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Day") },
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Timestep") },
             y: { ...baseOpts.scales.y, title: axisTitle("Review effort") } } },
         plugins: [thresholdLine],
       });
@@ -656,7 +659,7 @@
       renderExtraCharts(data, threshold);
       renderConfig(config);
 
-      setStatus(`${title} — ${days.length} days`, "done");
+      setStatus(`${title} — ${days.length} timesteps`, "done");
     }
 
     // Reset to no-playback state (used on load and when switching runs).
@@ -676,7 +679,7 @@
         replay = null;
         pauseBtn.disabled = true;
         pauseBtn.textContent = "⏸ Pause";
-        setStatus(`${title} — ${days.length} days ✓`, "done");
+        setStatus(`${title} — ${days.length} timesteps ✓`, "done");
         return;
       }
       const i = replay.i;
@@ -702,7 +705,7 @@
       for (const a of (byDay[day] || [])) feedEl.insertAdjacentHTML("afterbegin", actionRow(a));
       while (feedEl.childElementCount > FEED_LIMIT) feedEl.lastElementChild.remove();
 
-      setStatus(`replaying ${title} — day ${day} / ${days[days.length - 1]}`);
+      setStatus(`replaying ${title} — timestep ${day} / ${days[days.length - 1]}`);
       replay.i++;
     }
 
@@ -744,7 +747,7 @@
       clearInterval(replayTimer);
       replayTimer = null;
       pauseBtn.textContent = "▶ Resume";
-      setStatus(`paused — day ${at(replay.days, replay.i - 1)} / ${last(replay.days)}`);
+      setStatus(`paused — timestep ${at(replay.days, replay.i - 1)} / ${last(replay.days)}`);
     }
 
     function resumeReplay() {
@@ -780,7 +783,8 @@
       const heuristic = c.num_heuristic_agents != null ? c.num_heuristic_agents : c.num_agents;
       if (heuristic != null) parts.push(`${heuristic} heuristic`);
       if (c.num_rl_agents != null) parts.push(`${c.num_rl_agents} RL`);
-      if (run.num_days != null) parts.push(`${run.num_days}d`);
+      const runLen = run.num_timesteps != null ? run.num_timesteps : run.num_days;
+      if (runLen != null) parts.push(`${runLen} steps`);
       return parts.length ? `${run.title} (${parts.join(", ")})` : run.title;
     }
 

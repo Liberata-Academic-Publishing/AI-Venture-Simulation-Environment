@@ -17,7 +17,7 @@ from QLearningAgent import QLearningAgent, make_backend
 
 # Defaults come from config.py; CLI flags override them at runtime.
 NUM_AGENTS = SIM.num_heuristic_agents
-NUM_DAYS = SIM.num_days
+NUM_TIMESTEPS = SIM.num_timesteps
 NUM_RL_AGENTS = SIM.num_rl_agents
 OUTPUT_DIR = SIM.output_dir
 
@@ -31,39 +31,68 @@ def _talent_for(index: int, count: int) -> float:
 
 
 # Map raw action kinds to the decision an agent actively made on its turn.
-# Auto-continued locked reviews are follow-through, not fresh choices.
 DECISION_LABELS = {
     "write_paper": "write_paper",
     "review_started": "start_review",
     "review_continued": "continue_review",
     "review_finished_write": "finish_and_write",
     "review_finished_peer_review": "finish_and_review",
-    "review_unavailable": "start_review",
     "idle": "idle",
 }
 
 
 def seed_initial_papers(agents: list[Agent]):
-    """Seed starting papers per SimConfig (count + AC/accrual ranges)."""
+    """Seed starting papers per SimConfig (listed on the market from timestep 1)."""
     index = 0
     for agent in agents:
         for _ in range(SIM.init_papers_per_agent):
             index += 1
             paper = Paper(
                 author=agent,
+                quality=agent.intrinsic_talent,
                 current_ac=random.uniform(SIM.init_ac_min, SIM.init_ac_max),
-                accrual_rate=random.uniform(
-                    SIM.init_accrual_min, SIM.init_accrual_max
-                ),
+                market_listed=True,
             )
             paper.title = f"Paper {index}"
             Agent.all_papers.append(paper)
 
 
 def print_summary(env: Environment, history: History):
-    print(f"\nSimulation finished after {env.day} days")
+    print(f"\nSimulation finished after {env.timestep} timesteps")
     print(f"Agents: {len(env.agents)}")
     print(f"Papers: {len(env.papers)}")
+
+    reviewed = sum(1 for p in env.papers if p.reviewed)
+    on_market = sum(1 for p in env.papers if getattr(p, "review_available", False))
+    in_review = sum(1 for p in env.papers if p.review_in_progress_by is not None)
+    qualities = [p.quality for p in env.papers]
+    capitals = [a.academic_capital for a in env.agents]
+    from History import gini
+
+    print("\nMarketplace overview")
+    print(f"- papers reviewed: {reviewed}/{len(env.papers)}")
+    print(f"- papers on market (unclaimed): {on_market}")
+    print(f"- papers in review right now: {in_review}")
+    if qualities:
+        print(
+            f"- paper quality: mean={sum(qualities) / len(qualities):.2f}, "
+            f"min={min(qualities):.2f}, max={max(qualities):.2f}"
+        )
+    if capitals:
+        print(f"- capital Gini (inequality): {gini(capitals):.3f}")
+
+    reviewers = sorted(
+        (a for a in env.agents if a.completed_review_count > 0),
+        key=lambda a: a.peer_review_history,
+        reverse=True,
+    )
+    if reviewers:
+        print("\nTop reviewers (by reputation = AC earned per review)")
+        for agent in reviewers[:5]:
+            print(
+                f"- {agent.name}: reputation={agent.peer_review_history:.2f} "
+                f"over {agent.completed_review_count} reviews"
+            )
 
     print("\nAction counts")
     for action, count in history.action_counts.most_common():
@@ -88,10 +117,18 @@ def print_summary(env: Environment, history: History):
             if agent != paper.author
         ]
         reviewer_text = ", ".join(reviewers) if reviewers else "none"
+        if paper.review_available:
+            status = "on market"
+        elif paper.reviewed:
+            status = "reviewed"
+        elif paper.review_in_progress_by is not None:
+            status = "in review"
+        else:
+            status = "unlisted"
         print(
-            f"- {title}: author={author_name}, AC={paper.current_ac:.2f}, "
-            f"rate={paper.accrual_rate:.2f}, total reviews={paper.completed_peer_reviews}, "
-            f"unique reviewers={len(paper.reviewed_by)}, reviewer shares={reviewer_text}"
+            f"- {title}: author={author_name}, quality={paper.quality:.2f}, "
+            f"AC={paper.current_ac:.2f}, rate={paper.accrual_rate:.2f}, "
+            f"status={status}, reviewer shares={reviewer_text}"
         )
 
     print("\nRecent agent actions")
@@ -132,13 +169,16 @@ def print_choice_breakdown(history: History):
 
 
 CHART_DESCRIPTIONS = {
-    "summary": "Overview dashboard (review effort, actions, choices)",
-    "action_mix": "What every agent did each day (stacked bars)",
+    "summary": "Overview dashboard (capital, inequality, market, quality, reputation)",
+    "agent_capital": "Academic capital per agent over time",
+    "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
+    "marketplace_activity": "Papers on market vs cumulative reviews completed",
+    "paper_quality_vs_ac": "Paper quality vs accrued capital (reviewed or not)",
+    "review_reputation": "Reviewer reputation (AC earned per review) over time",
+    "action_mix": "What every agent did each timestep (stacked bars)",
     "choice_breakdown": "Agent decisions (write / review / finish)",
     "review_effort_histogram": "Completed peer reviews by effort level",
-    "review_effort_scatter": "Completed reviews: day vs effort",
     "writing_effort_distribution": "Total paper-writing effort by agent",
-    "review_behavior": "Cumulative completed peer reviews",
     "paper_ac": "Accrued capital per paper over time",
 }
 
@@ -205,11 +245,18 @@ def build_rl_agents(
     for i in range(count):
         backend = make_backend(backend_kind)
         if loaded:
-            backend.load(policy_path)
+            try:
+                backend.load(policy_path)
+            except (ValueError, EOFError, OSError, KeyError):
+                # Policies from before the single-review overhaul are incompatible.
+                if i == 0:
+                    print(f"RL: policy {policy_path} is incompatible; using scratch.")
+                loaded = False
+                backend = make_backend(backend_kind)
         agents.append(
             QLearningAgent(
                 intrinsic_talent=_talent_for(i, count),
-                forecast_horizon_days=SIM.forecast_horizon_days,
+                forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
                 name=f"RL Agent {i + 1}",
                 backend=backend,
                 epsilon=0.0 if freeze else SIM.rl_epsilon,
@@ -241,7 +288,7 @@ def build_simulation(
 
     agents: list[Agent] = [
         HeuristicAgent(intrinsic_talent=1.0,
-                       forecast_horizon_days=SIM.forecast_horizon_days,
+                       forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
                        name=f"Agent {i}")
         for i in range(1, num_agents + 1)
     ]
@@ -259,7 +306,7 @@ def build_simulation(
     return Environment(
         agents=agents,
         papers=Agent.all_papers,
-        forecast_horizon_days=SIM.forecast_horizon_days,
+        forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
         history=history,
     )
 
@@ -328,6 +375,11 @@ def build_run_config(
     config["num_rl_agents"] = rl_agents
     config["rl_backend"] = rl_backend
     config["num_agents"] = config["num_heuristic_agents"]
+    # Aliases so the static gallery (which also reads pre-overhaul runs) keeps
+    # rendering the time-unit config fields under their old names.
+    config["num_days"] = config["num_timesteps"]
+    config["forecast_horizon_days"] = config["forecast_horizon_timesteps"]
+    config["review_effort_per_day"] = config["review_effort_per_timestep"]
     return config
 
 
@@ -389,9 +441,8 @@ def main(argv=None):
         rl_policy_path=rl_policy_path,
         rl_freeze=args.rl_freeze,
     )
-    for _ in range(NUM_DAYS):
-        env.agentact()
-        env.nextstep()
+    for _ in range(NUM_TIMESTEPS):
+        env.run_timestep()
 
     print_summary(env, history)
     print_choice_breakdown(history)

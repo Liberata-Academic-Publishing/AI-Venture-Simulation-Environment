@@ -1,30 +1,26 @@
-"""Reinforcement-learning agent for the Liberata peer-review market.
+"""Reinforcement-learning agent for the single-review peer-review market.
 
-Reward = Δ academic capital. The agent learns *which action type* to take; the
-target paper for a review is chosen by the inherited heuristic forecast (so the
-action space stays tiny and fixed instead of growing with the paper pool).
+Reward = Δ academic capital. The agent learns *which action type* to take each
+timestep; the target paper for a claim is chosen by the inherited heuristic
+forecast, so the action space stays tiny and fixed.
 
-Action interface (matches Agent.available_actions)
---------------------------------------------------
-``choose_action()`` runs every turn: when the agent is free, and on *every* day
-of an active review (``should_offer_review_choice()`` is true the whole time).
-There is no forced auto-continue, so the agent observes the continue-vs-stop
-decision at each effort level -- the optimal-stopping signal it must learn.
+The agent makes one decision per timestep. The decision is computed in the
+marketplace phase (``choose_marketplace_action``): if it decides to claim a
+paper it returns that paper; otherwise it caches a work-phase action that
+``choose_work_action`` replays.
 
-* free (no active review)  -> ``("write_paper", None)``
-                              or ``("peer_review", paper)`` to start a review
-* review-fate choice        -> ``("peer_review", active_paper)`` to invest one
-                               more day, ``("finish_review_write_paper", None)``,
-                               or ``("finish_review_peer_review", candidate)``
+Action space
+------------
+* free (no active review)  -> ``WRITE`` or ``CLAIM`` (start reviewing a paper)
+* active review            -> ``CONTINUE`` (one more timestep), ``FINISH_WRITE``
+                              (finalize then write), or ``CLAIM_NEW`` (finalize
+                              the current review by claiming another paper)
 
-Review value scales with invested effort (``review_accrual_bump``, with
-diminishing marginal returns), so the skill being learned is *optimal stopping*:
-keep investing in the current review vs. cash it out and write / start another.
+NOTE: the action semantics and feature vector changed with the single-review
+marketplace overhaul, so policies saved before that change are incompatible and
+must be retrained.
 
-Library: numpy only. Two interchangeable Q backends (tabular + linear) sit behind
-a 2-method interface so the same agent can run either; tabular is the bucketed
-warm-up baseline, linear function approximation is the real target (it
-generalises across the continuous state instead of storing every bucket).
+Library: numpy only. Two interchangeable Q backends (tabular + linear).
 """
 
 from __future__ import annotations
@@ -40,27 +36,26 @@ from Agent import Agent, PAPER_THRESHOLD
 from HeuristicAgent import HeuristicAgent
 from Paper import (
     DEFAULT_MAX_REVIEWER_SHARE,
-    DEFAULT_REVIEWER_AC_THRESHOLD,
     MIN_REVIEW_EFFORT_THRESHOLD,
     Paper,
 )
 
 
 class QAction(IntEnum):
-    WRITE = 0           # free: work on own paper
-    START_REVIEW = 1    # free: begin a review of the best reviewable paper
-    CONTINUE = 2        # choice: invest one more day in the active review
-    FINISH_WRITE = 3    # choice: finalize the review, then write
-    FINISH_REVIEW = 4   # choice: finalize the review, then start another
+    WRITE = 0          # free: work on own paper
+    CLAIM = 1          # free: claim and start reviewing the best listed paper
+    CONTINUE = 2       # review: invest one more timestep in the active review
+    FINISH_WRITE = 3   # review: finalize the active review, then write
+    CLAIM_NEW = 4      # review: finalize by claiming another listed paper
 
 
 # Fixed-length observation. Index order is part of the contract between the
 # featurizer and the Q backends, so keep it stable.
-NUM_FEATURES = 8
+NUM_FEATURES = 9
 NUM_ACTIONS = len(QAction)
 
 # Scale used to squash invested review effort into ~[0, 1) for the feature.
-EFFORT_FEATURE_SCALE = 15.0
+EFFORT_FEATURE_SCALE = 5.0
 
 
 # --------------------------------------------------------------------------- #
@@ -77,7 +72,6 @@ class TabularQ:
         )
 
     def _key(self, features: np.ndarray) -> tuple[int, ...]:
-        # Features are bounded to ~[0, 1]; clip then bin.
         clipped = np.clip(features, 0.0, 1.0)
         idx = np.minimum((clipped * self.buckets).astype(int), self.buckets - 1)
         return tuple(int(i) for i in idx)
@@ -105,11 +99,7 @@ class TabularQ:
 
 
 class LinearQ:
-    """Linear function approximation: Q(s, a) = w_a . [features, 1].
-
-    Generalises across the continuous state, so the size of the state space stops
-    mattering -- there are no per-state entries, just one weight row per action.
-    """
+    """Linear function approximation: Q(s, a) = w_a . [features, 1]."""
 
     def __init__(self, alpha: float = 0.01):
         self.alpha = alpha
@@ -148,8 +138,7 @@ def make_backend(kind: str = "tabular", **kwargs):
 # --------------------------------------------------------------------------- #
 class QLearningAgent(HeuristicAgent):
     """Q-learning agent. Subclasses ``HeuristicAgent`` to reuse its review-target
-    selection and forecast helpers (``_can_review``, ``_score_start_review``,
-    ``_estimate_review_share``); only ``choose_action`` is RL-driven."""
+    selection and forecast helpers; only the action *type* is RL-driven."""
 
     def __init__(
         self,
@@ -157,7 +146,7 @@ class QLearningAgent(HeuristicAgent):
         academic_capital: float = 0.0,
         paper_progress: float = 0.0,
         review_progress: float = 0.0,
-        forecast_horizon_days: int = 30,
+        forecast_horizon_timesteps: int = 30,
         name: str | None = None,
         *,
         backend=None,
@@ -170,7 +159,7 @@ class QLearningAgent(HeuristicAgent):
             academic_capital=academic_capital,
             paper_progress=paper_progress,
             review_progress=review_progress,
-            forecast_horizon_days=forecast_horizon_days,
+            forecast_horizon_timesteps=forecast_horizon_timesteps,
             name=name,
         )
         # Share one backend across agents for self-play; default to a private one.
@@ -184,16 +173,18 @@ class QLearningAgent(HeuristicAgent):
         self._last_action: int | None = None
         self._last_capital: float = academic_capital
 
-    # ---- policy ----------------------------------------------------------- #
-    def choose_action(self) -> tuple[str, Paper | None]:
-        review_choice = self.should_offer_review_choice()
-        # In review-fate mode the active paper is in progress; a *new* review must
-        # target a different paper, so exclude it from the candidate pool.
+        # Decision cached in the marketplace phase, replayed in the work phase.
+        self._pending_action: int = int(QAction.WRITE)
+        self._pending_paper: Paper | None = None
+
+    # ---- policy: one decision per timestep, made in the marketplace phase -- #
+    def choose_marketplace_action(self) -> Paper | None:
+        in_review = self.active_review_paper is not None
         best_paper, best_share, best_ac = self._best_reviewable(
             exclude=self.active_review_paper
         )
         features = self._features(best_share, best_ac)
-        legal = self._legal_actions(review_choice, best_paper is not None)
+        legal = self._legal_actions(in_review, best_paper is not None)
 
         # TD update for the transition that ended at this state.
         if self.learning and self._last_features is not None:
@@ -208,12 +199,23 @@ class QLearningAgent(HeuristicAgent):
         self._last_features = features
         self._last_action = int(action)
         self._last_capital = self.academic_capital
+        self._pending_action = int(action)
+        self._pending_paper = best_paper
 
-        return self._to_env_action(action, best_paper)
+        if action in (QAction.CLAIM, QAction.CLAIM_NEW):
+            return best_paper
+        return None
+
+    def choose_work_action(self) -> tuple[str, Paper | None]:
+        action = self._pending_action
+        if action == QAction.CONTINUE:
+            return "peer_review", self.active_review_paper
+        if action == QAction.FINISH_WRITE:
+            return "finish_review_write_paper", None
+        return "write_paper", None
 
     def end_episode(self) -> None:
-        """Terminal flush: bootstrap-free update for the final transition, then
-        clear per-episode state. Call between training episodes."""
+        """Terminal flush: bootstrap-free update for the final transition."""
         if self.learning and self._last_features is not None:
             reward = self.academic_capital - self._last_capital
             self.backend.update(self._last_features, self._last_action, reward)
@@ -221,17 +223,15 @@ class QLearningAgent(HeuristicAgent):
         self._last_action = None
 
     # ---- action helpers --------------------------------------------------- #
-    def _legal_actions(
-        self, review_choice: bool, has_reviewable: bool
-    ) -> list[int]:
-        if review_choice:
+    def _legal_actions(self, in_review: bool, has_reviewable: bool) -> list[int]:
+        if in_review:
             actions = [QAction.CONTINUE, QAction.FINISH_WRITE]
             if has_reviewable:
-                actions.append(QAction.FINISH_REVIEW)
+                actions.append(QAction.CLAIM_NEW)
             return actions
         actions = [QAction.WRITE]
         if has_reviewable:
-            actions.append(QAction.START_REVIEW)
+            actions.append(QAction.CLAIM)
         return actions
 
     def _select(self, features: np.ndarray, legal: list[int]) -> int:
@@ -240,54 +240,46 @@ class QLearningAgent(HeuristicAgent):
         q = self.backend.q_values(features)
         return max(legal, key=lambda a: q[a])
 
-    def _to_env_action(
-        self, action: int, best_paper: Paper | None
-    ) -> tuple[str, Paper | None]:
-        if action == QAction.WRITE:
-            return "write_paper", None
-        if action == QAction.START_REVIEW:
-            return "peer_review", best_paper
-        if action == QAction.CONTINUE:
-            return "peer_review", self.active_review_paper
-        if action == QAction.FINISH_WRITE:
-            return "finish_review_write_paper", None
-        return "finish_review_peer_review", best_paper
-
     # ---- state ------------------------------------------------------------ #
     def _best_reviewable(
         self, exclude: Paper | None = None
     ) -> tuple[Paper | None, float, float]:
-        """Highest-forecast reviewable paper (reusing the heuristic score) plus
-        its estimated review share and current AC."""
+        """Highest-value claimable paper (reusing the heuristic score) plus its
+        estimated review share and current AC."""
         reviewable = [
             p
             for p in Agent.all_papers
-            if p is not exclude and self._can_review(p)
+            if p is not exclude
+            and self._can_review(p)
+            and p.offered_share(self) > 0.0
         ]
         if not reviewable:
             return None, 0.0, 0.0
-        best = max(
-            reviewable,
-            key=lambda p: self._score_start_review(p, MIN_REVIEW_EFFORT_THRESHOLD),
-        )
-        share = self._estimate_review_share(best)
+        best = max(reviewable, key=self._score_claim)
+        share = self._prospective_share(best)
         return best, share, best.current_ac
 
     def _features(self, best_share: float, best_ac: float) -> np.ndarray:
-        num_reviewable = sum(1 for p in Agent.all_papers if self._can_review(p))
+        num_reviewable = sum(
+            1
+            for p in Agent.all_papers
+            if self._can_review(p) and p.offered_share(self) > 0.0
+        )
         in_review = self.active_review_paper is not None
         features = np.array(
             [
-                # Required input #1: progress on the paper being written.
                 min(self.paper_progress / PAPER_THRESHOLD, 1.0),
-                # Required input #2: effort/days already invested in the review.
                 np.tanh(self.active_review_effort / EFFORT_FEATURE_SCALE),
                 np.tanh(self.academic_capital / 100.0),
-                1.0 if self.academic_capital >= DEFAULT_REVIEWER_AC_THRESHOLD else 0.0,
+                np.tanh(self.peer_review_history / 10.0),
                 np.tanh(num_reviewable / 10.0),
                 np.tanh(best_share / DEFAULT_MAX_REVIEWER_SHARE),
                 np.tanh(best_ac / 100.0),
                 1.0 if in_review else 0.0,
+                min(
+                    self.active_review_effort / max(MIN_REVIEW_EFFORT_THRESHOLD, 1.0),
+                    1.0,
+                ),
             ],
             dtype=np.float64,
         )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import statistics
 import tempfile
 import unittest
 
@@ -11,7 +12,7 @@ from HeuristicAgent import HeuristicAgent
 from History import History, gini
 from Paper import (
     MIN_REVIEW_EFFORT_THRESHOLD,
-    REVIEW_EFFORT_PER_DAY,
+    REVIEW_EFFORT_PER_TIMESTEP,
     Paper,
     review_accrual_bump,
 )
@@ -24,370 +25,342 @@ except ImportError:
     _HAS_MPL = False
 
 
-class DummyAgent(Agent):
-    def __init__(self, name: str = "agent", actions=None):
+class ScriptAgent(Agent):
+    """Agent driven by scripted marketplace/work decisions for deterministic tests."""
+
+    def __init__(self, name: str = "agent", marketplace=None, work=None):
         super().__init__(intrinsic_talent=1.0)
         self.name = name
-        self.actions = list(actions or [])
+        self.marketplace = list(marketplace or [])
+        self.work = list(work or [])
 
-    def choose_action(self):
-        if self.actions:
-            return self.actions.pop(0)
+    def choose_marketplace_action(self):
+        if self.marketplace:
+            return self.marketplace.pop(0)
+        return None
+
+    def choose_work_action(self):
+        if self.work:
+            return self.work.pop(0)
         return "write_paper", None
 
     def writing_effort_delta(self):
         return 0.5
 
 
-class RecordingAgent(DummyAgent):
+class RecordingAgent(ScriptAgent):
     def __init__(self, log: list[str], name: str):
         super().__init__(name=name)
         self.log = log
 
-    def act(self):
+    def work_turn(self):
         self.log.append(self.name)
-        return super().act()
+        return super().work_turn()
 
 
-class SimulationTest(unittest.TestCase):
+def _listed_paper(author, **kwargs) -> Paper:
+    paper = Paper(author=author, market_listed=True, **kwargs)
+    return paper
+
+
+class MarketplaceLifecycleTest(unittest.TestCase):
     def setUp(self):
         Agent.all_papers = []
 
-    def test_agentact_calls_agents_in_order(self):
+    def test_published_paper_lists_one_timestep_later(self):
+        author = ScriptAgent("author")
+        author.paper_progress = PAPER_THRESHOLD - 0.25
+        env = Environment(agents=[author])
+
+        env.run_timestep()  # timestep 1: author writes and publishes
+        self.assertEqual(len(Agent.all_papers), 1)
+        paper = Agent.all_papers[0]
+        self.assertFalse(paper.market_listed)
+        self.assertFalse(paper.review_available)
+
+        env.run_timestep()  # timestep 2: scheduled listing happens at the start
+        self.assertTrue(paper.market_listed)
+        self.assertTrue(paper.review_available)
+
+    def test_claimed_paper_leaves_market_for_everyone(self):
+        author = ScriptAgent("author")
+        first = ScriptAgent("first")
+        second = ScriptAgent("second")
+        paper = _listed_paper(author)
+
+        self.assertTrue(paper.start_review(first))
+        self.assertTrue(paper.review_claimed)
+        self.assertFalse(paper.market_listed)
+        self.assertFalse(paper.review_available)
+        self.assertFalse(paper.can_start_review(second))
+
+    def test_paper_can_only_be_reviewed_once(self):
+        author = ScriptAgent("author")
+        first = ScriptAgent("first")
+        second = ScriptAgent("second")
+        paper = _listed_paper(author, quality=1.0)
+
+        paper.start_review(first)
+        paper.finish_review(first, MIN_REVIEW_EFFORT_THRESHOLD)
+
+        self.assertTrue(paper.reviewed)
+        self.assertFalse(paper.review_available)
+        self.assertFalse(paper.can_start_review(second))
+
+    def test_min_effort_review_earns_reward(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        paper = _listed_paper(author, quality=1.0, accrual_rate=1.0, current_ac=10.0)
+        paper.update_price_table([author, reviewer], 1.0, 0.0)
+
+        share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
+
+        self.assertGreater(share, 0.0)
+        self.assertGreater(paper.accrual_rate, 1.0)
+        self.assertEqual(paper.completed_peer_reviews, 1)
+        self.assertIn(reviewer, paper.share_distribution)
+
+    def test_subthreshold_review_consumes_opportunity_without_reward(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        paper = _listed_paper(author, quality=1.0, accrual_rate=1.0)
+        paper.update_price_table([reviewer], 1.0, 0.0)
+
+        paper.start_review(reviewer)
+        share = paper.finish_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD - 0.5)
+
+        self.assertEqual(share, 0.0)
+        self.assertEqual(paper.accrual_rate, 1.0)
+        self.assertTrue(paper.reviewed)
+        self.assertNotIn(reviewer, paper.share_distribution)
+
+
+class EconomicsTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_review_bump_grows_with_diminishing_returns(self):
+        self.assertEqual(review_accrual_bump(MIN_REVIEW_EFFORT_THRESHOLD - 0.5), 0.0)
+        b1 = review_accrual_bump(1.0)
+        b2 = review_accrual_bump(2.0)
+        b3 = review_accrual_bump(3.0)
+        self.assertGreater(b1, 0.0)
+        self.assertGreater(b2, b1)
+        self.assertGreater(b3, b2)
+        self.assertGreater(b2 - b1, b3 - b2)
+
+    def test_higher_quality_raises_bump(self):
+        self.assertGreater(
+            review_accrual_bump(1.0, quality=1.5),
+            review_accrual_bump(1.0, quality=0.8),
+        )
+
+    def test_higher_effort_yields_higher_accrual_rate(self):
+        author = ScriptAgent("author")
+        low_reviewer = ScriptAgent("low")
+        high_reviewer = ScriptAgent("high")
+        low = _listed_paper(author, quality=1.0, accrual_rate=1.0)
+        high = _listed_paper(author, quality=1.0, accrual_rate=1.0)
+        low.update_price_table([low_reviewer], 1.0, 0.0)
+        high.update_price_table([high_reviewer], 1.0, 0.0)
+
+        low.add_review(low_reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
+        high.add_review(high_reviewer, MIN_REVIEW_EFFORT_THRESHOLD + 3)
+
+        self.assertGreater(high.accrual_rate, low.accrual_rate)
+
+    def test_price_drops_for_higher_quality_papers(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        low_q = _listed_paper(author, quality=0.8)
+        high_q = _listed_paper(author, quality=1.5)
+        median_q = statistics.median([0.8, 1.5])
+
+        low_q.update_price_table([reviewer], median_q, 0.0)
+        high_q.update_price_table([reviewer], median_q, 0.0)
+
+        self.assertGreater(low_q.offered_share(reviewer), high_q.offered_share(reviewer))
+
+    def test_price_rises_for_stronger_reviewer_history(self):
+        author = ScriptAgent("author")
+        rookie = ScriptAgent("rookie")
+        veteran = ScriptAgent("veteran")
+        veteran.peer_review_history = 5.0
+        paper = _listed_paper(author, quality=1.0)
+
+        paper.update_price_table([rookie, veteran], 1.0, mean_peer_review_history=2.5)
+
+        self.assertGreater(paper.offered_share(veteran), paper.offered_share(rookie))
+
+
+class ReviewerStateTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_peer_review_history_updates_on_completion(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer", work=[("finish_review_write_paper", None)])
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0, accrual_rate=1.0)
+        paper.update_price_table([reviewer], 1.0, 0.0)
+        Agent.all_papers = [paper]
+
+        claimed = reviewer.claim_review(paper)
+        self.assertIsNone(claimed)  # phase 1 is pure selection, no record
+        self.assertEqual(reviewer.active_review_effort, 0.0)
+
+        started = reviewer.apply_initial_review_effort()
+        self.assertEqual(started.kind, "review_started")
+        self.assertEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_TIMESTEP)
+
+        finished = reviewer.work_turn()
+        self.assertEqual(finished.kind, "review_finished_write")
+        self.assertEqual(reviewer.completed_review_count, 1)
+        self.assertGreater(reviewer.peer_review_history, 0.0)
+        self.assertIsNone(reviewer.active_review_paper)
+
+    def test_grabbing_new_paper_finalizes_active_review(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        first = _listed_paper(author, quality=1.0, current_ac=50.0)
+        second = _listed_paper(author, quality=1.0, current_ac=100.0)
+        first.update_price_table([reviewer], 1.0, 0.0)
+        second.update_price_table([reviewer], 1.0, 0.0)
+
+        reviewer.claim_review(first)
+        reviewer.apply_initial_review_effort()  # phase 2 effort on the first review
+        record = reviewer.claim_review(second)
+
+        self.assertEqual(record.kind, "review_finished_peer_review")
+        self.assertIs(record.paper, first)
+        self.assertIs(reviewer.active_review_paper, second)
+        self.assertEqual(reviewer.active_review_effort, 0.0)  # second not worked yet
+        self.assertTrue(first.reviewed)
+        self.assertFalse(second.reviewed)
+        self.assertIn(reviewer, first.share_distribution)
+
+
+class HeuristicPolicyTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_writes_when_nothing_is_reviewable(self):
+        agent = HeuristicAgent(intrinsic_talent=1.0)
+        self.assertIsNone(agent.choose_marketplace_action())
+        self.assertEqual(agent.choose_work_action(), ("write_paper", None))
+
+    def test_claims_highest_value_listed_paper(self):
+        agent = HeuristicAgent(intrinsic_talent=1.0)
+        author = ScriptAgent("author")
+        low = _listed_paper(author, quality=1.0, current_ac=10.0)
+        high = _listed_paper(author, quality=1.0, current_ac=200.0)
+        Agent.all_papers = [low, high]
+        for paper in (low, high):
+            paper.update_price_table([agent], 1.0, 0.0)
+
+        self.assertIs(agent.choose_marketplace_action(), high)
+
+    def test_work_phase_finishes_a_normal_review(self):
+        agent = HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_timesteps=30)
+        author = ScriptAgent("author")
+        paper = _listed_paper(author, quality=1.0, current_ac=10.0)
+        paper.update_price_table([agent], 1.0, 0.0)
+        Agent.all_papers = [paper]
+
+        agent.claim_review(paper)
+        agent.apply_initial_review_effort()
+        action, _ = agent.choose_work_action()
+
+        self.assertEqual(action, "finish_review_write_paper")
+
+    def test_work_phase_continues_when_marginal_effort_dominates(self):
+        # A low-talent agent's own research is weak, so investing another
+        # timestep in a valuable review beats finishing and writing.
+        agent = HeuristicAgent(intrinsic_talent=0.1, forecast_horizon_timesteps=60)
+        author = ScriptAgent("author")
+        paper = _listed_paper(author, quality=2.0, current_ac=10.0)
+        paper.update_price_table([agent], 2.0, 0.0)
+        Agent.all_papers = [paper]
+
+        agent.claim_review(paper)
+        agent.apply_initial_review_effort()
+        action, target = agent.choose_work_action()
+
+        self.assertEqual(action, "peer_review")
+        self.assertIs(target, paper)
+
+
+class EnvironmentTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_work_phase_runs_agents_each_timestep(self):
         log: list[str] = []
         agents = [RecordingAgent(log, "first"), RecordingAgent(log, "second")]
         env = Environment(agents=agents)
 
-        env.agentact()
+        env.run_timestep()
 
-        self.assertEqual(log, ["first", "second"])
+        self.assertEqual(sorted(log), ["first", "second"])
+        self.assertEqual(env.timestep, 1)
 
-    def test_nextstep_advances_papers_and_recomputes_agent_capital(self):
-        author = DummyAgent("author")
-        reviewer = DummyAgent("reviewer")
+    def test_accrual_and_capital_update_each_timestep(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
         paper = Paper(
             author=author,
-            current_ac=10.0,
             accrual_rate=2.0,
+            current_ac=10.0,
             share_distribution={author: 0.75, reviewer: 0.25},
         )
         env = Environment(agents=[author, reviewer], papers=[paper])
 
-        env.nextstep()
+        env.run_timestep()
 
-        self.assertEqual(env.day, 1)
+        self.assertEqual(env.timestep, 1)
         self.assertEqual(paper.current_ac, 12.0)
-        self.assertEqual(author.academic_capital, 9.0)
-        self.assertEqual(reviewer.academic_capital, 3.0)
+        self.assertAlmostEqual(author.academic_capital, 9.0)
+        self.assertAlmostEqual(reviewer.academic_capital, 3.0)
 
-    def _advance_to_review_choice(self, reviewer: DummyAgent) -> None:
-        """Keep choosing 'continue' until effort reaches the reward threshold.
-
-        The forced lock is gone, so the agent is offered the choice from day 1;
-        this helper just drives the review up to the cliff for tests that assert
-        behavior at exactly the threshold.
-        """
-        while reviewer.active_review_effort < MIN_REVIEW_EFFORT_THRESHOLD:
-            reviewer.actions.insert(
-                0, ("peer_review", reviewer.active_review_paper)
-            )
-            reviewer.act()
-        self.assertTrue(reviewer.should_offer_review_choice())
-        self.assertEqual(reviewer.active_review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
-
-    def test_review_locks_paper_and_grants_share_on_finish(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author, current_ac=100.0)
-        reviewer = DummyAgent(
-            "reviewer",
-            actions=[
-                ("peer_review", paper),
-                ("finish_review_write_paper", None),
-            ],
-        )
-
-        started = reviewer.act()
-        self.assertEqual(started.kind, "review_started")
-        self.assertEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_DAY)
-        self.assertFalse(paper.review_available)
-        self.assertIs(paper.review_in_progress_by, reviewer)
-
-        self._advance_to_review_choice(reviewer)
-        finished = reviewer.act()
-
-        self.assertEqual(finished.kind, "review_finished_write")
-        self.assertIsNone(reviewer.active_review_paper)
-        self.assertIsNone(paper.review_in_progress_by)
-        self.assertTrue(paper.review_available)
-        self.assertEqual(paper.share_distribution[reviewer], 0.01)
-        self.assertEqual(paper.completed_peer_reviews, 1)
-
-    def test_review_lock_blocks_other_reviewers(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author)
-        first = DummyAgent("first", actions=[("peer_review", paper)])
-        second = DummyAgent("second", actions=[("peer_review", paper)])
-
-        first.act()
-        unavailable = second.act()
-
-        self.assertEqual(unavailable.kind, "review_unavailable")
-        self.assertNotIn(second, paper.share_distribution)
-        self.assertIsNone(second.active_review_paper)
-        self.assertIs(paper.review_in_progress_by, first)
-        self.assertFalse(paper.review_available)
-
-    def test_environment_calls_act_each_review_day(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author)
-        reviewer = DummyAgent(
-            "reviewer",
-            actions=[("peer_review", paper), ("peer_review", paper)],
-        )
-        history = History()
-        env = Environment(agents=[reviewer], history=history)
-
-        env.agentact()
-        self.assertEqual(reviewer.active_review_effort, 1.0)
-        self.assertEqual(history.actions[-1][2], "review_started")
-
-        # No auto-continue: the agent itself chooses to continue each day.
-        env.agentact()
-        self.assertEqual(reviewer.active_review_effort, 2.0)
-        self.assertEqual(history.actions[-1][2], "review_continued")
-
-    def test_choice_offered_from_first_review_day(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author)
-        reviewer = DummyAgent("reviewer", actions=[("peer_review", paper)])
-
-        reviewer.act()
-        self.assertEqual(reviewer.active_review_effort, 1.0)
-        # The lock is gone, so the continue/finish choice is available from the
-        # first review day -- the agent may stop well below the reward cliff.
-        self.assertTrue(reviewer.should_offer_review_choice())
-        self.assertIn(
-            "finish_review_write_paper", reviewer.available_actions()
-        )
-
-    def test_minimum_effort_review_completes(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author)
-        reviewer = DummyAgent(
-            "reviewer",
-            actions=[
-                ("peer_review", paper),
-                ("finish_review_write_paper", None),
-            ],
-        )
-
-        reviewer.act()
-        self._advance_to_review_choice(reviewer)
-        finished = reviewer.act()
-
-        self.assertEqual(finished.kind, "review_finished_write")
-        self.assertIsNone(finished.review_kind)
-        self.assertEqual(finished.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
-        self.assertEqual(finished.writing_effort, 0.5)
-        self.assertEqual(paper.completed_peer_reviews, 1)
-
-    def test_review_below_minimum_effort_does_not_complete(self):
-        author = DummyAgent("author")
-        reviewer = DummyAgent("reviewer")
-        paper = Paper(author=author)
-
-        review_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD - 0.01)
-
-        self.assertEqual(review_share, 0.0)
-        self.assertNotIn(reviewer, paper.share_distribution)
-        self.assertEqual(paper.completed_peer_reviews, 0)
-
-    def test_review_accrual_bump_increases_with_diminishing_marginals(self):
-        bump_10 = review_accrual_bump(10)
-        bump_11 = review_accrual_bump(11)
-        bump_12 = review_accrual_bump(12)
-        bump_13 = review_accrual_bump(13)
-
-        self.assertGreater(bump_11, bump_10)
-        self.assertGreater(bump_12, bump_11)
-        self.assertGreater(bump_13, bump_12)
-        self.assertGreater(bump_11 - bump_10, bump_12 - bump_11)
-        self.assertGreater(bump_12 - bump_11, bump_13 - bump_12)
-        self.assertEqual(review_accrual_bump(9), 0.0)
-
-    def test_higher_effort_yields_higher_paper_accrual_rate(self):
-        author = DummyAgent("author")
-        low_reviewer = DummyAgent("low reviewer")
-        high_reviewer = DummyAgent("high reviewer")
-        low_paper = Paper(author=author, accrual_rate=1.0)
-        high_paper = Paper(author=author, accrual_rate=1.0)
-
-        low_paper.add_review(low_reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
-        high_paper.add_review(high_reviewer, MIN_REVIEW_EFFORT_THRESHOLD + 3)
-
-        self.assertGreater(high_paper.accrual_rate, low_paper.accrual_rate)
-
-    def test_agent_cannot_review_same_paper_twice(self):
-        author = DummyAgent("author")
-        reviewer = DummyAgent("reviewer")
-        paper = Paper(author=author)
-
-        first_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD)
-        rate_after_first_review = paper.accrual_rate
-        second_share = paper.add_review(reviewer, MIN_REVIEW_EFFORT_THRESHOLD + 2)
-
-        self.assertGreater(first_share, 0.0)
-        self.assertEqual(second_share, 0.0)
-        self.assertEqual(paper.completed_peer_reviews, 1)
-        self.assertEqual(paper.share_distribution[reviewer], first_share)
-        self.assertEqual(paper.accrual_rate, rate_after_first_review)
-
-    def test_review_share_and_accrual_gain_decay_logarithmically(self):
-        author = DummyAgent("author")
-        first_reviewer = DummyAgent("first reviewer")
-        second_reviewer = DummyAgent("second reviewer")
-        paper = Paper(author=author, accrual_rate=1.0)
-
-        first_share = paper.add_share(first_reviewer)
-        first_rate_gain = paper.accrual_rate - 1.0
-        rate_after_first = paper.accrual_rate
-        second_share = paper.add_share(second_reviewer)
-        second_rate_gain = paper.accrual_rate - rate_after_first
-
-        self.assertEqual(first_share, 0.01)
-        self.assertLess(second_share, first_share)
-        self.assertLess(second_rate_gain, first_rate_gain)
-
-    def test_constructor_supports_generated_agents(self):
-        env = Environment(num_agents=2, agent_cls=HeuristicAgent)
-
-        self.assertEqual(len(env.agents), 2)
-        self.assertTrue(all(isinstance(agent, HeuristicAgent) for agent in env.agents))
-
-    def test_heuristic_writes_when_no_papers_are_reviewable(self):
-        agent = HeuristicAgent(intrinsic_talent=1.0)
-
-        self.assertEqual(agent.choose_action(), ("write_paper", None))
-
-    def test_heuristic_selects_highest_value_reviewable_paper(self):
-        author = DummyAgent("author")
-        reviewer = HeuristicAgent(intrinsic_talent=1.0)
-        low_value = Paper(author=author, current_ac=10.0, accrual_rate=1.0)
-        high_value = Paper(author=author, current_ac=200.0, accrual_rate=1.0)
-        Agent.all_papers = [low_value, high_value]
-
-        action, paper = reviewer.choose_action()
-
-        self.assertEqual(action, "peer_review")
-        self.assertIs(paper, high_value)
-
-    def test_finish_review_and_start_new_review_same_day(self):
-        author = DummyAgent("author")
-        paper_a = Paper(author=author, current_ac=50.0)
-        paper_b = Paper(author=author, current_ac=100.0)
-        reviewer = DummyAgent(
-            "reviewer",
-            actions=[
-                ("peer_review", paper_a),
-                ("finish_review_peer_review", paper_b),
-            ],
-        )
-        Agent.all_papers = [paper_a, paper_b]
-
-        reviewer.act()
-        self._advance_to_review_choice(reviewer)
-        record = reviewer.act()
-
-        self.assertEqual(record.kind, "review_finished_peer_review")
-        self.assertEqual(record.review_effort, MIN_REVIEW_EFFORT_THRESHOLD)
-        self.assertIs(record.paper, paper_a)
-        self.assertIs(reviewer.active_review_paper, paper_b)
-        self.assertEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_DAY)
-        self.assertTrue(paper_a.review_available)
-        self.assertFalse(paper_b.review_available)
-        self.assertIn(reviewer, paper_a.share_distribution)
-
-    def test_act_returns_review_action_records(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author, current_ac=10.0)
-        reviewer = DummyAgent(
-            "reviewer",
-            actions=[
-                ("peer_review", paper),
-                ("peer_review", paper),
-                ("finish_review_write_paper", None),
-            ],
-        )
-
-        started = reviewer.act()
-        self.assertEqual(started.kind, "review_started")
-        self.assertIs(started.paper, paper)
-
-        self._advance_to_review_choice(reviewer)
-        continued = reviewer.act()
-        self.assertEqual(continued.kind, "review_continued")
-
-        finished = reviewer.act()
-        self.assertEqual(finished.kind, "review_finished_write")
-        self.assertEqual(finished.writing_effort, 0.5)
-
-    def test_write_action_records_writing_effort(self):
-        writer = DummyAgent("writer", actions=[("write_paper", None)])
-
-        record = writer.act()
-
-        self.assertEqual(record.kind, "write_paper")
-        self.assertEqual(record.writing_effort, 0.5)
-        self.assertEqual(writer.paper_progress, 0.5)
-        self.assertFalse(record.published)
-
-    def test_published_write_action_records_writing_effort(self):
-        writer = DummyAgent("writer", actions=[("write_paper", None)])
-        writer.paper_progress = PAPER_THRESHOLD - 0.25
-
-        record = writer.act()
-
-        self.assertEqual(record.kind, "write_paper")
-        self.assertEqual(record.writing_effort, 0.5)
-        self.assertTrue(record.published)
-        self.assertEqual(writer.paper_progress, 0.0)
-        self.assertEqual(len(Agent.all_papers), 1)
-
-    def test_environment_records_capital_and_actions(self):
-        author = DummyAgent("author")
-        reviewer = DummyAgent("reviewer")
+    def test_history_records_timesteps_and_actions(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
         paper = Paper(
             author=author,
-            current_ac=10.0,
             accrual_rate=2.0,
+            current_ac=10.0,
             share_distribution={author: 0.75, reviewer: 0.25},
         )
         history = History()
         env = Environment(agents=[author, reviewer], papers=[paper], history=history)
 
-        env.agentact()
-        env.nextstep()
+        env.run_timestep()
 
-        self.assertEqual(history.days, [1])
+        self.assertEqual(history.timesteps, [1])
+        self.assertEqual(history.days, [1])  # backwards-compatible alias
         self.assertEqual(len(history.actions), 2)
-        self.assertEqual(len(history.agent_capital["author"]), 1)
-        self.assertEqual(len(history.agent_capital["reviewer"]), 1)
         self.assertAlmostEqual(history.agent_capital["author"][0], 9.0)
-        self.assertAlmostEqual(history.agent_capital["reviewer"][0], 3.0)
         self.assertEqual(history.scalars["num_papers"][0], 1.0)
 
-    def test_environment_records_writing_effort(self):
-        writer = DummyAgent("writer")
+    def test_full_run_produces_reviews(self):
+        from run_simulation import build_simulation
+
         history = History()
-        env = Environment(agents=[writer], history=history)
+        env = build_simulation(history, num_agents=12, rl_agents=0, seed=3)
+        env.run(120)
 
-        env.agentact()
+        completed = sum(
+            getattr(p, "completed_peer_reviews", 0) for p in env.papers
+        )
+        self.assertGreater(len(env.papers), 0)
+        self.assertGreater(completed, 0)
+        # Reviewed papers leave the market permanently.
+        for paper in env.papers:
+            if paper.reviewed:
+                self.assertFalse(paper.review_available)
 
-        self.assertEqual(history.writing_efforts, [(1, "writer", 0.5, False)])
-
-    def test_history_to_csv_has_header_and_one_row_per_day(self):
-        author = DummyAgent("author")
-        paper = Paper(author=author, current_ac=5.0, accrual_rate=1.0)
+    def test_history_to_csv_has_header_and_one_row_per_timestep(self):
+        author = ScriptAgent("author")
+        paper = Paper(author=author, accrual_rate=1.0, current_ac=5.0)
         history = History()
         env = Environment(agents=[author], papers=[paper], history=history)
         env.run(3)
@@ -397,11 +370,13 @@ class SimulationTest(unittest.TestCase):
         with open(path, newline="") as fh:
             rows = list(csv.reader(fh))
 
-        self.assertEqual(rows[0][0], "day")
+        self.assertEqual(rows[0][0], "timestep")
         self.assertIn("total_capital", rows[0])
         self.assertEqual(len(rows), 1 + 3)
         self.assertEqual([row[0] for row in rows[1:]], ["1", "2", "3"])
 
+
+class UtilityTest(unittest.TestCase):
     def test_gini_ranges_from_equal_to_unequal(self):
         self.assertEqual(gini([]), 0.0)
         self.assertEqual(gini([5.0, 5.0, 5.0]), 0.0)
@@ -411,7 +386,8 @@ class SimulationTest(unittest.TestCase):
     def test_visualize_writes_pngs(self):
         import visualize
 
-        author = DummyAgent("author")
+        Agent.all_papers = []
+        author = ScriptAgent("author")
         paper = Paper(author=author, current_ac=5.0)
         history = History()
         env = Environment(agents=[author], papers=[paper], history=history)

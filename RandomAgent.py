@@ -7,29 +7,31 @@ from Paper import Paper
 
 class RandomAgent(Agent):
 
-    def choose_action(self) -> tuple[str, Paper | None]:
-        if self.should_offer_review_choice():
-            reviewable = [p for p in Agent.all_papers if self._can_review(p)]
-            options: list[tuple[str, Paper | None]] = [
-                ("peer_review", self.active_review_paper),
-                ("finish_review_write_paper", None),
-            ]
-            for paper in reviewable:
-                options.append(("finish_review_peer_review", paper))
-            return random.choice(options)
-
-        reviewable = [p for p in Agent.all_papers if self._can_review(p)]
+    def choose_marketplace_action(self) -> Paper | None:
+        reviewable = [
+            p
+            for p in Agent.all_papers
+            if self._can_review(p) and p.offered_share(self) > 0.0
+        ]
         if not reviewable:
-            return "write_paper", None
+            return None
+        # Pass roughly half the time so the agent also does its own research.
+        if random.random() < 0.5:
+            return None
+        return random.choice(reviewable)
 
-        action = random.choice(["write_paper", "peer_review"])
-        if action == "write_paper":
-            return "write_paper", None
-        return action, random.choice(reviewable)
+    def choose_work_action(self) -> tuple[str, Paper | None]:
+        if self.active_review_paper is not None:
+            return random.choice(
+                [
+                    ("peer_review", self.active_review_paper),
+                    ("finish_review_write_paper", None),
+                ]
+            )
+        return "write_paper", None
 
     def _can_review(self, paper: Paper) -> bool:
         helper = getattr(paper, "can_start_review", None)
         if helper is not None:
             return bool(helper(self))
-
-        return paper.author != self
+        return paper.author is not self

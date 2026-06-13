@@ -13,51 +13,71 @@ from config import SIM
 DEFAULT_ACCRUAL_RATE = SIM.default_accrual_rate
 DEFAULT_REVIEW_SHARE = SIM.default_review_share
 MIN_REVIEW_EFFORT_THRESHOLD = SIM.min_review_effort_threshold
-REVIEW_EFFORT_PER_DAY = SIM.review_effort_per_day
+REVIEW_EFFORT_PER_TIMESTEP = SIM.review_effort_per_timestep
 BASE_REVIEW_ACCRUAL_BUMP = SIM.base_review_accrual_bump
 FIRST_EXTRA_DAY_BUMP = SIM.first_extra_day_bump
-DEFAULT_REVIEWER_AC_THRESHOLD = SIM.default_reviewer_ac_threshold
-DEFAULT_HIGH_AC_REVIEW_SHARE = SIM.default_high_ac_review_share
 DEFAULT_MAX_REVIEWER_SHARE = SIM.default_max_reviewer_share
+MIN_OFFER_SHARE = SIM.min_offer_share
+QUALITY_SIGMA = SIM.quality_sigma
+MIN_PAPER_QUALITY = SIM.min_paper_quality
+QUALITY_PRICE_SCALE = SIM.quality_price_scale
+HISTORY_PRICE_SCALE = SIM.history_price_scale
 
 
-def review_accrual_bump(effort: float) -> float:
-    """Total accrual-rate bump fraction for a review completed at ``effort``.
+def quality_multiplier(quality: float) -> float:
+    """Clamp paper quality to a strictly positive multiplier."""
+    return max(MIN_PAPER_QUALITY, float(quality))
 
-    Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` yields 0. At exactly 10 the
-    reviewer earns the base bump. Past 10 the bump grows logarithmically in the
-    extra effort, so each day past 10 still adds a positive marginal bump but
-    each marginal is smaller than the previous day's. Base-2 anchors the first
-    extra day to add exactly ``FIRST_EXTRA_DAY_BUMP``.
+
+def accrual_rate_from_quality(quality: float) -> float:
+    """Base AC accrual rate implied by a paper's quality."""
+    return DEFAULT_ACCRUAL_RATE * quality_multiplier(quality)
+
+
+def review_accrual_bump(effort: float, quality: float = 1.0) -> float:
+    """Accrual-rate bump fraction for a single review of ``effort`` and ``quality``.
+
+    Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` (one timestep) yields 0. At the
+    threshold the reviewer earns the quality-scaled base bump. Each extra
+    timestep adds a positive but logarithmically diminishing marginal bump, so a
+    longer review is worth more but with falling returns.
     """
     if effort < MIN_REVIEW_EFFORT_THRESHOLD:
         return 0.0
 
-    extra_days = effort - MIN_REVIEW_EFFORT_THRESHOLD
-    return BASE_REVIEW_ACCRUAL_BUMP + FIRST_EXTRA_DAY_BUMP * math.log2(1 + extra_days)
+    base = BASE_REVIEW_ACCRUAL_BUMP * quality_multiplier(quality)
+    extra = effort - MIN_REVIEW_EFFORT_THRESHOLD
+    return base + FIRST_EXTRA_DAY_BUMP * math.log2(1 + extra)
 
 
 class Paper:
-    """Minimal paper model for the peer-review marketplace."""
+    """A paper in the single-review marketplace.
+
+    A paper is created with a known ``quality`` and is published to the market
+    one timestep after its author finishes writing it. While listed, its author
+    offers each potential reviewer a distinct share price (``price_table``). The
+    first agent to claim it takes it permanently off the market; the paper can be
+    reviewed exactly once.
+    """
 
     def __init__(
         self,
         author: Agent,
-        accrual_rate: float = DEFAULT_ACCRUAL_RATE,
+        quality: float = 1.0,
+        accrual_rate: float | None = None,
         current_ac: float = 0.0,
         share_distribution: dict[Agent, float] | None = None,
         completion_progress: float = 1.0,
-        review_available: bool = True,
-        reviewer_ac_threshold: float = DEFAULT_REVIEWER_AC_THRESHOLD,
-        low_ac_review_share: float = DEFAULT_REVIEW_SHARE,
-        high_ac_review_share: float = DEFAULT_HIGH_AC_REVIEW_SHARE,
+        market_listed: bool = False,
         max_reviewer_share: float = DEFAULT_MAX_REVIEWER_SHARE,
     ):
         if author is None:
             raise ValueError("author cannot be None")
 
         self.author = author
-        self.accrual_rate = self._nonnegative_float(accrual_rate, "accrual_rate")
+        self.quality = quality_multiplier(quality)
+        rate = accrual_rate_from_quality(self.quality) if accrual_rate is None else accrual_rate
+        self.accrual_rate = self._nonnegative_float(rate, "accrual_rate")
         self.current_ac = self._nonnegative_float(current_ac, "current_ac")
         self.share_distribution = (
             {author: 1.0} if share_distribution is None else dict(share_distribution)
@@ -67,64 +87,176 @@ class Paper:
             completion_progress,
             "completion_progress",
         )
-        self.review_available = bool(review_available)
-        self.reviewer_ac_threshold = self._nonnegative_float(
-            reviewer_ac_threshold,
-            "reviewer_ac_threshold",
-        )
-        self.low_ac_review_share = self._validate_share_value(
-            low_ac_review_share,
-            "low_ac_review_share",
-        )
-        self.high_ac_review_share = self._validate_share_value(
-            high_ac_review_share,
-            "high_ac_review_share",
-        )
         self.max_reviewer_share = self._validate_share_value(
             max_reviewer_share,
             "max_reviewer_share",
         )
-        self.completed_peer_reviews = 0
+
+        # Marketplace / single-review lifecycle.
+        self.market_listed = bool(market_listed)
+        self.scheduled_listing_timestep: int | None = None
+        self.review_claimed = False
+        self.reviewed = False
+        self.reviewer: Agent | None = None
         self.review_in_progress_by: Agent | None = None
-        self.reviewed_by: set[Agent] = set()
+        self.agreed_review_share = 0.0
+        self.price_table: dict[Agent, float] = {}
         self.review_records: list[dict[str, object]] = []
 
+    # ---- compatibility aliases ------------------------------------------
     @property
     def ac_accrual_rate(self) -> float:
-        """Compatibility alias for notes/code that use the longer AC name."""
         return self.accrual_rate
 
     @ac_accrual_rate.setter
     def ac_accrual_rate(self, value: float):
         self.accrual_rate = self._nonnegative_float(value, "ac_accrual_rate")
 
-    def is_valid_review_effort(self, effort: float) -> bool:
-        return self._nonnegative_float(effort, "review_effort") >= MIN_REVIEW_EFFORT_THRESHOLD
+    @property
+    def completed_peer_reviews(self) -> int:
+        """0 or 1 — a paper can be reviewed at most once."""
+        return 1 if self.reviewed else 0
+
+    @property
+    def reviewed_by(self) -> set[Agent]:
+        return {self.reviewer} if self.reviewer is not None else set()
+
+    @property
+    def review_available(self) -> bool:
+        """True when the paper is listed and not yet claimed/reviewed."""
+        return self.market_listed and not self.review_claimed and not self.reviewed
+
+    # ---- pricing --------------------------------------------------------
+    def update_price_table(
+        self,
+        reviewers,
+        market_median_quality: float,
+        mean_peer_review_history: float,
+    ) -> None:
+        """Recompute the per-reviewer share offer for this listed paper.
+
+        Higher paper quality (relative to the market) lowers the offered share;
+        a stronger reviewer peer-review history raises it. The result is clamped
+        to ``[min_offer_share, author share]`` and the single-review cap.
+        """
+        author_share = self.share_distribution.get(self.author, 0.0)
+        ceiling = min(self.max_reviewer_share, max(0.0, author_share))
+        table: dict[Agent, float] = {}
+        for agent in reviewers:
+            if agent is self.author:
+                continue
+            quality_factor = math.exp(
+                -QUALITY_PRICE_SCALE * (self.quality - market_median_quality)
+            )
+            history = getattr(agent, "peer_review_history", 0.0)
+            history_factor = max(
+                0.0,
+                1.0 + HISTORY_PRICE_SCALE * (history - mean_peer_review_history),
+            )
+            offer = DEFAULT_REVIEW_SHARE * quality_factor * history_factor
+            offer = min(max(offer, MIN_OFFER_SHARE), ceiling)
+            table[agent] = offer
+        self.price_table = table
+
+    def offered_share(self, agent: Agent) -> float:
+        """The share currently offered to ``agent`` (0 if none/ineligible)."""
+        return float(self.price_table.get(agent, 0.0))
+
+    # ---- single-review lifecycle ----------------------------------------
+    def can_start_review(self, agent: Agent) -> bool:
+        if agent is self.author:
+            return False
+        if self.reviewed or self.review_claimed:
+            return False
+        return self.market_listed
+
+    def start_review(self, agent: Agent) -> bool:
+        """Claim the paper for review: permanently delist it and lock the price."""
+        if not self.can_start_review(agent):
+            return False
+        self.review_in_progress_by = agent
+        self.review_claimed = True
+        self.market_listed = False
+        self.agreed_review_share = self.offered_share(agent)
+        return True
+
+    def finish_review(self, agent: Agent, effort: float) -> float:
+        """Finalize the in-progress review, granting the locked share.
+
+        Returns the share actually transferred (0 below the effort threshold).
+        Consumes the paper's single review either way.
+        """
+        if self.review_in_progress_by is not agent:
+            return 0.0
+
+        review_effort = self._nonnegative_float(effort, "review_effort")
+        self.review_in_progress_by = None
+        self.reviewed = True
+        self.reviewer = agent
+
+        if review_effort < MIN_REVIEW_EFFORT_THRESHOLD:
+            return 0.0
+
+        share = min(
+            self.agreed_review_share,
+            max(0.0, self.share_distribution.get(self.author, 0.0)),
+        )
+        if share > 0.0:
+            self.share_distribution[self.author] = (
+                self.share_distribution.get(self.author, 0.0) - share
+            )
+            self.share_distribution[agent] = (
+                self.share_distribution.get(agent, 0.0) + share
+            )
+
+        self.accrual_rate = self.estimate_accrual_rate_after_review(review_effort)
+        self.review_records.append(
+            {
+                "reviewer": agent,
+                "share": share,
+                "effort": review_effort,
+                "accrual_rate": self.accrual_rate,
+            }
+        )
+        return share
 
     def add_review(
         self,
         agent: Agent,
         effort: float,
-        share: float = DEFAULT_REVIEW_SHARE,
+        share: float | None = None,
     ) -> float:
-        """Apply a completed review once effort is at least the minimum threshold."""
-        review_effort = self._nonnegative_float(effort, "review_effort")
-        if not self.is_valid_review_effort(review_effort):
+        """Claim and finish a review in one call (direct/testing convenience)."""
+        if not self.start_review(agent):
             return 0.0
+        if share is not None:
+            self.agreed_review_share = self._validate_share_value(share, "share")
+        elif self.agreed_review_share <= 0.0:
+            self.agreed_review_share = min(
+                DEFAULT_REVIEW_SHARE,
+                max(0.0, self.share_distribution.get(self.author, 0.0)),
+            )
+        return self.finish_review(agent, effort)
 
-        return self._add_review_share(agent, share, effort=review_effort)
+    def estimate_review_share(self, agent: Agent) -> float:
+        """Share the author would grant ``agent`` for completing a review now."""
+        if self.review_in_progress_by is agent:
+            return min(
+                self.agreed_review_share,
+                max(0.0, self.share_distribution.get(self.author, 0.0)),
+            )
+        if not self.can_start_review(agent):
+            return 0.0
+        return min(
+            self.offered_share(agent),
+            max(0.0, self.share_distribution.get(self.author, 0.0)),
+        )
 
-    def add_share(self, agent: Agent, share: float = DEFAULT_REVIEW_SHARE) -> float:
-        """Compatibility wrapper for a minimum-threshold completed review."""
-        return self.add_review(agent, MIN_REVIEW_EFFORT_THRESHOLD, share)
+    def estimate_accrual_rate_after_review(self, effort: float) -> float:
+        return self.accrual_rate * (1.0 + review_accrual_bump(effort, self.quality))
 
+    # ---- shares / accrual ----------------------------------------------
     def set_share(self, agent: Agent, share: float):
-        """Set a contributor share.
-
-        This method is intentionally stricter than review actions. Normal
-        simulation-invalid review actions no-op, but direct invalid share edits
-        raise ValueError so model mistakes are visible.
-        """
         if agent is None:
             raise ValueError("agent cannot be None")
 
@@ -138,10 +270,9 @@ class Paper:
             raise ValueError("total paper shares cannot exceed 1.0")
 
         self.share_distribution[agent] = share_value
-        self._refresh_review_available()
 
-    def advance_accrual(self, days: int = 1):
-        self.accrue_ac(days)
+    def advance_accrual(self, time_steps: int = 1):
+        self.accrue_ac(time_steps)
 
     def accrue_ac(self, time_steps: float = 1.0) -> float:
         """Increase current AC using the current provisional accrual rate."""
@@ -149,113 +280,7 @@ class Paper:
         self.current_ac += self.accrual_rate * elapsed
         return self.current_ac
 
-    def estimate_review_share(
-        self,
-        agent: Agent,
-        share: float = DEFAULT_REVIEW_SHARE,
-    ) -> float:
-        if not self.can_start_review(agent):
-            return 0.0
-
-        base_share = self._base_review_share(agent, share)
-        decayed_share = base_share / self._review_damping()
-        author_share = self.share_distribution.get(self.author, 0.0)
-        remaining_review_budget = self.max_reviewer_share - self._total_reviewer_share()
-        return min(
-            decayed_share,
-            max(0.0, author_share),
-            max(0.0, remaining_review_budget),
-        )
-
-    def estimate_accrual_rate_after_review(self, effort: float) -> float:
-        bump = review_accrual_bump(effort) / self._review_damping()
-        return self.accrual_rate * (1.0 + bump)
-
-    def can_start_review(self, agent: Agent) -> bool:
-        if agent == self.author:
-            return False
-        if agent in self.reviewed_by:
-            return False
-        if self.review_in_progress_by == agent:
-            return True
-        if not self.review_available or self.review_in_progress_by is not None:
-            return False
-        return True
-
-    def start_review(self, agent: Agent) -> bool:
-        if not self.can_start_review(agent):
-            return False
-
-        self.review_in_progress_by = agent
-        self.review_available = False
-        return True
-
-    def finish_review(self, agent: Agent):
-        if self.review_in_progress_by == agent:
-            self.review_in_progress_by = None
-            self._refresh_review_available()
-
-    def _add_review_share(
-        self,
-        agent: Agent,
-        share: float,
-        effort: float,
-    ) -> float:
-        review_share = self.estimate_review_share(agent, share)
-        if review_share <= 0.0:
-            return 0.0
-
-        self.share_distribution[self.author] = (
-            self.share_distribution.get(self.author, 0.0) - review_share
-        )
-        self.share_distribution[agent] = (
-            self.share_distribution.get(agent, 0.0) + review_share
-        )
-        self.accrual_rate = self.estimate_accrual_rate_after_review(effort)
-        self.completed_peer_reviews += 1
-        self.reviewed_by.add(agent)
-        self.review_records.append(
-            {
-                "reviewer": agent,
-                "share": review_share,
-                "effort": effort,
-                "accrual_bump": review_accrual_bump(effort) / self._review_damping(),
-                "accrual_rate": self.accrual_rate,
-            }
-        )
-        self._refresh_review_available()
-        return review_share
-
-    def _review_damping(self) -> float:
-        return math.log2(self.completed_peer_reviews + 2)
-
-    def _refresh_review_available(self):
-        author_share = self.share_distribution.get(self.author, 0.0)
-        remaining_reviewer_share = self.max_reviewer_share - self._total_reviewer_share()
-        self.review_available = author_share > 0.0 and remaining_reviewer_share > 0.0
-
-    def _base_review_share(self, agent: Agent, share: float) -> float:
-        requested_share = self._validate_share_value(share, "share")
-        reviewer_ac = getattr(agent, "academic_capital", 0.0)
-        try:
-            reviewer_ac = float(reviewer_ac)
-        except (TypeError, ValueError):
-            reviewer_ac = 0.0
-
-        if requested_share == self.low_ac_review_share:
-            if reviewer_ac >= self.reviewer_ac_threshold:
-                return self.high_ac_review_share
-            return self.low_ac_review_share
-
-        return requested_share
-
-    def _total_reviewer_share(self) -> float:
-        return sum(
-            share
-            for contributor, share in self.share_distribution.items()
-            if contributor is not self.author
-        )
-
+    # ---- validation helpers --------------------------------------------
     def _validate_share_distribution(self):
         total = 0.0
         for contributor, share in self.share_distribution.items():
