@@ -15,6 +15,8 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
+from Paper import BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW
+
 if TYPE_CHECKING:
     from Agent import ActionRecord
     from Environment import Environment
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
 MetricFn = Callable[["Environment"], float]
 
 COMPLETED_REVIEW_KINDS = frozenset({
+    "bad_faith_review",
+    "good_faith_review",
     "review_finished_write",
     "review_finished_peer_review",
     "review_stopped",
@@ -63,6 +67,22 @@ def default_metrics() -> dict[str, MetricFn]:
         "completed_peer_reviews": lambda env: float(
             sum(getattr(p, "completed_peer_reviews", 0) for p in env.papers)
         ),
+        "good_faith_reviews": lambda env: float(
+            sum(
+                1
+                for p in env.papers
+                for record in getattr(p, "review_records", [])
+                if record.get("review_kind") == GOOD_FAITH_REVIEW
+            )
+        ),
+        "bad_faith_reviews": lambda env: float(
+            sum(
+                1
+                for p in env.papers
+                for record in getattr(p, "review_records", [])
+                if record.get("review_kind") == BAD_FAITH_REVIEW
+            )
+        ),
         "mean_peer_review_history": lambda env: (
             sum(getattr(a, "peer_review_history", 0.0) for a in env.agents)
             / len(env.agents)
@@ -103,7 +123,9 @@ class History:
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
-        self.completed_reviews: list[tuple[int, str, str | None, float]] = []
+        self.completed_reviews: list[
+            tuple[int, str, str | None, float, str | None]
+        ] = []
         self.writing_efforts: list[tuple[int, str, float, bool]] = []
         self.action_counts: Counter[str] = Counter()
         self.agent_actions: dict[str, list[str]] = {}
@@ -165,13 +187,14 @@ class History:
             and record.kind not in _NON_COMPLETION_REVIEW_KINDS
         ):
             effort = float(record.review_effort)
+            review_kind = record.review_kind
             # Record every finished review, including early stops below the
             # reward threshold, so the effort distribution shows where agents
             # actually choose to stop. The reward cliff (sub-threshold reviews
             # earn nothing) lives in Paper, not in this recording gate.
             if effort > 0:
                 self.completed_reviews.append(
-                    (timestep, agent_label, paper_label, effort)
+                    (timestep, agent_label, paper_label, effort, review_kind)
                 )
         if record.writing_effort is not None:
             self.writing_efforts.append(
@@ -249,8 +272,15 @@ class History:
                 for (d, a, k, p) in self.actions
             ],
             "completed_reviews": [
-                {"timestep": d, "day": d, "agent": a, "paper": p, "effort": e}
-                for (d, a, p, e) in self.completed_reviews
+                {
+                    "timestep": d,
+                    "day": d,
+                    "agent": a,
+                    "paper": p,
+                    "effort": e,
+                    "review_kind": k,
+                }
+                for (d, a, p, e, k) in self.completed_reviews
             ],
             "writing_efforts": [
                 {

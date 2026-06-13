@@ -19,7 +19,20 @@ Every timestep runs in two phases over a freshly shuffled agent order:
 
 ## Review effort model
 
-Review effort accrues one unit per timestep. The minimum threshold is one timestep, so a review can complete the timestep after it is taken on (earning the smallest, quality-scaled accrual bump). Additional timesteps add a logarithmically diminishing bump.
+The simulation supports two run-level review paradigms. A single run is either
+`continuous` or `discrete`; both paradigms are not mixed within one environment.
+
+In `continuous` mode, agents choose review time by continuing or finishing a
+review. The environment classifies completed reviews as bad faith below
+`good_faith_review_threshold` and good faith at or above it.
+
+In `discrete` mode, agents choose fixed bad- or good-faith review actions. By
+default, bad faith takes `T_B = 1` timestep, good faith takes `T_G = 5 * T_B`,
+and manuscript work uses `T_M = 200 * T_B`.
+
+The minimum reward threshold is one timestep, so a one-timestep review earns the
+smallest quality-scaled accrual bump. Additional timesteps add a logarithmically
+diminishing bump.
 
 ## Writing Effort Model
 
@@ -39,6 +52,12 @@ python dashboard_server.py
 
 Then open http://127.0.0.1:8000. The server is stdlib-only and runs entirely on
 localhost. Each browser connection streams a fresh, deterministic run with a small delay every step so the run is watchable.
+
+Run a discrete CLI simulation with random controls:
+
+```
+python run_simulation.py --review-paradigm discrete --random-agents 5 --no-archive
+```
 
 ## Logging runs
 Separately from the live dashboard, you can save completed runs and browse them later in a static web page . This is gets published to GitHub

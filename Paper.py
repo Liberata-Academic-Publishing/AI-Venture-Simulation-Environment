@@ -13,7 +13,12 @@ from config import SIM
 DEFAULT_ACCRUAL_RATE = SIM.default_accrual_rate
 DEFAULT_REVIEW_SHARE = SIM.default_review_share
 MIN_REVIEW_EFFORT_THRESHOLD = SIM.min_review_effort_threshold
+GOOD_FAITH_REVIEW_THRESHOLD = SIM.good_faith_review_threshold
 REVIEW_EFFORT_PER_TIMESTEP = SIM.review_effort_per_timestep
+BAD_REVIEW_TIMESTEPS = SIM.bad_review_timesteps
+GOOD_REVIEW_TIMESTEPS = SIM.good_review_timesteps
+DISCRETE_PAPER_TIMESTEPS = SIM.discrete_paper_timesteps
+DISCRETE_WRITING_EFFORT_PER_TIMESTEP = SIM.discrete_writing_effort_per_timestep
 BASE_REVIEW_ACCRUAL_BUMP = SIM.base_review_accrual_bump
 FIRST_EXTRA_DAY_BUMP = SIM.first_extra_day_bump
 DEFAULT_MAX_REVIEWER_SHARE = SIM.default_max_reviewer_share
@@ -22,6 +27,55 @@ QUALITY_SIGMA = SIM.quality_sigma
 MIN_PAPER_QUALITY = SIM.min_paper_quality
 QUALITY_PRICE_SCALE = SIM.quality_price_scale
 HISTORY_PRICE_SCALE = SIM.history_price_scale
+
+REVIEW_PARADIGM_CONTINUOUS = "continuous"
+REVIEW_PARADIGM_DISCRETE = "discrete"
+VALID_REVIEW_PARADIGMS = frozenset({
+    REVIEW_PARADIGM_CONTINUOUS,
+    REVIEW_PARADIGM_DISCRETE,
+})
+
+BAD_FAITH_REVIEW = "bad_faith"
+GOOD_FAITH_REVIEW = "good_faith"
+VALID_REVIEW_KINDS = frozenset({BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW})
+
+
+def validate_review_paradigm(paradigm: str) -> str:
+    value = str(paradigm).strip().lower()
+    if value not in VALID_REVIEW_PARADIGMS:
+        allowed = ", ".join(sorted(VALID_REVIEW_PARADIGMS))
+        raise ValueError(f"review_paradigm must be one of: {allowed}")
+    return value
+
+
+def normalize_review_kind(review_kind: str | None) -> str:
+    value = str(review_kind or "").strip().lower()
+    if value not in VALID_REVIEW_KINDS:
+        allowed = ", ".join(sorted(VALID_REVIEW_KINDS))
+        raise ValueError(f"review_kind must be one of: {allowed}")
+    return value
+
+
+def review_kind_from_effort(effort: float) -> str:
+    """Classify a completed review by the continuous-mode threshold."""
+    return (
+        GOOD_FAITH_REVIEW
+        if float(effort) >= GOOD_FAITH_REVIEW_THRESHOLD
+        else BAD_FAITH_REVIEW
+    )
+
+
+def fixed_review_effort(review_kind: str) -> float:
+    """Discrete-mode duration for a chosen review kind."""
+    kind = normalize_review_kind(review_kind)
+    if kind == GOOD_FAITH_REVIEW:
+        return GOOD_REVIEW_TIMESTEPS
+    return BAD_REVIEW_TIMESTEPS
+
+
+def review_action_kind(review_kind: str) -> str:
+    """Action-log label for a completed good/bad-faith review."""
+    return f"{normalize_review_kind(review_kind)}_review"
 
 
 def quality_multiplier(quality: float) -> float:
@@ -180,7 +234,12 @@ class Paper:
         self.agreed_review_share = self.offered_share(agent)
         return True
 
-    def finish_review(self, agent: Agent, effort: float) -> float:
+    def finish_review(
+        self,
+        agent: Agent,
+        effort: float,
+        review_kind: str | None = None,
+    ) -> float:
         """Finalize the in-progress review, granting the locked share.
 
         Returns the share actually transferred (0 below the effort threshold).
@@ -190,31 +249,35 @@ class Paper:
             return 0.0
 
         review_effort = self._nonnegative_float(effort, "review_effort")
+        completed_review_kind = (
+            normalize_review_kind(review_kind)
+            if review_kind is not None
+            else review_kind_from_effort(review_effort)
+        )
         self.review_in_progress_by = None
         self.reviewed = True
         self.reviewer = agent
 
-        if review_effort < MIN_REVIEW_EFFORT_THRESHOLD:
-            return 0.0
-
-        share = min(
-            self.agreed_review_share,
-            max(0.0, self.share_distribution.get(self.author, 0.0)),
-        )
-        if share > 0.0:
-            self.share_distribution[self.author] = (
-                self.share_distribution.get(self.author, 0.0) - share
+        share = 0.0
+        if review_effort >= MIN_REVIEW_EFFORT_THRESHOLD:
+            share = min(
+                self.agreed_review_share,
+                max(0.0, self.share_distribution.get(self.author, 0.0)),
             )
-            self.share_distribution[agent] = (
-                self.share_distribution.get(agent, 0.0) + share
-            )
-
-        self.accrual_rate = self.estimate_accrual_rate_after_review(review_effort)
+            if share > 0.0:
+                self.share_distribution[self.author] = (
+                    self.share_distribution.get(self.author, 0.0) - share
+                )
+                self.share_distribution[agent] = (
+                    self.share_distribution.get(agent, 0.0) + share
+                )
+            self.accrual_rate = self.estimate_accrual_rate_after_review(review_effort)
         self.review_records.append(
             {
                 "reviewer": agent,
                 "share": share,
                 "effort": review_effort,
+                "review_kind": completed_review_kind,
                 "accrual_rate": self.accrual_rate,
             }
         )

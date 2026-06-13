@@ -30,6 +30,8 @@ except ImportError as exc:  # pragma: no cover - exercised only without matplotl
 
 ACTION_COLORS = {
     "write_paper": "#60a5fa",
+    "bad_faith_review": "#f87171",
+    "good_faith_review": "#16a34a",
     "review_started": "#4ade80",
     "review_continued": "#22c55e",
     "review_finished_write": "#f59e0b",
@@ -42,6 +44,8 @@ ACTION_COLORS = {
 # Top-level decisions (matches run_simulation.DECISION_LABELS).
 DECISION_LABELS = {
     "write_paper": "write_paper",
+    "bad_faith_review": "bad_faith_review",
+    "good_faith_review": "good_faith_review",
     "review_started": "start_review",
     "review_continued": "continue_review",
     "review_finished_write": "finish_and_write",
@@ -52,6 +56,8 @@ DECISION_LABELS = {
 
 DECISION_COLORS = {
     "write_paper": "#60a5fa",
+    "bad_faith_review": "#f87171",
+    "good_faith_review": "#16a34a",
     "start_review": "#4ade80",
     "continue_review": "#22c55e",
     "finish_and_write": "#f59e0b",
@@ -168,7 +174,12 @@ def plot_review_behavior(history: "History", path: str | None = None, show: bool
     """Cumulative good- vs bad-faith reviews (and paper count) over time."""
     fig, ax = plt.subplots(figsize=(11, 6))
     scalars = history.scalars
-    for key in ("completed_peer_reviews", "num_papers"):
+    for key in (
+        "good_faith_reviews",
+        "bad_faith_reviews",
+        "completed_peer_reviews",
+        "num_papers",
+    ):
         if key in scalars:
             ax.plot(history.days, scalars[key], label=key)
     ax.set_xlabel("Timestep")
@@ -330,7 +341,7 @@ def _daily_action_counts(history: "History") -> dict[str, list[int]]:
 
 def _completed_reviews(history: "History") -> list[tuple[int, float]]:
     """Return (day, effort) for each completed peer review."""
-    return [(day, effort) for day, _, _, effort in history.completed_reviews]
+    return [(row[0], row[3]) for row in history.completed_reviews]
 
 
 def _writing_effort_by_agent(history: "History") -> dict[str, float]:
@@ -487,6 +498,8 @@ def plot_action_mix_over_time(
 
 _DECISION_ORDER = (
     "write_paper",
+    "bad_faith_review",
+    "good_faith_review",
     "start_review",
     "continue_review",
     "finish_and_write",

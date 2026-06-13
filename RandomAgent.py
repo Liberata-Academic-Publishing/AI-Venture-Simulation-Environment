@@ -2,10 +2,37 @@ from __future__ import annotations
 import random
 
 from Agent import Agent
-from Paper import Paper
+from config import SIM
+from Paper import (
+    BAD_FAITH_REVIEW,
+    GOOD_FAITH_REVIEW,
+    REVIEW_PARADIGM_DISCRETE,
+    Paper,
+)
 
 
 class RandomAgent(Agent):
+
+    def __init__(
+        self,
+        intrinsic_talent: float,
+        academic_capital: float = 0.0,
+        paper_progress: float = 0.0,
+        review_progress: float = 0.0,
+        name: str | None = None,
+        *,
+        claim_probability: float = SIM.random_claim_probability,
+        good_faith_probability: float = SIM.random_good_faith_probability,
+    ):
+        super().__init__(
+            intrinsic_talent=intrinsic_talent,
+            academic_capital=academic_capital,
+            paper_progress=paper_progress,
+            review_progress=review_progress,
+            name=name,
+        )
+        self.claim_probability = claim_probability
+        self.good_faith_probability = good_faith_probability
 
     def choose_marketplace_action(self) -> Paper | None:
         reviewable = [
@@ -15,10 +42,14 @@ class RandomAgent(Agent):
         ]
         if not reviewable:
             return None
-        # Pass roughly half the time so the agent also does its own research.
-        if random.random() < 0.5:
+        if random.random() >= self.claim_probability:
             return None
         return random.choice(reviewable)
+
+    def choose_review_kind(self, paper: Paper) -> str:
+        if random.random() < self.good_faith_probability:
+            return GOOD_FAITH_REVIEW
+        return BAD_FAITH_REVIEW
 
     def choose_work_action(self) -> tuple[str, Paper | None]:
         if self.active_review_paper is not None:
@@ -35,3 +66,30 @@ class RandomAgent(Agent):
         if helper is not None:
             return bool(helper(self))
         return paper.author is not self
+
+
+class ProbabilisticDiscreteAgent(RandomAgent):
+    """Discrete-only baseline with a fixed probability over good/bad reviews."""
+
+    requires_review_paradigm = REVIEW_PARADIGM_DISCRETE
+
+    def __init__(
+        self,
+        intrinsic_talent: float,
+        academic_capital: float = 0.0,
+        paper_progress: float = 0.0,
+        review_progress: float = 0.0,
+        name: str | None = None,
+        *,
+        claim_probability: float = SIM.probabilistic_claim_probability,
+        good_faith_probability: float = SIM.probabilistic_good_faith_probability,
+    ):
+        super().__init__(
+            intrinsic_talent=intrinsic_talent,
+            academic_capital=academic_capital,
+            paper_progress=paper_progress,
+            review_progress=review_progress,
+            name=name,
+            claim_probability=claim_probability,
+            good_faith_probability=good_faith_probability,
+        )

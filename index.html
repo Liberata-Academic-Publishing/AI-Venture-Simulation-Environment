@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Venture Simulation — Run Gallery</title>
+  <script src="chart.umd.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
+      background: #0f1419; color: #e6e6e6;
+    }
+    header {
+      padding: 14px 22px; border-bottom: 1px solid #232b33;
+      display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    }
+    header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    #status { font-size: 13px; color: #8b98a5; }
+    #status.done { color: #4ade80; }
+    #status.error { color: #f87171; }
+    select {
+      background: #161d24; color: #e6e6e6; border: 1px solid #232b33;
+      border-radius: 8px; padding: 6px 10px; font-size: 13px; max-width: 420px;
+    }
+    #speed { max-width: 110px; }
+    button {
+      background: #1d2630; color: #e6e6e6; border: 1px solid #2e3a46;
+      border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #243140; }
+    button:disabled { opacity: .5; cursor: default; }
+    .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+    .tile {
+      background: #161d24; border: 1px solid #232b33; border-radius: 8px;
+      padding: 6px 12px; min-width: 92px;
+    }
+    .tile .label { font-size: 11px; color: #8b98a5; text-transform: uppercase; letter-spacing: .04em; }
+    .tile .value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+    main { display: grid; grid-template-columns: 1fr 360px; gap: 16px; padding: 16px 22px; }
+    .panel { background: #161d24; border: 1px solid #232b33; border-radius: 10px; padding: 14px; }
+    .panel h2 { font-size: 13px; margin: 0 0 10px; color: #c4cdd5; font-weight: 600; }
+    .charts { display: grid; gap: 16px; }
+    .side { display: grid; gap: 16px; align-content: start; }
+    .feed { max-height: 60vh; overflow-y: auto; }
+    #panel-config { max-height: 40vh; overflow-y: auto; }
+    .cfg-group { font-size: 11px; color: #8b98a5; text-transform: uppercase;
+      letter-spacing: .04em; margin: 12px 0 4px; }
+    .cfg-group:first-child { margin-top: 0; }
+    .cfg-row { display: flex; justify-content: space-between; gap: 12px;
+      font-size: 12px; padding: 3px 0; border-bottom: 1px solid #1f272f; }
+    .cfg-row .k { color: #8b98a5; }
+    .cfg-row .v { color: #e6e6e6; font-weight: 600; text-align: right;
+      font-variant-numeric: tabular-nums; }
+    #configList .empty { font-size: 12px; color: #6b7280; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #1f272f; }
+    th { color: #8b98a5; font-weight: 500; position: sticky; top: 0; background: #161d24; }
+    .kind-write_paper { color: #60a5fa; }
+    .kind-peer_review, .kind-review_started, .kind-review_completed, .kind-review_continued { color: #4ade80; }
+    .kind-bad_faith_review { color: #f87171; }
+    .kind-idle, .kind-review_unavailable { color: #6b7280; }
+    canvas { max-height: 300px; }
+    .rates { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 12px; }
+    .rate { font-size: 12px; color: #c4cdd5; display: inline-flex; align-items: center; gap: 5px; }
+    .rate .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+    .rate .pct { font-weight: 600; color: #e6e6e6; }
+    .rate .cnt { color: #8b98a5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Venture Simulation</h1>
+    <select id="runPicker" title="Select a saved run"></select>
+    <button id="replayBtn" disabled>▶ Replay</button>
+    <button id="pauseBtn" disabled>⏸ Pause</button>
+    <select id="speed" title="Replay speed">
+      <option value="200">Slow</option>
+      <option value="80" selected>Normal</option>
+      <option value="25">Fast</option>
+    </select>
+    <span id="status">loading…</span>
+    <div class="tiles">
+      <div class="tile"><div class="label">Total AC</div><div class="value" id="t-total">—</div></div>
+      <div class="tile"><div class="label">Gini</div><div class="value" id="t-gini">—</div></div>
+      <div class="tile"><div class="label">Papers</div><div class="value" id="t-papers">—</div></div>
+      <div class="tile"><div class="label">Reviews</div><div class="value" id="t-reviews">—</div></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="charts">
+      <div class="panel"><h2>Academic capital per agent</h2><canvas id="agentChart"></canvas></div>
+      <div class="panel"><h2>System aggregates</h2><canvas id="aggChart"></canvas></div>
+      <div class="panel">
+        <h2>Action mix over time</h2>
+        <canvas id="actionChart"></canvas>
+        <div id="actionRates" class="rates"></div>
+      </div>
+      <div class="panel" id="panel-review"><h2>Review behavior</h2><canvas id="reviewChart"></canvas></div>
+      <div class="panel" id="panel-paperac"><h2>Per-paper accrued capital</h2><canvas id="paperAcChart"></canvas></div>
+      <div class="panel" id="panel-choices"><h2>Agent choices (write / review / finish)</h2><canvas id="choiceChart"></canvas></div>
+      <div class="panel" id="panel-effort-hist"><h2>Completed peer reviews by effort</h2><canvas id="effortHistChart"></canvas></div>
+      <div class="panel" id="panel-effort-scatter"><h2>Completed peer reviews over time</h2><canvas id="effortScatterChart"></canvas></div>
+      <div class="panel" id="panel-writing"><h2>Writing effort distribution</h2><canvas id="writingChart"></canvas></div>
+    </div>
+    <div class="side">
+      <div class="panel" id="panel-config">
+        <h2>Run configuration</h2>
+        <div id="configList"></div>
+      </div>
+      <div class="panel feed">
+        <h2>Action feed</h2>
+        <table>
+          <thead><tr><th>Timestep</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
+          <tbody id="feed"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const PALETTE = [
+      "#60a5fa","#4ade80","#f87171","#fbbf24","#a78bfa","#34d399","#f472b6",
+      "#22d3ee","#fb923c","#c084fc","#818cf8","#2dd4bf","#facc15","#fca5a5",
+      "#93c5fd","#86efac","#fdba74","#d8b4fe","#5eead4","#fde047"
+    ];
+    const color = (i) => PALETTE[i % PALETTE.length];
+    const agentColor = (name, i) => color(i % PALETTE.length);
+
+    // Stable display order + colors for action kinds (kinds from Agent.py).
+    const ACTION_ORDER = ["write_paper", "bad_faith_review", "good_faith_review",
+      "review_started", "review_continued",
+      "review_auto_continued", "review_finished_write", "review_finished_peer_review",
+      "review_stopped", "review_unavailable", "idle"];
+    const ACTION_COLOR = {
+      write_paper: "#60a5fa", bad_faith_review: "#f87171",
+      good_faith_review: "#16a34a", review_started: "#4ade80",
+      review_continued: "#34d399",
+      review_auto_continued: "#15803d", review_finished_write: "#f59e0b",
+      review_finished_peer_review: "#a855f7", review_stopped: "#22d3ee",
+      review_unavailable: "#fbbf24", idle: "#6b7280"
+    };
+    // Kinds present in a run, known kinds first (ACTION_ORDER), then any extras.
+    function actionKinds(countsObj) {
+      const present = new Set(Object.keys(countsObj || {}));
+      const ordered = ACTION_ORDER.filter(k => present.has(k));
+      for (const k of present) if (!ordered.includes(k)) ordered.push(k);
+      return ordered;
+    }
+    const kindColor = (k, i) => ACTION_COLOR[k] || color(i % PALETTE.length);
+
+    // Top-level decisions: map raw action kinds to a decision (mirrors visualize.py).
+    const DECISION_LABELS = {
+      write_paper: "write_paper", bad_faith_review: "bad_faith_review",
+      good_faith_review: "good_faith_review", review_started: "start_review",
+      review_continued: "continue_review", review_finished_write: "finish_and_write",
+      review_finished_peer_review: "finish_and_review", review_unavailable: "start_review",
+      idle: "idle",
+    };
+    const DECISION_ORDER = ["write_paper", "bad_faith_review", "good_faith_review",
+      "start_review", "continue_review",
+      "finish_and_write", "finish_and_review", "idle"];
+    const DECISION_COLOR = {
+      write_paper: "#60a5fa", bad_faith_review: "#f87171",
+      good_faith_review: "#16a34a", start_review: "#4ade80", continue_review: "#22c55e",
+      finish_and_write: "#f59e0b", finish_and_review: "#a855f7", idle: "#6b7280",
+    };
+    // Reward threshold for review effort; used to draw a reference line. Runs that
+    // record it in their config override this fallback (Paper.py default is 10).
+    const DEFAULT_REVIEW_THRESHOLD = 10;
+
+    // Curated grouping + friendly labels for the SimConfig fields a run records,
+    // mirroring the sections in config.py. Keys not listed here still render,
+    // under "Other", so future config fields appear automatically.
+    const CONFIG_GROUPS = [
+      ["World", [
+        ["num_heuristic_agents", "Heuristic agents"],
+        ["num_rl_agents", "RL agents"],
+        ["num_random_agents", "Random agents"],
+        ["num_probabilistic_agents", "Probabilistic agents"],
+        ["num_days", "Timesteps"],
+        ["seed", "Seed"],
+        ["forecast_horizon_days", "Forecast horizon (timesteps)"],
+        ["output_dir", "Output dir"],
+      ]],
+      ["Initial papers", [
+        ["init_papers_per_agent", "Papers per agent"],
+        ["init_ac_min", "Initial AC min"],
+        ["init_ac_max", "Initial AC max"],
+        ["init_accrual_min", "Initial accrual min"],
+        ["init_accrual_max", "Initial accrual max"],
+      ]],
+      ["Paper economics", [
+        ["default_accrual_rate", "Accrual rate"],
+        ["default_review_share", "Base review share"],
+        ["default_max_reviewer_share", "Max reviewer share"],
+        ["min_offer_share", "Min offer share"],
+      ]],
+      ["Paper quality", [
+        ["quality_sigma", "Quality sigma"],
+        ["min_paper_quality", "Min paper quality"],
+        ["quality_price_scale", "Quality price scale"],
+        ["history_price_scale", "History price scale"],
+      ]],
+      ["Effort & reward", [
+        ["review_paradigm", "Review paradigm"],
+        ["review_effort_per_day", "Review effort / timestep"],
+        ["min_review_effort_threshold", "Min review effort"],
+        ["good_faith_review_threshold", "Good-faith threshold"],
+        ["bad_review_timesteps", "Bad review timesteps"],
+        ["good_review_timesteps", "Good review timesteps"],
+        ["base_review_accrual_bump", "Base accrual bump"],
+        ["first_extra_day_bump", "First extra-timestep bump"],
+      ]],
+      ["Publishing", [
+        ["paper_threshold", "Paper threshold"],
+        ["discrete_paper_timesteps", "Discrete paper timesteps"],
+        ["discrete_writing_effort_per_timestep", "Discrete writing / timestep"],
+      ]],
+      ["Control agents", [
+        ["random_claim_probability", "Random claim probability"],
+        ["random_good_faith_probability", "Random good-faith probability"],
+        ["probabilistic_claim_probability", "Probabilistic claim probability"],
+        ["probabilistic_good_faith_probability", "Probabilistic good-faith probability"],
+      ]],
+      ["Heuristic forecasting", [
+        ["expected_write_progress", "Expected write progress"],
+        ["max_forecast_effort", "Max forecast effort"],
+      ]],
+      ["RL agents", [
+        ["rl_backend", "Backend"],
+        ["rl_epsilon", "Epsilon"],
+        ["rl_gamma", "Gamma"],
+        ["talent_min", "Talent min"],
+        ["talent_max", "Talent max"],
+        ["policies_dir", "Policies dir"],
+      ]],
+    ];
+    // Keys we never surface (internal alias / redundant with the labeled fields).
+    const CONFIG_HIDDEN = new Set(["num_agents"]);
+
+    const prettyKey = (k) => k.replace(/_/g, " ");
+    function formatConfigValue(v) {
+      if (typeof v === "boolean") return v ? "yes" : "no";
+      if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(v);
+      return String(v);
+    }
+
+    // Inline plugin: stroke one dashed reference line at chart.$threshold = {axis, value}.
+    const thresholdLine = {
+      id: "thresholdLine",
+      afterDraw(chart) {
+        const t = chart.$threshold;
+        if (!t) return;
+        const scale = chart.scales[t.axis];
+        if (!scale) return;
+        const p = scale.getPixelForValue(t.value);
+        const { ctx, chartArea: a } = chart;
+        ctx.save();
+        ctx.strokeStyle = "#dc2626"; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        if (t.axis === "x") { ctx.moveTo(p, a.top); ctx.lineTo(p, a.bottom); }
+        else { ctx.moveTo(a.left, p); ctx.lineTo(a.right, p); }
+        ctx.stroke();
+        ctx.restore();
+      },
+    };
+
+    // ---- pure helpers mirroring visualize.py -----------------------------
+    function choiceTallies(actions) {
+      const t = {};
+      for (const a of (actions || [])) {
+        const d = DECISION_LABELS[a.kind];
+        if (d) t[d] = (t[d] || 0) + 1;
+      }
+      return t;
+    }
+    // Bin completed reviews by integer effort -> [{x: effort, y: count}].
+    function effortHistogram(reviews) {
+      const counts = {};
+      for (const r of (reviews || [])) {
+        const e = Math.trunc(r.effort);
+        counts[e] = (counts[e] || 0) + 1;
+      }
+      return Object.keys(counts).map(Number).sort((a, b) => a - b)
+        .map(e => ({ x: e, y: counts[e] }));
+    }
+    // Total writing effort accumulated per agent -> list of totals.
+    function writingTotals(efforts) {
+      const totals = {};
+      for (const w of (efforts || [])) totals[w.agent] = (totals[w.agent] || 0) + w.effort;
+      return Object.values(totals);
+    }
+    // Equal-width histogram of `values` (<=20 bins) -> [{x: bin center, y: count}].
+    function histogramBins(values) {
+      if (!values.length) return [];
+      const min = Math.min(...values), max = Math.max(...values);
+      if (min === max) return [{ x: min, y: values.length }];
+      const n = Math.max(1, Math.min(20, values.length));
+      const width = (max - min) / n;
+      const bins = Array.from({ length: n }, (_, i) => ({ x: min + width * (i + 0.5), y: 0 }));
+      for (const v of values) {
+        let idx = Math.floor((v - min) / width);
+        if (idx >= n) idx = n - 1;
+        bins[idx].y++;
+      }
+      return bins;
+    }
+
+    const setPanel = (id, visible) => {
+      document.getElementById(id).style.display = visible ? "" : "none";
+    };
+
+    const baseOpts = {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      interaction: { intersect: false, mode: "index" },
+      scales: {
+        x: { ticks: { color: "#8b98a5" }, grid: { color: "#1f272f" } },
+        y: { ticks: { color: "#8b98a5" }, grid: { color: "#1f272f" } }
+      }
+    };
+
+    let agentChart, aggChart, actionChart;
+    let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart;
+    const statusEl = document.getElementById("status");
+    const ratesEl = document.getElementById("actionRates");
+    const feedEl = document.getElementById("feed");
+    const configListEl = document.getElementById("configList");
+    const pickerEl = document.getElementById("runPicker");
+    const replayBtn = document.getElementById("replayBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const speedEl = document.getElementById("speed");
+
+    const FEED_LIMIT = 500;  // cap rendered rows; runs can have thousands of actions
+
+    // Currently loaded run, kept so the Replay button can animate it on demand.
+    let currentData = null, currentTitle = "";
+    // Active playback context (null when idle/finished). `i` is the next day index
+    // to draw, so pausing just stops the timer and resuming picks up at `replay.i`.
+    let replay = null;
+    let replayTimer = null;
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = "";
+      if (cls) statusEl.classList.add(cls);
+    }
+
+    // 100%-stacked area: one band per action kind, days on x, % share on y.
+    function setupActionChart(kinds) {
+      if (actionChart) actionChart.destroy();
+      actionChart = new Chart(document.getElementById("actionChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: kinds.map((k, i) => ({
+            label: k, data: [], borderColor: kindColor(k, i),
+            backgroundColor: kindColor(k, i) + "cc", borderWidth: 1,
+            pointRadius: 0, fill: true, stack: "a"
+          }))
+        },
+        options: {
+          ...baseOpts,
+          plugins: { legend: { labels: { color: "#c4cdd5", boxWidth: 10 } } },
+          scales: {
+            ...baseOpts.scales,
+            y: { ...baseOpts.scales.y, stacked: true, min: 0, max: 100,
+                 ticks: { ...baseOpts.scales.y.ticks, callback: (v) => v + "%" } }
+          }
+        }
+      });
+    }
+
+    // Per-day counts of each kind: { day: { kind: n } }.
+    function dayCounts(actions) {
+      const out = {};
+      for (const a of (actions || [])) {
+        const day = out[a.day] || (out[a.day] = {});
+        day[a.kind] = (day[a.kind] || 0) + 1;
+      }
+      return out;
+    }
+
+    // One day's normalized share (0–100) for `kind` given that day's counts.
+    function dayShare(counts, kind) {
+      const total = Object.values(counts || {}).reduce((s, n) => s + n, 0);
+      return total ? (100 * (counts[kind] || 0)) / total : 0;
+    }
+
+    // Overall-rate chips: kind, its % of all actions, and raw count.
+    function renderRates(totals) {
+      const grand = Object.values(totals || {}).reduce((s, n) => s + n, 0);
+      ratesEl.innerHTML = actionKinds(totals).map((k, i) => {
+        const n = totals[k] || 0;
+        const pct = grand ? (100 * n / grand).toFixed(1) : "0.0";
+        return `<span class="rate"><span class="swatch" style="background:${kindColor(k, i)}"></span>` +
+               `${k} <span class="pct">${pct}%</span> <span class="cnt">(${n})</span></span>`;
+      }).join("");
+    }
+
+    function setupCharts(agentLabels) {
+      if (agentChart) agentChart.destroy();
+      if (aggChart) aggChart.destroy();
+
+      agentChart = new Chart(document.getElementById("agentChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: agentLabels.map((name, i) => ({
+            label: name, data: [], borderColor: agentColor(name, i),
+            borderWidth: 1.5, pointRadius: 0, tension: 0.15
+          }))
+        },
+        options: { ...baseOpts, plugins: { legend: { display: agentLabels.length <= 20, labels: { color: "#c4cdd5", boxWidth: 10 } } } }
+      });
+
+      aggChart = new Chart(document.getElementById("aggChart"), {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            { label: "total_capital", data: [], borderColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+            { label: "mean_capital",  data: [], borderColor: "#4ade80", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+            { label: "max_capital",   data: [], borderColor: "#fbbf24", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+            { label: "capital_gini",  data: [], borderColor: "#f472b6", borderWidth: 1.5, borderDash: [5,4], pointRadius: 0, yAxisID: "y1" }
+          ]
+        },
+        options: {
+          ...baseOpts,
+          plugins: { legend: { labels: { color: "#c4cdd5", boxWidth: 10 } } },
+          scales: {
+            ...baseOpts.scales,
+            y1: { position: "right", min: 0, max: 1, ticks: { color: "#f472b6" }, grid: { drawOnChartArea: false } }
+          }
+        }
+      });
+    }
+
+    // ---- new charts (mirroring visualize.py) -----------------------------
+    const legendOpts = { labels: { color: "#c4cdd5", boxWidth: 10 } };
+    const axisTitle = (text) => ({ display: true, text, color: "#8b98a5" });
+
+    // Cumulative good/bad/completed reviews and paper count over time.
+    function setupReviewChart() {
+      if (reviewChart) reviewChart.destroy();
+      reviewChart = new Chart(document.getElementById("reviewChart"), {
+        type: "line",
+        data: { labels: [], datasets: [
+          { label: "good_faith_reviews", data: [], borderColor: "#16a34a", borderWidth: 1.5, pointRadius: 0 },
+          { label: "bad_faith_reviews", data: [], borderColor: "#f87171", borderWidth: 1.5, pointRadius: 0 },
+          { label: "completed_peer_reviews", data: [], borderColor: "#4ade80", borderWidth: 1.5, pointRadius: 0 },
+          { label: "num_papers", data: [], borderColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0 },
+        ]},
+        options: { ...baseOpts, plugins: { legend: legendOpts } },
+      });
+    }
+
+    // One thin line per paper: accrued capital over time (legend suppressed).
+    function setupPaperAcChart(labels) {
+      if (paperAcChart) paperAcChart.destroy();
+      paperAcChart = new Chart(document.getElementById("paperAcChart"), {
+        type: "line",
+        data: { labels: [], datasets: labels.map((name, i) => ({
+          label: name, data: [], borderColor: color(i) + "99", borderWidth: 0.7, pointRadius: 0,
+        }))},
+        options: { ...baseOpts, plugins: { legend: { display: false } } },
+      });
+    }
+
+    // Bar chart of top-level agent decisions.
+    function setupChoiceChart() {
+      if (choiceChart) choiceChart.destroy();
+      choiceChart = new Chart(document.getElementById("choiceChart"), {
+        type: "bar",
+        data: { labels: [], datasets: [{ label: "decisions", data: [], backgroundColor: [] }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, title: axisTitle("Decision count") } } },
+      });
+    }
+
+    // Histogram of completed reviews by integer effort, with reward-threshold line.
+    function setupEffortHistChart() {
+      if (effortHistChart) effortHistChart.destroy();
+      effortHistChart = new Chart(document.getElementById("effortHistChart"), {
+        type: "bar",
+        data: { datasets: [{ label: "completed reviews", data: [],
+          backgroundColor: "#60a5facc", borderColor: "#1e3a5f", borderWidth: 1 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", offset: false, title: axisTitle("Review effort") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Completed peer reviews") } } },
+        plugins: [thresholdLine],
+      });
+    }
+
+    // Scatter of each completed review (day vs effort), with reward-threshold line.
+    function setupEffortScatterChart() {
+      if (effortScatterChart) effortScatterChart.destroy();
+      effortScatterChart = new Chart(document.getElementById("effortScatterChart"), {
+        type: "scatter",
+        data: { datasets: [{ label: "reviews", data: [],
+          backgroundColor: "#a855f7aa", borderColor: "#4c1d95", pointRadius: 3 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Timestep") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Review effort") } } },
+        plugins: [thresholdLine],
+      });
+    }
+
+    // Histogram of total paper-writing effort accumulated per agent.
+    function setupWritingChart() {
+      if (writingChart) writingChart.destroy();
+      writingChart = new Chart(document.getElementById("writingChart"), {
+        type: "bar",
+        data: { datasets: [{ label: "agents", data: [],
+          backgroundColor: "#60a5facc", borderColor: "#1e3a5f", borderWidth: 1 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Total writing effort per agent") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Agents") } } },
+      });
+    }
+
+    // Draw the six new charts from a loaded run (static: not animated during replay).
+    function renderExtraCharts(data, threshold) {
+      const days = data.days || [];
+      const s = data.scalars || {};
+
+      // Review behavior
+      const hasReview = (s.completed_peer_reviews || []).length || (s.num_papers || []).length;
+      setPanel("panel-review", !!hasReview);
+      if (hasReview) {
+        setupReviewChart();
+        reviewChart.data.labels = days;
+        reviewChart.data.datasets.forEach(ds => {
+          ds.data = s[ds.label] || [];
+        });
+        reviewChart.update();
+      }
+
+      // Per-paper accrued capital
+      const paperAc = data.paper_ac || {};
+      const paperLabels = Object.keys(paperAc);
+      setPanel("panel-paperac", paperLabels.length > 0);
+      if (paperLabels.length) {
+        setupPaperAcChart(paperLabels);
+        paperAcChart.data.labels = days;
+        paperAcChart.data.datasets.forEach(ds => { ds.data = paperAc[ds.label] || []; });
+        paperAcChart.update();
+      }
+
+      // Agent choices
+      const tallies = choiceTallies(data.actions);
+      const choiceLabels = DECISION_ORDER.filter(d => tallies[d]);
+      setPanel("panel-choices", choiceLabels.length > 0);
+      if (choiceLabels.length) {
+        setupChoiceChart();
+        choiceChart.data.labels = choiceLabels.map(l => l.replace(/_/g, " "));
+        choiceChart.data.datasets[0].data = choiceLabels.map(l => tallies[l]);
+        choiceChart.data.datasets[0].backgroundColor = choiceLabels.map(l => DECISION_COLOR[l] || "#94a3b8");
+        choiceChart.update();
+      }
+
+      // Review effort histogram + scatter (only runs that recorded completed_reviews)
+      const reviews = data.completed_reviews || [];
+      setPanel("panel-effort-hist", reviews.length > 0);
+      setPanel("panel-effort-scatter", reviews.length > 0);
+      if (reviews.length) {
+        setupEffortHistChart();
+        effortHistChart.data.datasets[0].data = effortHistogram(reviews);
+        effortHistChart.$threshold = { axis: "x", value: threshold };
+        effortHistChart.update();
+
+        setupEffortScatterChart();
+        effortScatterChart.data.datasets[0].data = reviews.map(r => ({ x: r.day, y: r.effort }));
+        effortScatterChart.$threshold = { axis: "y", value: threshold };
+        effortScatterChart.update();
+      }
+
+      // Writing effort distribution (only runs that recorded writing_efforts)
+      const writing = writingTotals(data.writing_efforts);
+      setPanel("panel-writing", writing.length > 0);
+      if (writing.length) {
+        setupWritingChart();
+        writingChart.data.datasets[0].data = histogramBins(writing);
+        writingChart.update();
+      }
+    }
+
+    const last = (arr) => (arr && arr.length ? arr[arr.length - 1] : 0);
+    const at = (arr, i) => (arr && i < arr.length ? arr[i] : 0);
+    const actionRow = (a) =>
+      `<tr><td>${a.day}</td><td>${a.agent}</td>` +
+      `<td class="kind-${a.kind}">${a.kind}</td><td>${a.paper ?? ""}</td></tr>`;
+
+    function setTiles(s, i) {  // i = day index, or use last value when omitted
+      const v = (arr) => (i == null ? last(arr) : at(arr, i));
+      document.getElementById("t-total").textContent  = v(s.total_capital).toFixed(1);
+      document.getElementById("t-gini").textContent   = v(s.capital_gini).toFixed(3);
+      document.getElementById("t-papers").textContent = Math.round(v(s.num_papers));
+      document.getElementById("t-reviews").textContent =
+        Math.round(v(s.completed_peer_reviews));
+    }
+
+    // Render a run's recorded simulation config as grouped key/value rows.
+    // Unknown keys (not in CONFIG_GROUPS) are collected under "Other" so any
+    // future config fields still show up without code changes.
+    function renderConfig(config) {
+      if (!config || typeof config !== "object" || !Object.keys(config).length) {
+        configListEl.innerHTML = '<div class="empty">No configuration recorded for this run.</div>';
+        return;
+      }
+
+      const seen = new Set(CONFIG_HIDDEN);
+      const row = (label, value) =>
+        `<div class="cfg-row"><span class="k">${label}</span>` +
+        `<span class="v">${formatConfigValue(value)}</span></div>`;
+
+      let html = "";
+      for (const [groupName, fields] of CONFIG_GROUPS) {
+        const rows = [];
+        for (const [key, label] of fields) {
+          if (key in config) { rows.push(row(label, config[key])); seen.add(key); }
+        }
+        if (rows.length) html += `<div class="cfg-group">${groupName}</div>${rows.join("")}`;
+      }
+
+      const extras = Object.keys(config).filter(k => !seen.has(k));
+      if (extras.length) {
+        html += `<div class="cfg-group">Other</div>` +
+          extras.map(k => row(prettyKey(k), config[k])).join("");
+      }
+
+      configListEl.innerHTML = html ||
+        '<div class="empty">No configuration recorded for this run.</div>';
+    }
+
+    // Instant render: draw the whole run at once (default when a run is selected).
+    function renderRun(data, title, config) {
+      stopReplay();
+      currentData = data;
+      currentTitle = title;
+      replayBtn.disabled = false;
+
+      const days = data.days || [];
+      setupCharts(Object.keys(data.agent_capital || {}));
+
+      agentChart.data.labels = days;
+      agentChart.data.datasets.forEach(ds => { ds.data = data.agent_capital[ds.label] || []; });
+      agentChart.update();
+
+      aggChart.data.labels = days;
+      aggChart.data.datasets.forEach(ds => { ds.data = (data.scalars && data.scalars[ds.label]) || []; });
+      aggChart.update();
+
+      // Action mix: normalize each day's kind-counts to a 0–100% share.
+      const byDay = dayCounts(data.actions);
+      let counts = data.action_counts;
+      if (!counts || !Object.keys(counts).length) {  // older runs: tally from actions
+        counts = {};
+        for (const c of Object.values(byDay))
+          for (const [k, n] of Object.entries(c)) counts[k] = (counts[k] || 0) + n;
+      }
+      setupActionChart(actionKinds(counts));
+      actionChart.data.labels = days;
+      actionChart.data.datasets.forEach(ds => {
+        ds.data = days.map(day => dayShare(byDay[day], ds.label));
+      });
+      actionChart.update();
+      renderRates(counts);
+
+      setTiles(data.scalars || {});
+
+      // Show the most recent actions (newest first), capped for performance.
+      const actions = data.actions || [];
+      feedEl.innerHTML = actions.slice(-FEED_LIMIT).reverse().map(actionRow).join("");
+
+      const threshold = (config && config.min_review_effort_threshold) || DEFAULT_REVIEW_THRESHOLD;
+      renderExtraCharts(data, threshold);
+      renderConfig(config);
+
+      setStatus(`${title} — ${days.length} timesteps`, "done");
+    }
+
+    // Reset to no-playback state (used on load and when switching runs).
+    function stopReplay() {
+      if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+      replay = null;
+      pauseBtn.disabled = true;
+      pauseBtn.textContent = "⏸ Pause";
+    }
+
+    // One animation frame: draw day `replay.i`, then advance it.
+    function replayTick() {
+      const { days, s, agentCap, byDay, byDayCounts, runningCounts, title } = replay;
+      if (replay.i >= days.length) {       // reached the end
+        clearInterval(replayTimer);
+        replayTimer = null;
+        replay = null;
+        pauseBtn.disabled = true;
+        pauseBtn.textContent = "⏸ Pause";
+        setStatus(`${title} — ${days.length} timesteps ✓`, "done");
+        return;
+      }
+      const i = replay.i;
+      const day = days[i];
+
+      agentChart.data.labels.push(day);
+      agentChart.data.datasets.forEach(ds => ds.data.push(at(agentCap[ds.label], i)));
+      agentChart.update();
+
+      aggChart.data.labels.push(day);
+      aggChart.data.datasets.forEach(ds => ds.data.push(at(s[ds.label], i)));
+      aggChart.update();
+
+      const dayCnt = byDayCounts[day] || {};
+      actionChart.data.labels.push(day);
+      actionChart.data.datasets.forEach(ds => ds.data.push(dayShare(dayCnt, ds.label)));
+      actionChart.update();
+      for (const [k, n] of Object.entries(dayCnt)) runningCounts[k] = (runningCounts[k] || 0) + n;
+      renderRates(runningCounts);
+
+      setTiles(s, i);
+
+      for (const a of (byDay[day] || [])) feedEl.insertAdjacentHTML("afterbegin", actionRow(a));
+      while (feedEl.childElementCount > FEED_LIMIT) feedEl.lastElementChild.remove();
+
+      setStatus(`replaying ${title} — timestep ${day} / ${days[days.length - 1]}`);
+      replay.i++;
+    }
+
+    function armTimer() {
+      if (replayTimer) clearInterval(replayTimer);
+      replayTimer = setInterval(replayTick, Number(speedEl.value));
+    }
+
+    // Animated playback from day 0: step through the already-loaded run day by day,
+    // exactly like the live dashboard — but driven from saved data, no server needed.
+    function startReplay() {
+      if (!currentData) return;
+      stopReplay();
+      const data = currentData;
+      setupCharts(Object.keys(data.agent_capital || {}));
+      setupActionChart(actionKinds(data.action_counts || {}));
+      feedEl.innerHTML = "";
+      ratesEl.innerHTML = "";
+
+      // Group actions by day so each frame can append just that day's events.
+      const byDay = {};
+      for (const a of (data.actions || [])) {
+        if (!byDay[a.day]) byDay[a.day] = [];
+        byDay[a.day].push(a);
+      }
+
+      replay = {
+        days: data.days || [], s: data.scalars || {},
+        agentCap: data.agent_capital || {}, byDay,
+        byDayCounts: dayCounts(data.actions), runningCounts: {},
+        i: 0, title: currentTitle,
+      };
+      pauseBtn.disabled = false;
+      pauseBtn.textContent = "⏸ Pause";
+      armTimer();
+    }
+
+    function pauseReplay() {
+      clearInterval(replayTimer);
+      replayTimer = null;
+      pauseBtn.textContent = "▶ Resume";
+      setStatus(`paused — timestep ${at(replay.days, replay.i - 1)} / ${last(replay.days)}`);
+    }
+
+    function resumeReplay() {
+      pauseBtn.textContent = "⏸ Pause";
+      armTimer();
+    }
+
+    replayBtn.addEventListener("click", startReplay);  // always restarts from the top
+    pauseBtn.addEventListener("click", () => {
+      if (!replay) return;
+      replayTimer ? pauseReplay() : resumeReplay();
+    });
+    // Apply a new speed immediately if we're mid-playback (keeps current position).
+    speedEl.addEventListener("change", () => { if (replayTimer) armTimer(); });
+
+    let runsById = {};  // id -> manifest entry, so loadRun can read each run's config
+
+    async function loadRun(id, title) {
+      stopReplay();
+      setStatus(`loading ${title}…`);
+      try {
+        const res = await fetch(`data/${id}/history.json`, { cache: "no-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        renderRun(await res.json(), title, (runsById[id] || {}).config);
+      } catch (err) {
+        setStatus(`couldn't load run (${err.message})`, "error");
+      }
+    }
+
+    function describe(run) {
+      const c = run.config || {};
+      const parts = [];
+      const heuristic = c.num_heuristic_agents != null ? c.num_heuristic_agents : c.num_agents;
+      if (heuristic != null) parts.push(`${heuristic} heuristic`);
+      if (c.num_rl_agents != null) parts.push(`${c.num_rl_agents} RL`);
+      const runLen = run.num_timesteps != null ? run.num_timesteps : run.num_days;
+      if (runLen != null) parts.push(`${runLen} steps`);
+      return parts.length ? `${run.title} (${parts.join(", ")})` : run.title;
+    }
+
+    async function init() {
+      let runs;
+      try {
+        const res = await fetch("data/index.json", { cache: "no-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        runs = await res.json();
+      } catch (err) {
+        setStatus("no runs found — run the simulation and commit docs/data", "error");
+        return;
+      }
+      if (!Array.isArray(runs) || runs.length === 0) {
+        setStatus("no runs yet — run the simulation to add one", "error");
+        return;
+      }
+
+      runsById = Object.fromEntries(runs.map(r => [r.id, r]));
+
+      pickerEl.innerHTML = "";
+      for (const run of runs) {
+        const opt = document.createElement("option");
+        opt.value = run.id;
+        opt.textContent = describe(run);
+        opt.dataset.title = run.title;
+        pickerEl.appendChild(opt);
+      }
+
+      pickerEl.addEventListener("change", () => {
+        const opt = pickerEl.selectedOptions[0];
+        loadRun(opt.value, opt.dataset.title);
+      });
+
+      // Manifest is sorted newest-first, so the first option is the latest run.
+      loadRun(runs[0].id, runs[0].title);
+    }
+
+    init();
+  </script>
+</body>
+</html>

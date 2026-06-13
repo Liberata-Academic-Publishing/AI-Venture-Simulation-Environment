@@ -6,11 +6,20 @@ from dataclasses import dataclass
 
 from config import SIM
 from Paper import (
+    DISCRETE_PAPER_TIMESTEPS,
+    DISCRETE_WRITING_EFFORT_PER_TIMESTEP,
+    GOOD_FAITH_REVIEW,
     MIN_REVIEW_EFFORT_THRESHOLD,
     QUALITY_SIGMA,
     REVIEW_EFFORT_PER_TIMESTEP,
+    REVIEW_PARADIGM_CONTINUOUS,
+    REVIEW_PARADIGM_DISCRETE,
     Paper,
+    fixed_review_effort,
     quality_multiplier,
+    review_action_kind,
+    review_kind_from_effort,
+    validate_review_paradigm,
 )
 
 PAPER_THRESHOLD = SIM.paper_threshold
@@ -48,8 +57,11 @@ class Agent(ABC):
         self.name = name
         self.active_review_paper: Paper | None = None
         self.active_review_effort = 0.0
+        self.active_review_kind: str | None = None
+        self.active_review_target_effort: float | None = None
         self.last_review_effort: float | None = None
         self.last_review_kind: str | None = None
+        self.review_paradigm = validate_review_paradigm(SIM.review_paradigm)
 
         # Quality of the paper currently being written (known before/while
         # working on it). Sampled lazily the first time the agent writes.
@@ -79,9 +91,19 @@ class Agent(ABC):
           - ``"finish_review_write_paper"`` — finalize the active review, then write.
         """
 
+    def choose_review_kind(self, paper: Paper) -> str:
+        """Discrete-mode review choice. Subclasses can choose bad vs good faith."""
+        return GOOD_FAITH_REVIEW
+
+    def configure_review_paradigm(self, review_paradigm: str) -> None:
+        self.review_paradigm = validate_review_paradigm(review_paradigm)
+
     def should_offer_review_choice(self) -> bool:
         """True when the agent holds an in-progress review (continue / finish)."""
-        return self.active_review_paper is not None
+        return (
+            self.review_paradigm == REVIEW_PARADIGM_CONTINUOUS
+            and self.active_review_paper is not None
+        )
 
     def available_actions(self) -> tuple[str, ...]:
         if self.should_offer_review_choice():
@@ -89,7 +111,11 @@ class Agent(ABC):
         return ("write_paper",)
 
     # ---- phase 1: marketplace selection (instantaneous, no effort) -------
-    def claim_review(self, paper: Paper) -> ActionRecord | None:
+    def claim_review(
+        self,
+        paper: Paper,
+        review_kind: str | None = None,
+    ) -> ActionRecord | None:
         """Select ``paper`` to review, finalizing any active review first.
 
         This is pure selection: the new review starts at zero effort. The
@@ -105,12 +131,21 @@ class Agent(ABC):
         self.active_review_paper = paper
         self.active_review_effort = 0.0
         self.review_progress = 0.0
+        if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+            self.active_review_kind = review_kind or self.choose_review_kind(paper)
+            self.active_review_target_effort = fixed_review_effort(
+                self.active_review_kind
+            )
+        else:
+            self.active_review_kind = None
+            self.active_review_target_effort = None
 
         if finished is not None:
             return ActionRecord(
                 "review_finished_peer_review",
                 finished.paper,
                 review_effort=finished.review_effort,
+                review_kind=finished.review_kind,
             )
         return None
 
@@ -118,30 +153,21 @@ class Agent(ABC):
     def apply_initial_review_effort(self) -> ActionRecord:
         """Apply this timestep's effort to a review claimed in the marketplace."""
         self._clear_last_review_result()
-        self.active_review_effort += self.review_effort_delta()
-        self.review_progress = self.active_review_effort
-        return ActionRecord(
-            "review_started",
-            self.active_review_paper,
-            review_effort=self.active_review_effort,
-        )
+        return self._advance_active_review("review_started")
 
     def work_turn(self) -> ActionRecord:
         """Apply this timestep's effort for an agent that did not claim a paper."""
         self._clear_last_review_result()
 
         if self.active_review_paper is not None:
+            if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+                return self._advance_active_review("review_continued")
+
             action, _ = self.choose_work_action()
             if action == "finish_review_write_paper":
                 return self._finish_review_and_write()
             # Default to continuing the active review.
-            self.active_review_effort += self.review_effort_delta()
-            self.review_progress = self.active_review_effort
-            return ActionRecord(
-                "review_continued",
-                self.active_review_paper,
-                review_effort=self.active_review_effort,
-            )
+            return self._advance_active_review("review_continued")
 
         papers_before = len(Agent.all_papers)
         writing_effort = self.write_paper()
@@ -167,31 +193,80 @@ class Agent(ABC):
             finished.paper,
             published=published,
             review_effort=finished.review_effort,
+            review_kind=finished.review_kind,
             writing_effort=writing_effort,
         )
 
-    def _finalize_active_review(self) -> ActionRecord | None:
+    def _advance_active_review(self, progress_kind: str) -> ActionRecord:
+        paper = self.active_review_paper
+        self.active_review_effort += self.review_effort_delta()
+        self.review_progress = self.active_review_effort
+
+        if (
+            self.review_paradigm == REVIEW_PARADIGM_DISCRETE
+            and self.active_review_target_effort is not None
+            and self.active_review_effort >= self.active_review_target_effort
+        ):
+            review_kind = self.active_review_kind or review_kind_from_effort(
+                self.active_review_effort
+            )
+            completed = self._finalize_active_review(
+                action_kind=review_action_kind(review_kind),
+                review_kind=review_kind,
+            )
+            if completed is not None:
+                return completed
+
+        return ActionRecord(
+            progress_kind,
+            paper,
+            review_effort=self.active_review_effort,
+            review_kind=self.active_review_kind,
+        )
+
+    def _finalize_active_review(
+        self,
+        action_kind: str = "review_stopped",
+        review_kind: str | None = None,
+    ) -> ActionRecord | None:
         paper = self.active_review_paper
         if paper is None:
             return None
 
         effort = self.active_review_effort
-        share = paper.finish_review(self, effort)
-        self._record_review_outcome(paper, share, effort)
+        completed_review_kind = review_kind or self.active_review_kind
+        if completed_review_kind is None:
+            completed_review_kind = review_kind_from_effort(effort)
+        share = paper.finish_review(self, effort, completed_review_kind)
+        self._record_review_outcome(paper, share, effort, completed_review_kind)
 
         self.active_review_paper = None
         self.active_review_effort = 0.0
+        self.active_review_kind = None
+        self.active_review_target_effort = None
         self.review_progress = 0.0
 
-        return ActionRecord("review_stopped", paper, review_effort=effort)
+        return ActionRecord(
+            action_kind,
+            paper,
+            review_effort=effort,
+            review_kind=completed_review_kind,
+        )
 
-    def _record_review_outcome(self, paper: Paper, share: float, effort: float) -> None:
+    def _record_review_outcome(
+        self,
+        paper: Paper,
+        share: float,
+        effort: float,
+        review_kind: str,
+    ) -> None:
         """Update the agent's public peer-review history on completion."""
         self.completed_review_count += 1
         self.total_ac_from_reviews += share * paper.current_ac
         self.peer_review_history = (
             self.total_ac_from_reviews / self.completed_review_count
         )
+        self.last_review_kind = review_kind
         if share > 0.0:
             self.last_review_effort = effort
 
@@ -202,7 +277,7 @@ class Agent(ABC):
             self.next_paper_quality = self._sample_quality()
         effort = self.writing_effort_delta()
         self.paper_progress += effort
-        if self.paper_progress >= PAPER_THRESHOLD:
+        if self.paper_progress >= self.paper_completion_threshold():
             self.paper_progress = 0.0
             self.publish_paper()
             self.next_paper_quality = None
@@ -227,7 +302,14 @@ class Agent(ABC):
 
     def writing_effort_delta(self) -> float:
         """Writing effort contributed in one timestep."""
+        if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+            return DISCRETE_WRITING_EFFORT_PER_TIMESTEP
         return self._clean_effort(random.random())
+
+    def paper_completion_threshold(self) -> float:
+        if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+            return DISCRETE_PAPER_TIMESTEPS
+        return PAPER_THRESHOLD
 
     def _clear_last_review_result(self):
         self.last_review_effort = None

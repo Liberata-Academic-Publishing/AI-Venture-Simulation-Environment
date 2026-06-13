@@ -11,11 +11,16 @@ from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History, gini
 from Paper import (
+    BAD_FAITH_REVIEW,
+    BAD_REVIEW_TIMESTEPS,
+    GOOD_FAITH_REVIEW,
+    GOOD_REVIEW_TIMESTEPS,
     MIN_REVIEW_EFFORT_THRESHOLD,
     REVIEW_EFFORT_PER_TIMESTEP,
     Paper,
     review_accrual_bump,
 )
+from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 
 try:
     import matplotlib  # noqa: F401
@@ -46,6 +51,15 @@ class ScriptAgent(Agent):
 
     def writing_effort_delta(self):
         return 0.5
+
+
+class ReviewKindScriptAgent(ScriptAgent):
+    def __init__(self, review_kind: str, **kwargs):
+        super().__init__(**kwargs)
+        self.review_kind = review_kind
+
+    def choose_review_kind(self, paper):
+        return self.review_kind
 
 
 class RecordingAgent(ScriptAgent):
@@ -237,6 +251,125 @@ class ReviewerStateTest(unittest.TestCase):
         self.assertTrue(first.reviewed)
         self.assertFalse(second.reviewed)
         self.assertIn(reviewer, first.share_distribution)
+
+
+class ReviewParadigmTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_continuous_mode_classifies_finished_reviews_by_threshold(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent(
+            "reviewer",
+            marketplace=[],
+            work=[("peer_review", None), ("finish_review_write_paper", None)],
+        )
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        Agent.all_papers = [paper]
+        history = History()
+        env = Environment(
+            agents=[author, reviewer],
+            papers=Agent.all_papers,
+            history=history,
+            review_paradigm="continuous",
+        )
+        paper.update_price_table([reviewer], 1.0, 0.0)
+
+        reviewer.claim_review(paper)
+        reviewer.apply_initial_review_effort()
+        reviewer.work_turn()
+        record = reviewer.work_turn()
+
+        self.assertEqual(record.review_kind, GOOD_FAITH_REVIEW)
+        self.assertEqual(reviewer.last_review_kind, GOOD_FAITH_REVIEW)
+        self.assertEqual(paper.review_records[-1]["review_kind"], GOOD_FAITH_REVIEW)
+
+    def test_discrete_bad_faith_review_finishes_after_one_timestep(self):
+        author = ScriptAgent("author")
+        reviewer = ReviewKindScriptAgent(
+            BAD_FAITH_REVIEW, name="reviewer", marketplace=[]
+        )
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        reviewer.marketplace = [paper]
+        Agent.all_papers = [paper]
+        history = History()
+        env = Environment(
+            agents=[author, reviewer],
+            papers=Agent.all_papers,
+            history=history,
+            review_paradigm="discrete",
+        )
+
+        env.run_timestep()
+
+        self.assertTrue(paper.reviewed)
+        self.assertIsNone(reviewer.active_review_paper)
+        self.assertEqual(reviewer.last_review_kind, BAD_FAITH_REVIEW)
+        self.assertEqual(paper.review_records[-1]["effort"], BAD_REVIEW_TIMESTEPS)
+        self.assertEqual(history.completed_reviews[-1][4], BAD_FAITH_REVIEW)
+        self.assertEqual(history.action_counts["bad_faith_review"], 1)
+        self.assertEqual(history.scalars["bad_faith_reviews"][-1], 1.0)
+        self.assertEqual(history.scalars["good_faith_reviews"][-1], 0.0)
+
+    def test_discrete_good_faith_review_uses_fixed_five_timesteps(self):
+        author = ScriptAgent("author")
+        reviewer = ReviewKindScriptAgent(
+            GOOD_FAITH_REVIEW, name="reviewer", marketplace=[]
+        )
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        reviewer.marketplace = [paper]
+        Agent.all_papers = [paper]
+        history = History()
+        env = Environment(
+            agents=[author, reviewer],
+            papers=Agent.all_papers,
+            history=history,
+            review_paradigm="discrete",
+        )
+
+        env.run(int(GOOD_REVIEW_TIMESTEPS) - 1)
+
+        self.assertFalse(paper.reviewed)
+        self.assertIs(reviewer.active_review_paper, paper)
+        self.assertEqual(reviewer.active_review_effort, GOOD_REVIEW_TIMESTEPS - 1)
+
+        env.run_timestep()
+
+        self.assertTrue(paper.reviewed)
+        self.assertIsNone(reviewer.active_review_paper)
+        self.assertEqual(reviewer.last_review_kind, GOOD_FAITH_REVIEW)
+        self.assertEqual(paper.review_records[-1]["effort"], GOOD_REVIEW_TIMESTEPS)
+        self.assertEqual(history.completed_reviews[-1][4], GOOD_FAITH_REVIEW)
+        self.assertEqual(history.action_counts["good_faith_review"], 1)
+        self.assertEqual(history.scalars["good_faith_reviews"][-1], 1.0)
+
+    def test_probabilistic_agents_are_discrete_only(self):
+        agent = ProbabilisticDiscreteAgent(intrinsic_talent=1.0)
+
+        with self.assertRaises(ValueError):
+            Environment(agents=[agent], review_paradigm="continuous")
+
+        env = Environment(agents=[agent], review_paradigm="discrete")
+        self.assertEqual(env.review_paradigm, "discrete")
+
+    def test_invalid_review_paradigm_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Environment(agents=[], review_paradigm="mixed")
+
+    def test_build_simulation_can_add_random_control_agents(self):
+        from run_simulation import build_simulation
+
+        history = History()
+        env = build_simulation(
+            history,
+            num_agents=0,
+            rl_agents=0,
+            random_agents=2,
+            seed=3,
+        )
+
+        self.assertEqual(len(env.agents), 2)
+        self.assertTrue(all(isinstance(agent, RandomAgent) for agent in env.agents))
 
 
 class HeuristicPolicyTest(unittest.TestCase):

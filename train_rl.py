@@ -53,6 +53,7 @@ def build_env(
     num_heuristic: int,
     horizon: int,
     seed: int,
+    review_paradigm: str = SIM.review_paradigm,
     gamma: float = 0.95,
 ) -> tuple[Environment, list[QLearningAgent], list[HeuristicAgent]]:
     """Fresh env: shared-backend RL agents vs. heuristic opponents."""
@@ -80,7 +81,8 @@ def build_env(
 
     seed_initial_papers(agents, rng)
     env = Environment(agents=agents, papers=Agent.all_papers,
-                      forecast_horizon_timesteps=horizon)
+                      forecast_horizon_timesteps=horizon,
+                      review_paradigm=review_paradigm)
     return env, rl_agents, heuristics
 
 
@@ -110,7 +112,8 @@ def train(args) -> None:
         env, rl_agents, _ = build_env(
             backend=backend, epsilon=epsilon, learning=True,
             num_rl=args.num_rl, num_heuristic=args.num_heuristic,
-            horizon=args.horizon, seed=args.seed + episode, gamma=args.gamma,
+            horizon=args.horizon, seed=args.seed + episode,
+            review_paradigm=args.review_paradigm, gamma=args.gamma,
         )
         env.run(args.timesteps)
         for agent in rl_agents:
@@ -137,6 +140,7 @@ def evaluate(backend, args) -> None:
         backend=backend, epsilon=0.0, learning=False,
         num_rl=args.num_rl, num_heuristic=args.num_heuristic,
         horizon=args.horizon, seed=args.seed + 10_000,
+        review_paradigm=args.review_paradigm,
     )
     env.run(args.timesteps)
 
@@ -161,6 +165,8 @@ def parse_args(argv=None):
     p.add_argument("--num-heuristic", dest="num_heuristic", type=int,
                    default=TRAIN.num_heuristic)
     p.add_argument("--horizon", type=int, default=SIM.forecast_horizon_timesteps)
+    p.add_argument("--review-paradigm", choices=["continuous", "discrete"],
+                   default=SIM.review_paradigm)
     p.add_argument("--alpha", type=float, default=None,
                    help="learning rate (defaults: 0.1 tabular / 0.01 linear)")
     p.add_argument("--gamma", type=float, default=SIM.rl_gamma)
