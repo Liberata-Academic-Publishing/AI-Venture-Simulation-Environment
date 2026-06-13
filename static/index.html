@@ -86,11 +86,14 @@
     const color = (i) => PALETTE[i % PALETTE.length];
 
     // Stable display order + colors for action kinds (kinds from Agent.py).
-    const ACTION_ORDER = ["write_paper", "review_started", "review_continued",
+    const ACTION_ORDER = ["write_paper", "bad_faith_review", "good_faith_review",
+      "review_started", "review_continued",
       "review_auto_continued", "review_finished_write", "review_finished_peer_review",
       "review_stopped", "review_unavailable", "idle"];
     const ACTION_COLOR = {
-      write_paper: "#60a5fa", review_started: "#4ade80", review_continued: "#34d399",
+      write_paper: "#60a5fa", bad_faith_review: "#f87171",
+      good_faith_review: "#16a34a", review_started: "#4ade80",
+      review_continued: "#34d399",
       review_auto_continued: "#15803d", review_finished_write: "#f59e0b",
       review_finished_peer_review: "#a855f7", review_stopped: "#22d3ee",
       review_unavailable: "#fbbf24", idle: "#6b7280"
