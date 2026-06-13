@@ -7,7 +7,7 @@ from statistics import median
 from typing import TYPE_CHECKING
 
 from Agent import Agent
-from Paper import Paper
+from Paper import REVIEW_PARADIGM_DISCRETE, Paper, validate_review_paradigm
 
 if TYPE_CHECKING:
     from History import History
@@ -32,12 +32,14 @@ class Environment:
         num_agents: int | None = None,
         agent_cls: type[Agent] | AgentFactory | None = None,
         forecast_horizon_timesteps: int = 30,
+        review_paradigm: str = "continuous",
         history: "History | None" = None,
     ):
         if agents is not None and num_agents is not None:
             raise ValueError("Pass either agents or num_agents, not both.")
 
         self.forecast_horizon_timesteps = forecast_horizon_timesteps
+        self.review_paradigm = validate_review_paradigm(review_paradigm)
         self.history = history
         self.timestep = 0
 
@@ -52,7 +54,7 @@ class Environment:
 
         self.papers = list(Agent.all_papers if papers is None else papers)
         Agent.all_papers = self.papers
-        self._configure_agent_forecasts()
+        self._configure_agents()
 
     # ---- main loop -------------------------------------------------------
     def run_timestep(self):
@@ -94,13 +96,21 @@ class Environment:
         """
         claimers: set[Agent] = set()
         for agent in order:
+            if (
+                self.review_paradigm == REVIEW_PARADIGM_DISCRETE
+                and agent.active_review_paper is not None
+            ):
+                continue
             choose = getattr(agent, "choose_marketplace_action", None)
             if choose is None:
                 continue
             paper = choose()
             if paper is None or not paper.can_start_review(agent):
                 continue
-            record = agent.claim_review(paper)
+            review_kind = None
+            if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+                review_kind = agent.choose_review_kind(paper)
+            record = agent.claim_review(paper, review_kind=review_kind)
             claimers.add(agent)
             if self.history is not None and record is not None:
                 self.history.record_action(self, agent, record)
@@ -175,8 +185,15 @@ class Environment:
         if Agent.all_papers is not self.papers:
             self.papers = Agent.all_papers
 
-    def _configure_agent_forecasts(self):
+    def _configure_agents(self):
         for agent in self.agents:
+            required = getattr(agent, "requires_review_paradigm", None)
+            if required is not None and required != self.review_paradigm:
+                raise ValueError(
+                    f"{type(agent).__name__} requires review_paradigm={required!r}"
+                )
+            if hasattr(agent, "configure_review_paradigm"):
+                agent.configure_review_paradigm(self.review_paradigm)
             if hasattr(agent, "forecast_horizon_timesteps"):
                 agent.forecast_horizon_timesteps = self.forecast_horizon_timesteps
 

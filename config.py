@@ -27,6 +27,8 @@ class SimConfig:
     # --- World -----------------------------------------------------------
     num_heuristic_agents: int = 20
     num_rl_agents: int = 0
+    num_random_agents: int = 0
+    num_probabilistic_agents: int = 0
     num_timesteps: int = 1000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
@@ -59,13 +61,25 @@ class SimConfig:
     history_price_scale: float = 0.5    # better reviewer history -> larger offered share
 
     # --- Effort & reward model -------------------------------------------
+    review_paradigm: str = "continuous"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
     min_review_effort_threshold: float = 1.0    # reward cliff: below this earns 0
+    good_faith_review_threshold: float = 2.0    # continuous-mode classification
+    bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
+    good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
     base_review_accrual_bump: float = 0.20      # rate bump at exactly the threshold
     first_extra_day_bump: float = 0.10          # added by the first timestep past threshold
 
     # --- Publishing ------------------------------------------------------
     paper_threshold: float = 10.0   # writing effort needed to publish a paper
+    discrete_paper_timesteps: float = 200.0      # discrete manuscript duration (T_M)
+    discrete_writing_effort_per_timestep: float = 1.0
+
+    # --- Control / probability agents ------------------------------------
+    random_claim_probability: float = 0.5
+    random_good_faith_probability: float = 0.5
+    probabilistic_claim_probability: float = 0.5
+    probabilistic_good_faith_probability: float = 0.5
 
     # --- Heuristic forecasting -------------------------------------------
     expected_write_progress: float = 0.5

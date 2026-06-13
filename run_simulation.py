@@ -14,11 +14,14 @@ from HeuristicAgent import HeuristicAgent
 from History import History
 from Paper import Paper
 from QLearningAgent import QLearningAgent, make_backend
+from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 
 # Defaults come from config.py; CLI flags override them at runtime.
 NUM_AGENTS = SIM.num_heuristic_agents
 NUM_TIMESTEPS = SIM.num_timesteps
 NUM_RL_AGENTS = SIM.num_rl_agents
+NUM_RANDOM_AGENTS = SIM.num_random_agents
+NUM_PROBABILISTIC_AGENTS = SIM.num_probabilistic_agents
 OUTPUT_DIR = SIM.output_dir
 
 
@@ -33,6 +36,8 @@ def _talent_for(index: int, count: int) -> float:
 # Map raw action kinds to the decision an agent actively made on its turn.
 DECISION_LABELS = {
     "write_paper": "write_paper",
+    "bad_faith_review": "bad_faith_review",
+    "good_faith_review": "good_faith_review",
     "review_started": "start_review",
     "review_continued": "continue_review",
     "review_finished_write": "finish_and_write",
@@ -61,6 +66,7 @@ def print_summary(env: Environment, history: History):
     print(f"\nSimulation finished after {env.timestep} timesteps")
     print(f"Agents: {len(env.agents)}")
     print(f"Papers: {len(env.papers)}")
+    print(f"Review paradigm: {env.review_paradigm}")
 
     reviewed = sum(1 for p in env.papers if p.reviewed)
     on_market = sum(1 for p in env.papers if getattr(p, "review_available", False))
@@ -71,6 +77,14 @@ def print_summary(env: Environment, history: History):
 
     print("\nMarketplace overview")
     print(f"- papers reviewed: {reviewed}/{len(env.papers)}")
+    print(
+        f"- good-faith reviews: "
+        f"{int(history.scalars.get('good_faith_reviews', [0])[-1]) if history.timesteps else 0}"
+    )
+    print(
+        f"- bad-faith reviews: "
+        f"{int(history.scalars.get('bad_faith_reviews', [0])[-1]) if history.timesteps else 0}"
+    )
     print(f"- papers on market (unclaimed): {on_market}")
     print(f"- papers in review right now: {in_review}")
     if qualities:
@@ -157,6 +171,8 @@ def print_choice_breakdown(history: History):
         return
     for decision in (
         "write_paper",
+        "bad_faith_review",
+        "good_faith_review",
         "start_review",
         "continue_review",
         "finish_and_write",
@@ -272,15 +288,39 @@ def build_rl_agents(
     return agents
 
 
+def build_random_agents(count: int) -> list[RandomAgent]:
+    if count <= 0:
+        return []
+    return [
+        RandomAgent(intrinsic_talent=1.0, name=f"Random Agent {i + 1}")
+        for i in range(count)
+    ]
+
+
+def build_probabilistic_agents(count: int) -> list[ProbabilisticDiscreteAgent]:
+    if count <= 0:
+        return []
+    return [
+        ProbabilisticDiscreteAgent(
+            intrinsic_talent=1.0,
+            name=f"Probabilistic Agent {i + 1}",
+        )
+        for i in range(count)
+    ]
+
+
 def build_simulation(
     history: History,
     *,
     num_agents: int = NUM_AGENTS,
     seed: int = SIM.seed,
     rl_agents: int = NUM_RL_AGENTS,
+    random_agents: int = NUM_RANDOM_AGENTS,
+    probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
     rl_policy_path: str | None = None,
     rl_freeze: bool = False,
+    review_paradigm: str = SIM.review_paradigm,
 ) -> Environment:
     """Construct a simulation of heuristics plus independent RL agents."""
     random.seed(seed)
@@ -292,6 +332,8 @@ def build_simulation(
                        name=f"Agent {i}")
         for i in range(1, num_agents + 1)
     ]
+    agents.extend(build_random_agents(random_agents))
+    agents.extend(build_probabilistic_agents(probabilistic_agents))
     agents.extend(
         build_rl_agents(
             rl_agents,
@@ -307,6 +349,7 @@ def build_simulation(
         agents=agents,
         papers=Agent.all_papers,
         forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
+        review_paradigm=review_paradigm,
         history=history,
     )
 
@@ -341,6 +384,21 @@ def parse_args(argv=None):
         metavar="N", help="Number of RL agents (0 disables RL).",
     )
     parser.add_argument(
+        "--random-agents", dest="random_agents", type=int,
+        default=NUM_RANDOM_AGENTS, metavar="N",
+        help="Number of random control agents.",
+    )
+    parser.add_argument(
+        "--probabilistic-agents", dest="probabilistic_agents", type=int,
+        default=NUM_PROBABILISTIC_AGENTS, metavar="N",
+        help="Number of discrete-only probability agents.",
+    )
+    parser.add_argument(
+        "--review-paradigm", dest="review_paradigm",
+        choices=["continuous", "discrete"], default=SIM.review_paradigm,
+        help="Review action paradigm for the whole simulation run.",
+    )
+    parser.add_argument(
         "--rl-backend", dest="rl_backend", choices=["tabular", "linear"],
         default=SIM.rl_backend, help="Q backend for the RL agents.",
     )
@@ -362,7 +420,10 @@ def parse_args(argv=None):
 def build_run_config(
     *,
     rl_agents: int = NUM_RL_AGENTS,
+    random_agents: int = NUM_RANDOM_AGENTS,
+    probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
+    review_paradigm: str = SIM.review_paradigm,
 ) -> dict:
     """Full SimConfig snapshot for this run, with runtime overrides applied.
 
@@ -373,7 +434,10 @@ def build_run_config(
     """
     config = asdict(SIM)
     config["num_rl_agents"] = rl_agents
+    config["num_random_agents"] = random_agents
+    config["num_probabilistic_agents"] = probabilistic_agents
     config["rl_backend"] = rl_backend
+    config["review_paradigm"] = review_paradigm
     config["num_agents"] = config["num_heuristic_agents"]
     # Aliases so the static gallery (which also reads pre-overhaul runs) keeps
     # rendering the time-unit config fields under their old names.
@@ -388,13 +452,22 @@ def archive_run(
     title: str | None,
     *,
     rl_agents: int = NUM_RL_AGENTS,
+    random_agents: int = NUM_RANDOM_AGENTS,
+    probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
+    review_paradigm: str = SIM.review_paradigm,
 ) -> None:
     from export_run import export_run
 
     run_id = export_run(
         history,
-        config=build_run_config(rl_agents=rl_agents, rl_backend=rl_backend),
+        config=build_run_config(
+            rl_agents=rl_agents,
+            random_agents=random_agents,
+            probabilistic_agents=probabilistic_agents,
+            rl_backend=rl_backend,
+            review_paradigm=review_paradigm,
+        ),
         title=title,
     )
     print(f"\nArchived run to docs/data/{run_id}/ (visible in the gallery).")
@@ -406,7 +479,10 @@ def prompt_and_archive(
     history: History,
     *,
     rl_agents: int = NUM_RL_AGENTS,
+    random_agents: int = NUM_RANDOM_AGENTS,
+    probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
+    review_paradigm: str = SIM.review_paradigm,
 ) -> None:
     """Ask whether to save this run and, if so, what to title it."""
     try:
@@ -423,7 +499,15 @@ def prompt_and_archive(
         name = input("Name this run (leave blank for an auto name): ").strip()
     except EOFError:
         name = ""
-    archive_run(history, name or None, rl_agents=rl_agents, rl_backend=rl_backend)
+    archive_run(
+        history,
+        name or None,
+        rl_agents=rl_agents,
+        random_agents=random_agents,
+        probabilistic_agents=probabilistic_agents,
+        rl_backend=rl_backend,
+        review_paradigm=review_paradigm,
+    )
 
 
 def main(argv=None):
@@ -437,9 +521,12 @@ def main(argv=None):
     env = build_simulation(
         history,
         rl_agents=args.rl_agents,
+        random_agents=args.random_agents,
+        probabilistic_agents=args.probabilistic_agents,
         rl_backend=args.rl_backend,
         rl_policy_path=rl_policy_path,
         rl_freeze=args.rl_freeze,
+        review_paradigm=args.review_paradigm,
     )
     for _ in range(NUM_TIMESTEPS):
         env.run_timestep()
@@ -451,11 +538,24 @@ def main(argv=None):
     if args.no_archive:
         print("\nNot archived to the gallery (--no-archive).")
     elif args.name is not None:
-        archive_run(history, args.name,
-                    rl_agents=args.rl_agents, rl_backend=args.rl_backend)
+        archive_run(
+            history,
+            args.name,
+            rl_agents=args.rl_agents,
+            random_agents=args.random_agents,
+            probabilistic_agents=args.probabilistic_agents,
+            rl_backend=args.rl_backend,
+            review_paradigm=args.review_paradigm,
+        )
     else:
-        prompt_and_archive(history,
-                           rl_agents=args.rl_agents, rl_backend=args.rl_backend)
+        prompt_and_archive(
+            history,
+            rl_agents=args.rl_agents,
+            random_agents=args.random_agents,
+            probabilistic_agents=args.probabilistic_agents,
+            rl_backend=args.rl_backend,
+            review_paradigm=args.review_paradigm,
+        )
 
 
 if __name__ == "__main__":

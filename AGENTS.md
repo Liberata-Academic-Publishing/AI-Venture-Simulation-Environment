@@ -25,9 +25,15 @@ CLI flags for one-off overrides.
 - **Writing effort**: each `write_paper` adds a `writing_effort_delta`; once
   cumulative progress reaches `paper_threshold`, a paper publishes and progress
   resets.
-- **Review effort**: continuous. A review must clear `min_review_effort_threshold`
-  to earn any reward (a reward cliff). Effort at/above the good-faith threshold is
-  classified good faith; below it (but completed) is bad faith.
+- **Review paradigms**: each environment run is either `continuous` or
+  `discrete`, configured by `review_paradigm`; paradigms are not mixed inside one
+  run.
+- **Continuous review effort**: agents choose time spent by continuing or
+  finishing reviews. The environment classifies completed reviews as bad faith
+  below `good_faith_review_threshold` and good faith at or above it.
+- **Discrete review effort**: agents choose `bad_faith` or `good_faith` when
+  claiming a review. By default `T_B = 1`, `T_G = 5 * T_B`, and discrete
+  manuscript work uses `T_M = 200 * T_B`.
 - **Review-share economics**: a review grants ownership share on the reviewed
   paper (`default_review_share`, higher for high-AC reviewers, capped at
   `default_max_reviewer_share`).
@@ -41,7 +47,8 @@ CLI flags for one-off overrides.
 - `Agent.py` - abstract `Agent` base + the action protocol: `write_paper`,
   `peer_review`, `finish_review_write_paper`, `finish_review_peer_review`.
   `ActionRecord` describes one turn. `Agent.all_papers` is a shared class list.
-- `HeuristicAgent.py`, `QLearningAgent.py`, `RandomAgent.py` - agent variants.
+- `HeuristicAgent.py`, `QLearningAgent.py`, `RandomAgent.py` - agent variants,
+  including random controls and discrete-only probability agents.
 - `Paper.py` - paper economics, reviews, and accrual; defines
   `MIN_REVIEW_EFFORT_THRESHOLD`, `REVIEW_EFFORT_PER_DAY`.
 - `Environment.py` - the world / turn loop (`agentact`, `nextstep`).
@@ -59,6 +66,7 @@ CLI flags for one-off overrides.
 python run_simulation.py
 python run_simulation.py --no-archive            # don't save
 python run_simulation.py --name "my run"         # save non-interactively
+python run_simulation.py --review-paradigm discrete --random-agents 5 --no-archive
 python run_simulation.py --rl-agents 20 --rl-backend tabular
 
 # Train the RL agent (auto-saves to policies/)

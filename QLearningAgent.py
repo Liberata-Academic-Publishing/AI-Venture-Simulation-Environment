@@ -32,7 +32,7 @@ from enum import IntEnum
 
 import numpy as np
 
-from Agent import Agent, PAPER_THRESHOLD
+from Agent import Agent
 from HeuristicAgent import HeuristicAgent
 from Paper import (
     DEFAULT_MAX_REVIEWER_SHARE,
@@ -268,7 +268,7 @@ class QLearningAgent(HeuristicAgent):
         in_review = self.active_review_paper is not None
         features = np.array(
             [
-                min(self.paper_progress / PAPER_THRESHOLD, 1.0),
+                min(self.paper_progress / self.paper_completion_threshold(), 1.0),
                 np.tanh(self.active_review_effort / EFFORT_FEATURE_SCALE),
                 np.tanh(self.academic_capital / 100.0),
                 np.tanh(self.peer_review_history / 10.0),

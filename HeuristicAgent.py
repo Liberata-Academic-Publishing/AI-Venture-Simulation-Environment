@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from Agent import Agent, PAPER_THRESHOLD
+from Agent import Agent
 from config import SIM
 from Paper import (
-    DEFAULT_ACCRUAL_RATE,
+    BAD_FAITH_REVIEW,
+    BAD_REVIEW_TIMESTEPS,
+    GOOD_FAITH_REVIEW,
+    GOOD_REVIEW_TIMESTEPS,
     MIN_PAPER_QUALITY,
     MIN_REVIEW_EFFORT_THRESHOLD,
     Paper,
+    REVIEW_PARADIGM_DISCRETE,
     accrual_rate_from_quality,
     review_accrual_bump,
 )
@@ -83,6 +87,12 @@ class HeuristicAgent(Agent):
             return "peer_review", paper
         return "finish_review_write_paper", None
 
+    def choose_review_kind(self, paper: Paper) -> str:
+        """Discrete-mode choice between fixed bad- and good-faith review work."""
+        bad = self._score_fixed_review(paper, BAD_REVIEW_TIMESTEPS)
+        good = self._score_fixed_review(paper, GOOD_REVIEW_TIMESTEPS)
+        return GOOD_FAITH_REVIEW if good > bad else BAD_FAITH_REVIEW
+
     # ---- scoring ---------------------------------------------------------
     def _review_value(self, paper: Paper, effort: float, horizon: float) -> float:
         """Forecast capital from owning the agreed review share of ``paper``."""
@@ -96,9 +106,18 @@ class HeuristicAgent(Agent):
 
     def _score_claim(self, paper: Paper) -> float:
         """Value of claiming ``paper`` and completing a minimum-effort review."""
+        if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+            return max(
+                self._score_fixed_review(paper, BAD_REVIEW_TIMESTEPS),
+                self._score_fixed_review(paper, GOOD_REVIEW_TIMESTEPS),
+            )
         return self._review_value(
             paper, MIN_REVIEW_EFFORT_THRESHOLD, self.forecast_horizon_timesteps
         )
+
+    def _score_fixed_review(self, paper: Paper, effort: float) -> float:
+        horizon = self.forecast_horizon_timesteps - max(0.0, effort - 1.0)
+        return self._review_value(paper, effort, horizon)
 
     def _score_finish_and_write(self, paper: Paper) -> float:
         """Finish the active review now and spend this timestep writing."""
@@ -128,7 +147,7 @@ class HeuristicAgent(Agent):
         paper_rate = accrual_rate_from_quality(quality)
         full_value = paper_rate * self.forecast_horizon_timesteps
         timesteps_to_finish = max(
-            1.0, PAPER_THRESHOLD / max(EXPECTED_WRITE_PROGRESS, 1e-9)
+            1.0, self.paper_completion_threshold() / max(EXPECTED_WRITE_PROGRESS, 1e-9)
         )
         return full_value / timesteps_to_finish
 
