@@ -130,11 +130,14 @@
     const agentColor = (name, i) => color(i % PALETTE.length);
 
     // Stable display order + colors for action kinds (kinds from Agent.py).
-    const ACTION_ORDER = ["write_paper", "review_started", "review_continued",
+    const ACTION_ORDER = ["write_paper", "bad_faith_review", "good_faith_review",
+      "review_started", "review_continued",
       "review_auto_continued", "review_finished_write", "review_finished_peer_review",
       "review_stopped", "review_unavailable", "idle"];
     const ACTION_COLOR = {
-      write_paper: "#60a5fa", review_started: "#4ade80", review_continued: "#34d399",
+      write_paper: "#60a5fa", bad_faith_review: "#f87171",
+      good_faith_review: "#16a34a", review_started: "#4ade80",
+      review_continued: "#34d399",
       review_auto_continued: "#15803d", review_finished_write: "#f59e0b",
       review_finished_peer_review: "#a855f7", review_stopped: "#22d3ee",
       review_unavailable: "#fbbf24", idle: "#6b7280"
@@ -150,15 +153,18 @@
 
     // Top-level decisions: map raw action kinds to a decision (mirrors visualize.py).
     const DECISION_LABELS = {
-      write_paper: "write_paper", review_started: "start_review",
+      write_paper: "write_paper", bad_faith_review: "bad_faith_review",
+      good_faith_review: "good_faith_review", review_started: "start_review",
       review_continued: "continue_review", review_finished_write: "finish_and_write",
       review_finished_peer_review: "finish_and_review", review_unavailable: "start_review",
       idle: "idle",
     };
-    const DECISION_ORDER = ["write_paper", "start_review", "continue_review",
+    const DECISION_ORDER = ["write_paper", "bad_faith_review", "good_faith_review",
+      "start_review", "continue_review",
       "finish_and_write", "finish_and_review", "idle"];
     const DECISION_COLOR = {
-      write_paper: "#60a5fa", start_review: "#4ade80", continue_review: "#22c55e",
+      write_paper: "#60a5fa", bad_faith_review: "#f87171",
+      good_faith_review: "#16a34a", start_review: "#4ade80", continue_review: "#22c55e",
       finish_and_write: "#f59e0b", finish_and_review: "#a855f7", idle: "#6b7280",
     };
     // Reward threshold for review effort; used to draw a reference line. Runs that
@@ -172,6 +178,8 @@
       ["World", [
         ["num_heuristic_agents", "Heuristic agents"],
         ["num_rl_agents", "RL agents"],
+        ["num_random_agents", "Random agents"],
+        ["num_probabilistic_agents", "Probabilistic agents"],
         ["num_days", "Timesteps"],
         ["seed", "Seed"],
         ["forecast_horizon_days", "Forecast horizon (timesteps)"],
@@ -197,13 +205,25 @@
         ["history_price_scale", "History price scale"],
       ]],
       ["Effort & reward", [
+        ["review_paradigm", "Review paradigm"],
         ["review_effort_per_day", "Review effort / timestep"],
         ["min_review_effort_threshold", "Min review effort"],
+        ["good_faith_review_threshold", "Good-faith threshold"],
+        ["bad_review_timesteps", "Bad review timesteps"],
+        ["good_review_timesteps", "Good review timesteps"],
         ["base_review_accrual_bump", "Base accrual bump"],
         ["first_extra_day_bump", "First extra-timestep bump"],
       ]],
       ["Publishing", [
         ["paper_threshold", "Paper threshold"],
+        ["discrete_paper_timesteps", "Discrete paper timesteps"],
+        ["discrete_writing_effort_per_timestep", "Discrete writing / timestep"],
+      ]],
+      ["Control agents", [
+        ["random_claim_probability", "Random claim probability"],
+        ["random_good_faith_probability", "Random good-faith probability"],
+        ["probabilistic_claim_probability", "Probabilistic claim probability"],
+        ["probabilistic_good_faith_probability", "Probabilistic good-faith probability"],
       ]],
       ["Heuristic forecasting", [
         ["expected_write_progress", "Expected write progress"],
@@ -422,12 +442,14 @@
     const legendOpts = { labels: { color: "#c4cdd5", boxWidth: 10 } };
     const axisTitle = (text) => ({ display: true, text, color: "#8b98a5" });
 
-    // Cumulative completed reviews and paper count over time.
+    // Cumulative good/bad/completed reviews and paper count over time.
     function setupReviewChart() {
       if (reviewChart) reviewChart.destroy();
       reviewChart = new Chart(document.getElementById("reviewChart"), {
         type: "line",
         data: { labels: [], datasets: [
+          { label: "good_faith_reviews", data: [], borderColor: "#16a34a", borderWidth: 1.5, pointRadius: 0 },
+          { label: "bad_faith_reviews", data: [], borderColor: "#f87171", borderWidth: 1.5, pointRadius: 0 },
           { label: "completed_peer_reviews", data: [], borderColor: "#4ade80", borderWidth: 1.5, pointRadius: 0 },
           { label: "num_papers", data: [], borderColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0 },
         ]},
@@ -513,8 +535,9 @@
       if (hasReview) {
         setupReviewChart();
         reviewChart.data.labels = days;
-        reviewChart.data.datasets[0].data = s.completed_peer_reviews || [];
-        reviewChart.data.datasets[1].data = s.num_papers || [];
+        reviewChart.data.datasets.forEach(ds => {
+          ds.data = s[ds.label] || [];
+        });
         reviewChart.update();
       }
 
