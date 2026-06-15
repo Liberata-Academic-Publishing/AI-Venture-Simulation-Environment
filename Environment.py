@@ -18,11 +18,12 @@ AgentFactory = Callable[..., Agent]
 class Environment:
     """Single-review marketplace environment.
 
-    Each timestep runs in two phases over a freshly shuffled agent order: a
-    marketplace phase where agents may claim at most one listed paper to review,
-    then a work phase where the remaining agents write or advance their active
-    review. Papers list one timestep after they are written and leave the market
-    permanently the moment they are claimed.
+    Each timestep reshuffles the agent order, then advances the world by one
+    timestep. In the ``continuous`` paradigm this is one merged decision per
+    agent (claim+review, continue a review, research, or finish research). In the
+    ``discrete`` paradigm it is the two-phase flow (a marketplace claim phase
+    then a work phase). Papers list one timestep after they are written and leave
+    the market permanently the moment they are claimed.
     """
 
     def __init__(
@@ -66,8 +67,11 @@ class Environment:
 
         order = list(self.agents)
         random.shuffle(order)
-        claimers = self._marketplace_phase(order)
-        self._work_phase(order, claimers)
+        if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+            claimers = self._marketplace_phase(order)
+            self._work_phase(order, claimers)
+        else:
+            self._continuous_phase(order)
 
         self._sync_papers()
         self._schedule_new_papers()
@@ -87,6 +91,22 @@ class Environment:
         return self
 
     # ---- phases ----------------------------------------------------------
+    def _continuous_phase(self, order: list[Agent]) -> None:
+        """Single merged phase: each agent makes one decision and spends one
+        timestep of effort on it (claim+review, continue review, research, or
+        finish research). Agents act in the freshly shuffled order so claims
+        race for whatever papers are still listed."""
+        for agent in order:
+            act = getattr(agent, "act_continuous", None)
+            if act is None:
+                continue
+            records = act()
+            if self.history is None or not records:
+                continue
+            for record in records:
+                if record is not None:
+                    self.history.record_action(self, agent, record)
+
     def _marketplace_phase(self, order: list[Agent]) -> set[Agent]:
         """Phase 1 (instantaneous): each agent may select one listed paper.
 

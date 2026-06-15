@@ -27,6 +27,7 @@ QUALITY_SIGMA = SIM.quality_sigma
 MIN_PAPER_QUALITY = SIM.min_paper_quality
 QUALITY_PRICE_SCALE = SIM.quality_price_scale
 HISTORY_PRICE_SCALE = SIM.history_price_scale
+WRITING_SATURATION = SIM.writing_saturation
 
 REVIEW_PARADIGM_CONTINUOUS = "continuous"
 REVIEW_PARADIGM_DISCRETE = "discrete"
@@ -84,8 +85,22 @@ def quality_multiplier(quality: float) -> float:
 
 
 def accrual_rate_from_quality(quality: float) -> float:
-    """Base AC accrual rate implied by a paper's quality."""
+    """Base AC accrual rate implied by a paper's quality (the asymptotic ceiling)."""
     return DEFAULT_ACCRUAL_RATE * quality_multiplier(quality)
+
+
+def accrual_rate_from_effort(quality: float, writing_effort: float) -> float:
+    """Continuous-mode base accrual rate after ``writing_effort`` timesteps.
+
+    The rate approaches the quality-defined ceiling
+    ``accrual_rate_from_quality(quality)`` asymptotically:
+    ``ceiling * (1 - exp(-WRITING_SATURATION * effort))``. Zero effort yields a
+    zero rate; more effort moves the paper closer to its ceiling with
+    diminishing returns. There is no minimum threshold to finish a paper.
+    """
+    effort = max(0.0, float(writing_effort))
+    ceiling = accrual_rate_from_quality(quality)
+    return ceiling * (1.0 - math.exp(-WRITING_SATURATION * effort))
 
 
 def review_accrual_bump(effort: float, quality: float = 1.0) -> float:
@@ -124,13 +139,24 @@ class Paper:
         completion_progress: float = 1.0,
         market_listed: bool = False,
         max_reviewer_share: float = DEFAULT_MAX_REVIEWER_SHARE,
+        writing_effort: float | None = None,
     ):
         if author is None:
             raise ValueError("author cannot be None")
 
         self.author = author
         self.quality = quality_multiplier(quality)
-        rate = accrual_rate_from_quality(self.quality) if accrual_rate is None else accrual_rate
+        self.writing_effort = (
+            None if writing_effort is None else max(0.0, float(writing_effort))
+        )
+        if accrual_rate is not None:
+            rate = accrual_rate
+        elif self.writing_effort is not None:
+            # Continuous mode: writing effort sets how close to the ceiling we get.
+            rate = accrual_rate_from_effort(self.quality, self.writing_effort)
+        else:
+            # Discrete / back-compat: full quality-defined rate.
+            rate = accrual_rate_from_quality(self.quality)
         self.accrual_rate = self._nonnegative_float(rate, "accrual_rate")
         self.current_ac = self._nonnegative_float(current_ac, "current_ac")
         self.share_distribution = (

@@ -18,6 +18,8 @@ from Paper import (
     MIN_REVIEW_EFFORT_THRESHOLD,
     REVIEW_EFFORT_PER_TIMESTEP,
     Paper,
+    accrual_rate_from_effort,
+    accrual_rate_from_quality,
     review_accrual_bump,
 )
 from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
@@ -33,11 +35,13 @@ except ImportError:
 class ScriptAgent(Agent):
     """Agent driven by scripted marketplace/work decisions for deterministic tests."""
 
-    def __init__(self, name: str = "agent", marketplace=None, work=None):
+    def __init__(self, name: str = "agent", marketplace=None, work=None, continuous=None):
         super().__init__(intrinsic_talent=1.0)
         self.name = name
         self.marketplace = list(marketplace or [])
         self.work = list(work or [])
+        # Scripted (kind, paper) tuples for the merged continuous phase.
+        self.continuous = list(continuous or [])
 
     def choose_marketplace_action(self):
         if self.marketplace:
@@ -48,6 +52,11 @@ class ScriptAgent(Agent):
         if self.work:
             return self.work.pop(0)
         return "write_paper", None
+
+    def choose_continuous_action(self):
+        if self.continuous:
+            return self.continuous.pop(0)
+        return super().choose_continuous_action()
 
     def writing_effort_delta(self):
         return 0.5
@@ -71,6 +80,10 @@ class RecordingAgent(ScriptAgent):
         self.log.append(self.name)
         return super().work_turn()
 
+    def act_continuous(self):
+        self.log.append(self.name)
+        return super().act_continuous()
+
 
 def _listed_paper(author, **kwargs) -> Paper:
     paper = Paper(author=author, market_listed=True, **kwargs)
@@ -82,11 +95,11 @@ class MarketplaceLifecycleTest(unittest.TestCase):
         Agent.all_papers = []
 
     def test_published_paper_lists_one_timestep_later(self):
-        author = ScriptAgent("author")
-        author.paper_progress = PAPER_THRESHOLD - 0.25
+        # Continuous mode: the author finishes a paper by choice, not a threshold.
+        author = ScriptAgent("author", continuous=[("research_finish", None)])
         env = Environment(agents=[author])
 
-        env.run_timestep()  # timestep 1: author writes and publishes
+        env.run_timestep()  # timestep 1: author researches and finishes a paper
         self.assertEqual(len(Agent.all_papers), 1)
         paper = Agent.all_papers[0]
         self.assertFalse(paper.market_listed)
@@ -507,6 +520,129 @@ class EnvironmentTest(unittest.TestCase):
         self.assertIn("total_capital", rows[0])
         self.assertEqual(len(rows), 1 + 3)
         self.assertEqual([row[0] for row in rows[1:]], ["1", "2", "3"])
+
+
+class ContinuousAccrualTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_accrual_rate_rises_and_saturates_with_effort(self):
+        ceiling = accrual_rate_from_quality(1.0)
+        r0 = accrual_rate_from_effort(1.0, 0.0)
+        r5 = accrual_rate_from_effort(1.0, 5.0)
+        r20 = accrual_rate_from_effort(1.0, 20.0)
+
+        self.assertAlmostEqual(r0, 0.0)
+        self.assertGreater(r5, r0)
+        self.assertGreater(r20, r5)
+        self.assertLess(r20, ceiling)
+        # Diminishing returns: equal-width effort bands add less rate as effort grows.
+        self.assertGreater(r5 - r0, r20 - r5)
+
+    def test_more_writing_effort_raises_paper_base_rate(self):
+        author = ScriptAgent("author")
+        low = Paper(author=author, quality=1.0, writing_effort=2.0)
+        high = Paper(author=author, quality=1.0, writing_effort=12.0)
+
+        self.assertGreater(high.accrual_rate, low.accrual_rate)
+        self.assertLess(high.accrual_rate, accrual_rate_from_quality(1.0))
+
+
+class ContinuousMergedPhaseTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def _listed(self, author, **kwargs):
+        paper = _listed_paper(author, **kwargs)
+        Agent.all_papers.append(paper)
+        return paper
+
+    def test_nonreviewer_claim_starts_review_with_one_effort(self):
+        author = ScriptAgent("author")
+        paper = self._listed(author, quality=1.0, current_ac=10.0)
+        reviewer = ScriptAgent("reviewer", continuous=[("claim", paper)])
+        paper.update_price_table([reviewer], 1.0, 0.0)
+
+        records = reviewer.act_continuous()
+
+        self.assertEqual([r.kind for r in records], ["review_started"])
+        self.assertIs(reviewer.active_review_paper, paper)
+        self.assertAlmostEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_TIMESTEP)
+
+    def test_nonreviewer_research_adds_progress_without_publishing(self):
+        agent = ScriptAgent("a", continuous=[("research", None)])
+
+        records = agent.act_continuous()
+
+        self.assertEqual([r.kind for r in records], ["write_paper"])
+        self.assertFalse(records[0].published)
+        self.assertEqual(len(Agent.all_papers), 0)
+        self.assertGreater(agent.paper_progress, 0.0)
+
+    def test_nonreviewer_research_finish_publishes_and_resets(self):
+        agent = ScriptAgent("a", continuous=[("research_finish", None)])
+
+        records = agent.act_continuous()
+
+        self.assertEqual([r.kind for r in records], ["write_paper"])
+        self.assertTrue(records[0].published)
+        self.assertEqual(len(Agent.all_papers), 1)
+        self.assertEqual(agent.paper_progress, 0.0)
+        self.assertAlmostEqual(Agent.all_papers[0].writing_effort, 0.5)
+
+    def test_reviewer_review_continues_active_review(self):
+        author = ScriptAgent("author")
+        paper = self._listed(author, quality=1.0, current_ac=10.0)
+        reviewer = ScriptAgent("reviewer")
+        paper.update_price_table([reviewer], 1.0, 0.0)
+        reviewer.claim_review(paper)
+        reviewer.apply_initial_review_effort()
+        reviewer.continuous = [("review", None)]
+
+        records = reviewer.act_continuous()
+
+        self.assertEqual([r.kind for r in records], ["review_continued"])
+        self.assertAlmostEqual(
+            reviewer.active_review_effort, 2 * REVIEW_EFFORT_PER_TIMESTEP
+        )
+
+    def test_reviewer_claim_switch_finalizes_old_review(self):
+        author = ScriptAgent("author")
+        first = self._listed(author, quality=1.0, current_ac=50.0)
+        second = self._listed(author, quality=1.0, current_ac=100.0)
+        reviewer = ScriptAgent("reviewer")
+        for paper in (first, second):
+            paper.update_price_table([reviewer], 1.0, 0.0)
+        reviewer.claim_review(first)
+        reviewer.apply_initial_review_effort()
+        reviewer.continuous = [("claim", second)]
+
+        records = reviewer.act_continuous()
+
+        self.assertEqual(
+            [r.kind for r in records],
+            ["review_finished_peer_review", "review_started"],
+        )
+        self.assertTrue(first.reviewed)
+        self.assertIs(reviewer.active_review_paper, second)
+        self.assertAlmostEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_TIMESTEP)
+
+    def test_reviewer_research_ends_review_and_writes(self):
+        author = ScriptAgent("author")
+        paper = self._listed(author, quality=1.0, current_ac=50.0)
+        reviewer = ScriptAgent("reviewer")
+        paper.update_price_table([reviewer], 1.0, 0.0)
+        reviewer.claim_review(paper)
+        reviewer.apply_initial_review_effort()
+        reviewer.continuous = [("research", None)]
+
+        records = reviewer.act_continuous()
+
+        self.assertEqual([r.kind for r in records], ["review_finished_write"])
+        self.assertTrue(paper.reviewed)
+        self.assertIsNone(reviewer.active_review_paper)
+        self.assertFalse(records[0].published)
+        self.assertGreater(reviewer.paper_progress, 0.0)
 
 
 class UtilityTest(unittest.TestCase):

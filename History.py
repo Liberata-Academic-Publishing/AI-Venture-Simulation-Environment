@@ -120,6 +120,8 @@ class History:
         # Per-paper attributes (constant or final snapshot) for outcome charts.
         self.paper_quality: dict[str, float] = {}
         self.paper_reviewed: dict[str, bool] = {}
+        self.paper_writing_effort: dict[str, float] = {}
+        self.paper_accrual_rate: dict[str, float] = {}
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
@@ -170,6 +172,12 @@ class History:
                 label = self._label(paper, "Paper")
                 self.paper_quality[label] = float(getattr(paper, "quality", 0.0))
                 self.paper_reviewed[label] = bool(getattr(paper, "reviewed", False))
+                effort = getattr(paper, "writing_effort", None)
+                if effort is not None:
+                    self.paper_writing_effort[label] = float(effort)
+                self.paper_accrual_rate[label] = float(
+                    getattr(paper, "accrual_rate", 0.0)
+                )
 
     def record_action(self, env: "Environment", agent: Any, record: "ActionRecord") -> None:
         """Log one agent turn. Called during a timestep's marketplace/work phases,
@@ -267,6 +275,8 @@ class History:
             "paper_ac": {k: list(v) for k, v in self.paper_ac.items()},
             "paper_quality": dict(self.paper_quality),
             "paper_reviewed": dict(self.paper_reviewed),
+            "paper_writing_effort": dict(self.paper_writing_effort),
+            "paper_accrual_rate": dict(self.paper_accrual_rate),
             "actions": [
                 {"timestep": d, "day": d, "agent": a, "kind": k, "paper": p}
                 for (d, a, k, p) in self.actions

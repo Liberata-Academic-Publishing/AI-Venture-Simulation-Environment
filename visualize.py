@@ -291,6 +291,43 @@ def plot_paper_quality_vs_ac(
     return _finish(fig, path, show)
 
 
+def _draw_writing_effort_vs_rate(ax, history: "History") -> None:
+    """How much authors invested in each paper vs the base accrual rate it earned.
+
+    Continuous mode: a paper's base rate approaches its quality ceiling as
+    writing effort grows, so the cloud should trace a rising, saturating band.
+    """
+    efforts = getattr(history, "paper_writing_effort", {})
+    rates = getattr(history, "paper_accrual_rate", {})
+    points = [
+        (efforts[label], rates[label])
+        for label in efforts
+        if label in rates
+    ]
+    if not points:
+        ax.text(
+            0.5, 0.5, "No writing-effort data\n(continuous mode only)",
+            ha="center", va="center",
+        )
+        ax.set_axis_off()
+        return
+    xs, ys = zip(*points)
+    ax.scatter(xs, ys, s=18, alpha=0.5, color="#0ea5e9", edgecolors="#075985")
+    ax.set_xlabel("Writing effort invested (timesteps)")
+    ax.set_ylabel("Base accrual rate at finish")
+
+
+def plot_writing_effort_vs_rate(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Per-paper writing effort vs the base accrual rate it locked in."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_writing_effort_vs_rate(ax, history)
+    ax.set_title("Writing effort vs accrual rate (asymptote)")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _draw_review_reputation(ax, history: "History") -> None:
     """Per-agent peer-review reputation over time, with the mean highlighted."""
     series_map = getattr(history, "agent_review_history", {})
@@ -577,8 +614,12 @@ def plot_run_summary(history: "History", path: str | None = None, show: bool = F
     ax.set_title("Review marketplace")
 
     ax = axes[1, 0]
-    _draw_quality_vs_ac(ax, history)
-    ax.set_title("Paper quality vs accrued capital")
+    if getattr(history, "paper_writing_effort", {}):
+        _draw_writing_effort_vs_rate(ax, history)
+        ax.set_title("Writing effort vs accrual rate")
+    else:
+        _draw_quality_vs_ac(ax, history)
+        ax.set_title("Paper quality vs accrued capital")
 
     ax = axes[1, 1]
     _draw_review_reputation(ax, history)
@@ -612,6 +653,9 @@ def plot_all(
         ),
         "paper_quality_vs_ac": plot_paper_quality_vs_ac(
             history, os.path.join(outdir, "paper_quality_vs_ac.png"), show=show
+        ),
+        "writing_effort_vs_rate": plot_writing_effort_vs_rate(
+            history, os.path.join(outdir, "writing_effort_vs_rate.png"), show=show
         ),
         "review_reputation": plot_review_reputation(
             history, os.path.join(outdir, "review_reputation.png"), show=show

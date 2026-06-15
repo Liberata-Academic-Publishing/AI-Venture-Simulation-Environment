@@ -190,6 +190,7 @@ CHART_DESCRIPTIONS = {
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
     "marketplace_activity": "Papers on market vs cumulative reviews completed",
     "paper_quality_vs_ac": "Paper quality vs accrued capital (reviewed or not)",
+    "writing_effort_vs_rate": "Writing effort invested vs base accrual rate (asymptote)",
     "review_reputation": "Reviewer reputation (AC earned per review) over time",
     "action_mix": "What every agent did each timestep (stacked bars)",
     "choice_breakdown": "Agent decisions (write / review / finish)",

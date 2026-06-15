@@ -24,6 +24,13 @@ from Paper import (
 
 PAPER_THRESHOLD = SIM.paper_threshold
 EXPECTED_REVIEW_EFFORT_PER_TURN = REVIEW_EFFORT_PER_TIMESTEP
+WRITING_EFFORT_PER_TIMESTEP = SIM.writing_effort_per_timestep
+
+# Continuous-mode merged decision: one of these per agent per timestep.
+CONTINUOUS_CLAIM = "claim"
+CONTINUOUS_REVIEW = "review"
+CONTINUOUS_RESEARCH = "research"
+CONTINUOUS_RESEARCH_FINISH = "research_finish"
 
 
 @dataclass(frozen=True)
@@ -91,6 +98,36 @@ class Agent(ABC):
           - ``"finish_review_write_paper"`` — finalize the active review, then write.
         """
 
+    def choose_continuous_action(self) -> tuple[str, Paper | None]:
+        """Continuous merged phase: one decision that also applies a timestep.
+
+        Returns ``(kind, paper)`` where ``kind`` is one of:
+
+        Without an active review:
+          - ``"claim"`` (with a listed ``paper``) — start reviewing it (+1 effort).
+          - ``"research"`` — add one timestep of writing effort to the own paper.
+          - ``"research_finish"`` — add one writing timestep, then finish the paper
+            (listed next timestep) and start a fresh one.
+
+        With an active review:
+          - ``"claim"`` (with a listed ``paper``) — finalize the current review and
+            start the new one (+1 effort).
+          - ``"review"`` — add one timestep of effort to the current review.
+          - ``"research"`` — finalize the current review, then add one writing
+            timestep to the own paper.
+
+        Default derives from the two-phase hooks; concrete agents override this.
+        """
+        paper = self.choose_marketplace_action()
+        if paper is not None and paper.can_start_review(self):
+            return (CONTINUOUS_CLAIM, paper)
+        if self.active_review_paper is not None:
+            action, _ = self.choose_work_action()
+            if action == "finish_review_write_paper":
+                return (CONTINUOUS_RESEARCH, None)
+            return (CONTINUOUS_REVIEW, None)
+        return (CONTINUOUS_RESEARCH, None)
+
     def choose_review_kind(self, paper: Paper) -> str:
         """Discrete-mode review choice. Subclasses can choose bad vs good faith."""
         return GOOD_FAITH_REVIEW
@@ -149,6 +186,30 @@ class Agent(ABC):
             )
         return None
 
+    # ---- continuous merged phase (one decision + one timestep of effort) --
+    def act_continuous(self) -> list[ActionRecord]:
+        """Run one merged continuous-mode decision and apply its timestep.
+
+        Returns the action record(s) produced (a claim that finalizes an active
+        review yields two: the finished review and the newly started one).
+        """
+        self._clear_last_review_result()
+        kind, paper = self.choose_continuous_action()
+
+        if kind == CONTINUOUS_CLAIM and paper is not None and paper.can_start_review(self):
+            records: list[ActionRecord] = []
+            finalized = self.claim_review(paper)
+            if finalized is not None:
+                records.append(finalized)
+            records.append(self._advance_active_review("review_started"))
+            return records
+
+        if kind == CONTINUOUS_REVIEW and self.active_review_paper is not None:
+            return [self._advance_active_review("review_continued")]
+
+        finish = kind == CONTINUOUS_RESEARCH_FINISH and self.active_review_paper is None
+        return [self._research_turn(finish=finish)]
+
     # ---- phase 2: effort application (one timestep of work) --------------
     def apply_initial_review_effort(self) -> ActionRecord:
         """Apply this timestep's effort to a review claimed in the marketplace."""
@@ -175,6 +236,35 @@ class Agent(ABC):
             "write_paper",
             published=len(Agent.all_papers) > papers_before,
             writing_effort=writing_effort,
+        )
+
+    def _research_turn(self, finish: bool) -> ActionRecord:
+        """Continuous research: optionally finalize an active review, then add one
+        writing timestep; when ``finish`` is set, publish the paper and start a
+        fresh one."""
+        finished = None
+        if self.active_review_paper is not None:
+            finished = self._finalize_active_review()
+
+        effort = self.add_research_effort()
+        published = False
+        if finish:
+            self.finish_research_paper()
+            published = True
+
+        if finished is not None:
+            return ActionRecord(
+                "review_finished_write",
+                finished.paper,
+                published=published,
+                review_effort=finished.review_effort,
+                review_kind=finished.review_kind,
+                writing_effort=effort,
+            )
+        return ActionRecord(
+            "write_paper",
+            published=published,
+            writing_effort=effort,
         )
 
     def _finish_review_and_write(self) -> ActionRecord:
@@ -293,6 +383,36 @@ class Agent(ABC):
         paper = Paper(author=self, quality=quality)
         Agent.all_papers.append(paper)
 
+    # ---- continuous writing (agent-chosen finish, asymptotic accrual) ----
+    def add_research_effort(self) -> float:
+        """Add one timestep of writing effort to the in-progress paper (no publish).
+
+        Quality is sampled lazily the first time the agent researches a paper.
+        """
+        if self.next_paper_quality is None:
+            self.next_paper_quality = self._sample_quality()
+        effort = self.writing_effort_delta()
+        self.paper_progress += effort
+        return effort
+
+    def finish_research_paper(self) -> Paper:
+        """Publish the in-progress paper using its accumulated writing effort.
+
+        The paper's base accrual rate is set from how much writing effort went
+        in (asymptotically approaching its quality ceiling). Resets progress and
+        resamples a fresh quality for the agent's next paper.
+        """
+        quality = (
+            self.next_paper_quality
+            if self.next_paper_quality is not None
+            else self._sample_quality()
+        )
+        paper = Paper(author=self, quality=quality, writing_effort=self.paper_progress)
+        Agent.all_papers.append(paper)
+        self.paper_progress = 0.0
+        self.next_paper_quality = None
+        return paper
+
     def _sample_quality(self) -> float:
         return quality_multiplier(random.gauss(self.intrinsic_talent, QUALITY_SIGMA))
 
@@ -304,7 +424,7 @@ class Agent(ABC):
         """Writing effort contributed in one timestep."""
         if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
             return DISCRETE_WRITING_EFFORT_PER_TIMESTEP
-        return self._clean_effort(random.random())
+        return WRITING_EFFORT_PER_TIMESTEP
 
     def paper_completion_threshold(self) -> float:
         if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:

@@ -1,7 +1,13 @@
 from __future__ import annotations
 import random
 
-from Agent import Agent
+from Agent import (
+    Agent,
+    CONTINUOUS_CLAIM,
+    CONTINUOUS_RESEARCH,
+    CONTINUOUS_RESEARCH_FINISH,
+    CONTINUOUS_REVIEW,
+)
 from config import SIM
 from Paper import (
     BAD_FAITH_REVIEW,
@@ -60,6 +66,25 @@ class RandomAgent(Agent):
                 ]
             )
         return "write_paper", None
+
+    def choose_continuous_action(self) -> tuple[str, Paper | None]:
+        reviewable = [
+            p
+            for p in Agent.all_papers
+            if self._can_review(p) and p.offered_share(self) > 0.0
+        ]
+        if reviewable and random.random() < self.claim_probability:
+            return (CONTINUOUS_CLAIM, random.choice(reviewable))
+
+        if self.active_review_paper is not None:
+            return random.choice([
+                (CONTINUOUS_REVIEW, None),
+                (CONTINUOUS_RESEARCH, None),
+            ])
+        return random.choice([
+            (CONTINUOUS_RESEARCH, None),
+            (CONTINUOUS_RESEARCH_FINISH, None),
+        ])
 
     def _can_review(self, paper: Paper) -> bool:
         helper = getattr(paper, "can_start_review", None)

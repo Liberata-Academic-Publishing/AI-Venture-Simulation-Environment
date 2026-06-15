@@ -63,6 +63,7 @@ class SimConfig:
     # --- Effort & reward model -------------------------------------------
     review_paradigm: str = "continuous"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
+    writing_effort_per_timestep: float = 1.0    # continuous writing effort per timestep
     min_review_effort_threshold: float = 1.0    # reward cliff: below this earns 0
     good_faith_review_threshold: float = 2.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
@@ -74,6 +75,10 @@ class SimConfig:
     paper_threshold: float = 10.0   # writing effort needed to publish a paper
     discrete_paper_timesteps: float = 200.0      # discrete manuscript duration (T_M)
     discrete_writing_effort_per_timestep: float = 1.0
+    # Continuous-mode asymptotic writing model: a paper's accrual rate approaches
+    # its quality-defined ceiling as accumulated writing effort grows. Higher k
+    # reaches the ceiling faster (k=0.2 -> ~63% at 5 ts, ~86% at 10 ts).
+    writing_saturation: float = 0.2
 
     # --- Control / probability agents ------------------------------------
     random_claim_probability: float = 0.5

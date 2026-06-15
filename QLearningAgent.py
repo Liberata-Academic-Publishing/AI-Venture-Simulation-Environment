@@ -4,21 +4,30 @@ Reward = Δ academic capital. The agent learns *which action type* to take each
 timestep; the target paper for a claim is chosen by the inherited heuristic
 forecast, so the action space stays tiny and fixed.
 
-The agent makes one decision per timestep. The decision is computed in the
-marketplace phase (``choose_marketplace_action``): if it decides to claim a
-paper it returns that paper; otherwise it caches a work-phase action that
-``choose_work_action`` replays.
+The agent makes one decision per timestep, and the wiring depends on the active
+review paradigm:
+
+* **continuous** (default) -- one merged decision per timestep via
+  ``choose_continuous_action``; the chosen action also applies that timestep's
+  effort (claim+review, continue a review, research, or research+finish).
+* **discrete** -- the two-phase flow: the decision is computed in the
+  marketplace phase (``choose_marketplace_action``) and, when it is not a claim,
+  a cached work-phase action is replayed by ``choose_work_action``.
 
 Action space
 ------------
-* free (no active review)  -> ``WRITE`` or ``CLAIM`` (start reviewing a paper)
+* free (no active review)  -> ``WRITE`` (research, no publish), ``RESEARCH_FINISH``
+                              (research then finish/list the paper; continuous
+                              only), or ``CLAIM`` (start reviewing a paper)
 * active review            -> ``CONTINUE`` (one more timestep), ``FINISH_WRITE``
-                              (finalize then write), or ``CLAIM_NEW`` (finalize
-                              the current review by claiming another paper)
+                              (finalize then research/write), or ``CLAIM_NEW``
+                              (finalize the current review by claiming another
+                              paper)
 
 NOTE: the action semantics and feature vector changed with the single-review
-marketplace overhaul, so policies saved before that change are incompatible and
-must be retrained.
+marketplace overhaul, and the continuous merged-phase overhaul added the
+``RESEARCH_FINISH`` action (so ``NUM_ACTIONS`` grew). Policies saved before
+either change are incompatible and must be retrained.
 
 Library: numpy only. Two interchangeable Q backends (tabular + linear).
 """
@@ -32,7 +41,13 @@ from enum import IntEnum
 
 import numpy as np
 
-from Agent import Agent
+from Agent import (
+    Agent,
+    CONTINUOUS_CLAIM,
+    CONTINUOUS_RESEARCH,
+    CONTINUOUS_RESEARCH_FINISH,
+    CONTINUOUS_REVIEW,
+)
 from HeuristicAgent import HeuristicAgent
 from Paper import (
     DEFAULT_MAX_REVIEWER_SHARE,
@@ -42,11 +57,12 @@ from Paper import (
 
 
 class QAction(IntEnum):
-    WRITE = 0          # free: work on own paper
+    WRITE = 0          # free: research own paper (continuous: no finish)
     CLAIM = 1          # free: claim and start reviewing the best listed paper
     CONTINUE = 2       # review: invest one more timestep in the active review
-    FINISH_WRITE = 3   # review: finalize the active review, then write
+    FINISH_WRITE = 3   # review: finalize the active review, then research/write
     CLAIM_NEW = 4      # review: finalize by claiming another listed paper
+    RESEARCH_FINISH = 5  # free (continuous): research, then finish/list the paper
 
 
 # Fixed-length observation. Index order is part of the contract between the
@@ -213,6 +229,49 @@ class QLearningAgent(HeuristicAgent):
         if action == QAction.FINISH_WRITE:
             return "finish_review_write_paper", None
         return "write_paper", None
+
+    # ---- continuous merged phase: one Q decision per timestep ------------- #
+    def choose_continuous_action(self) -> tuple[str, Paper | None]:
+        in_review = self.active_review_paper is not None
+        best_paper, best_share, best_ac = self._best_reviewable(
+            exclude=self.active_review_paper
+        )
+        features = self._features(best_share, best_ac)
+        legal = self._legal_continuous_actions(in_review, best_paper is not None)
+
+        if self.learning and self._last_features is not None:
+            reward = self.academic_capital - self._last_capital
+            q_next = self.backend.q_values(features)
+            max_next = max((q_next[a] for a in legal), default=0.0)
+            target = reward + self.gamma * max_next
+            self.backend.update(self._last_features, self._last_action, target)
+
+        action = self._select(features, legal)
+
+        self._last_features = features
+        self._last_action = int(action)
+        self._last_capital = self.academic_capital
+
+        if action in (QAction.CLAIM, QAction.CLAIM_NEW):
+            return (CONTINUOUS_CLAIM, best_paper)
+        if action == QAction.CONTINUE:
+            return (CONTINUOUS_REVIEW, None)
+        if action == QAction.RESEARCH_FINISH:
+            return (CONTINUOUS_RESEARCH_FINISH, None)
+        return (CONTINUOUS_RESEARCH, None)
+
+    def _legal_continuous_actions(
+        self, in_review: bool, has_reviewable: bool
+    ) -> list[int]:
+        if in_review:
+            actions = [QAction.CONTINUE, QAction.FINISH_WRITE]
+            if has_reviewable:
+                actions.append(QAction.CLAIM_NEW)
+            return actions
+        actions = [QAction.WRITE, QAction.RESEARCH_FINISH]
+        if has_reviewable:
+            actions.append(QAction.CLAIM)
+        return actions
 
     def end_episode(self) -> None:
         """Terminal flush: bootstrap-free update for the final transition."""

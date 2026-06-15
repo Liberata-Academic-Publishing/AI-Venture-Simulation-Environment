@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from Agent import Agent
+from Agent import (
+    Agent,
+    CONTINUOUS_CLAIM,
+    CONTINUOUS_RESEARCH,
+    CONTINUOUS_RESEARCH_FINISH,
+    CONTINUOUS_REVIEW,
+)
 from config import SIM
 from Paper import (
     BAD_FAITH_REVIEW,
@@ -11,6 +17,7 @@ from Paper import (
     MIN_REVIEW_EFFORT_THRESHOLD,
     Paper,
     REVIEW_PARADIGM_DISCRETE,
+    accrual_rate_from_effort,
     accrual_rate_from_quality,
     review_accrual_bump,
 )
@@ -86,6 +93,89 @@ class HeuristicAgent(Agent):
         if self._score_continue_review(paper) > self._score_finish_and_write(paper):
             return "peer_review", paper
         return "finish_review_write_paper", None
+
+    # ---- continuous merged phase ----------------------------------------
+    def choose_continuous_action(self) -> tuple[str, Paper | None]:
+        horizon = self.forecast_horizon_timesteps
+        research_kind, research_total, build_len = self._best_research_plan(horizon)
+        # Per-timestep value of researching: a paper only earns once finished, so
+        # amortize its forecast value over the timesteps spent building it. This
+        # puts research on equal footing with a (roughly one-timestep) review.
+        research_step_value = research_total / max(1.0, build_len)
+
+        listed = [
+            paper
+            for paper in Agent.all_papers
+            if self._can_review(paper) and paper.offered_share(self) > 0.0
+        ]
+        best = max(listed, key=self._score_claim) if listed else None
+        claim_value = self._score_claim(best) if best is not None else 0.0
+
+        if self.active_review_paper is None:
+            if best is not None and claim_value > research_step_value:
+                return (CONTINUOUS_CLAIM, best)
+            return (research_kind, None)
+
+        # Holding a review: ending it now banks its forecast value; compare
+        # continuing the review against ending it to claim or to research.
+        current = self.active_review_paper
+        finish_current = self._review_value(
+            current, self.active_review_effort, horizon
+        )
+        review_continue = self._score_continue_review(current)
+        claim_switch = (
+            finish_current + claim_value if best is not None else float("-inf")
+        )
+        research_after = finish_current + research_step_value
+
+        best_alt = max(review_continue, claim_switch, research_after)
+        if review_continue >= best_alt:
+            return (CONTINUOUS_REVIEW, None)
+        if best is not None and claim_switch >= research_after:
+            return (CONTINUOUS_CLAIM, best)
+        return (CONTINUOUS_RESEARCH, None)
+
+    def _best_research_plan(self, horizon: float) -> tuple[str, float, float]:
+        """Best own-research move: finish after this step vs keep researching.
+
+        Models the asymptotic-accrual tradeoff: more writing effort raises the
+        paper's permanent accrual rate (toward its quality ceiling) but delays
+        when it starts earning. Returns ``(action_kind, total_value,
+        build_length)`` where ``total_value`` is the AC the paper is forecast to
+        earn over the horizon (the author owns ~all of it) and ``build_length``
+        is the number of writing timesteps the plan implies (for amortization).
+        """
+        quality = (
+            self.next_paper_quality
+            if self.next_paper_quality is not None
+            else max(MIN_PAPER_QUALITY, self.intrinsic_talent)
+        )
+        effort = self.paper_progress
+        span = max(1.0, float(horizon))
+
+        # Invest this timestep, then finish (paper earns over the remaining span).
+        finish_value = accrual_rate_from_effort(quality, effort + 1.0) * max(
+            0.0, span - 1.0
+        )
+
+        # Invest this timestep and keep researching k more, then finish. The
+        # build length counts from the paper's current progress so amortization
+        # reflects the whole manuscript, not just the steps still to come.
+        best_continue = float("-inf")
+        best_build = 1.0
+        kmax = int(min(MAX_FORECAST_EFFORT, span - 1.0))
+        for k in range(1, kmax + 1):
+            earning = span - 1.0 - k
+            if earning < 0.0:
+                break
+            value = accrual_rate_from_effort(quality, effort + 1.0 + k) * earning
+            if value > best_continue:
+                best_continue = value
+                best_build = effort + 1.0 + k
+
+        if best_continue > finish_value:
+            return (CONTINUOUS_RESEARCH, best_continue, best_build)
+        return (CONTINUOUS_RESEARCH_FINISH, finish_value, effort + 1.0)
 
     def choose_review_kind(self, paper: Paper) -> str:
         """Discrete-mode choice between fixed bad- and good-faith review work."""

@@ -5,12 +5,18 @@ one Q backend learns online (reward = Δ academic capital), with ε decayed each
 episode. After training we run a greedy (ε=0) evaluation against
 ``HeuristicAgent``s and report the capital gap.
 
+Training runs under the configured ``review_paradigm`` (``--review-paradigm``):
+in the default *continuous* paradigm the RL agent makes one merged decision per
+timestep; in *discrete* it uses the two-phase flow. The action space differs
+between paradigms, so a policy trained in one is not meaningful in the other.
+
 The trained policy (the Q backend) is auto-saved to ``policies/`` and can be
 reloaded with ``--load`` to resume training or to run a frozen policy.
 
 Usage:
     python train_rl.py                       # train + auto-save to policies/
     python train_rl.py --backend linear --episodes 300
+    python train_rl.py --review-paradigm discrete
     python train_rl.py --load policies/policy_tabular.pkl --episodes 0   # eval only
 """
 
@@ -102,8 +108,9 @@ def train(args) -> None:
         print("Warning: --episodes 0 with no --load evaluates an empty policy.")
 
     if args.episodes:
-        print(f"Training: backend={args.backend} episodes={args.episodes} "
-              f"timesteps={args.timesteps} rl={args.num_rl} heuristic={args.num_heuristic}")
+        print(f"Training: paradigm={args.review_paradigm} backend={args.backend} "
+              f"episodes={args.episodes} timesteps={args.timesteps} "
+              f"rl={args.num_rl} heuristic={args.num_heuristic}")
     for episode in range(args.episodes):
         # Linear ε decay from eps_start to eps_end.
         frac = episode / max(1, args.episodes - 1)
