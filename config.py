@@ -66,11 +66,11 @@ class SimConfig:
     review_paradigm: str = "continuous"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
     writing_effort_per_timestep: float = 1.0    # continuous writing effort per timestep
-    min_review_effort_threshold: float = 1.0    # reward cliff: below this earns 0
+    min_review_effort_threshold: float = 2.0    # reward cliff: below this earns 0
     good_faith_review_threshold: float = 2.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
     good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
-    review_effort_curve: str = "sigmoid"        # "sigmoid" | "log"
+    review_effort_curve: str = "log"        # "sigmoid" | "log"
     min_review_accrual_bump: float = 0.05       # sigmoid bump at one timestep
     max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
     review_sigmoid_midpoint: float = 2.5        # review length where impact accelerates
@@ -115,9 +115,9 @@ class TrainConfig:
     simulation parameters above."""
 
     episodes: int = 200
-    timesteps: int = 200
+    timesteps: int = 1000
     num_rl: int = 10
-    num_heuristic: int = 10
+    num_heuristic: int = 0
     eps_start: float = 1.0
     eps_end: float = 0.05
 
