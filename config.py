@@ -25,8 +25,8 @@ class SimConfig:
     """Every parameter that defines a single simulation run."""
 
     # --- World -----------------------------------------------------------
-    num_heuristic_agents: int = 20
-    num_rl_agents: int = 0
+    num_heuristic_agents: int = 0
+    num_rl_agents: int = 20
     num_random_agents: int = 0
     num_probabilistic_agents: int = 0
     num_timesteps: int = 1000
@@ -103,6 +103,7 @@ class SimConfig:
     rl_backend: str = "tabular"     # "tabular" | "linear"
     rl_epsilon: float = 0.1         # exploration when learning online
     rl_gamma: float = 0.95          # TD discount
+    rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
     talent_min: float = 0.8         # talent spread (inert until the sim uses it)
     talent_max: float = 1.2
     policies_dir: str = "policies"

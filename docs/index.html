@@ -44,6 +44,14 @@
     .charts { display: grid; gap: 16px; }
     .side { display: grid; gap: 16px; align-content: start; }
     .feed { max-height: 60vh; overflow-y: auto; }
+    .feed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .feed-head h2 { margin: 0; }
+    #feedFilter { margin-left: auto; max-width: 180px; padding: 4px 8px; font-size: 12px; }
+    #panel-ranking .ranking { max-height: 40vh; overflow-y: auto; }
+    #ranking td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #ranking .rank { color: #8b98a5; text-align: right; }
+    #ranking .kind { color: #c4cdd5; }
+    #ranking .empty { font-size: 12px; color: #6b7280; }
     #panel-config { max-height: 40vh; overflow-y: auto; }
     .cfg-group { font-size: 11px; color: #8b98a5; text-transform: uppercase;
       letter-spacing: .04em; margin: 12px 0 4px; }
@@ -62,6 +70,9 @@
     .kind-bad_faith_review { color: #f87171; }
     .kind-idle, .kind-review_unavailable { color: #6b7280; }
     canvas { max-height: 300px; }
+    /* Static charts are served as pre-rendered (dark, transparent) PNGs and
+       shown in place of their canvas; hidden until a run sets the source. */
+    .chart-img { display: none; width: 100%; max-height: 300px; object-fit: contain; }
     .rates { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 12px; }
     .rate { font-size: 12px; color: #c4cdd5; display: inline-flex; align-items: center; gap: 5px; }
     .rate .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
@@ -100,6 +111,7 @@
       </div>
       <div class="panel" id="panel-groups">
         <h2>Agent type comparison</h2>
+        <img class="chart-img" id="img-agent_group_comparison" alt="Agent type comparison">
         <canvas id="groupChart"></canvas>
         <table class="summary-table">
           <thead>
@@ -111,20 +123,37 @@
           <tbody id="groupSummary"></tbody>
         </table>
       </div>
-      <div class="panel" id="panel-review"><h2>Review behavior</h2><canvas id="reviewChart"></canvas></div>
-      <div class="panel" id="panel-paperac"><h2>Per-paper accrued capital</h2><canvas id="paperAcChart"></canvas></div>
-      <div class="panel" id="panel-choices"><h2>Agent choices (write / review / finish)</h2><canvas id="choiceChart"></canvas></div>
-      <div class="panel" id="panel-effort-hist"><h2>Completed peer reviews by effort</h2><canvas id="effortHistChart"></canvas></div>
-      <div class="panel" id="panel-effort-scatter"><h2>Completed peer reviews over time</h2><canvas id="effortScatterChart"></canvas></div>
-      <div class="panel" id="panel-writing"><h2>Writing effort distribution</h2><canvas id="writingChart"></canvas></div>
+      <div class="panel" id="panel-review"><h2>Review behavior</h2><img class="chart-img" id="img-review_behavior" alt="Review behavior"><canvas id="reviewChart"></canvas></div>
+      <div class="panel" id="panel-marketplace"><h2>Review marketplace: supply vs reviews completed</h2><img class="chart-img" id="img-marketplace_activity" alt="Review marketplace"><canvas id="marketplaceChart"></canvas></div>
+      <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
+      <div class="panel" id="panel-quality"><h2>Paper quality vs accrued capital</h2><img class="chart-img" id="img-paper_quality_vs_ac" alt="Paper quality vs accrued capital"><canvas id="qualityChart"></canvas></div>
+      <div class="panel" id="panel-effort-rate"><h2>Writing effort vs accrual rate</h2><img class="chart-img" id="img-writing_effort_vs_rate" alt="Writing effort vs accrual rate"><canvas id="effortRateChart"></canvas></div>
+      <div class="panel" id="panel-paperac"><h2>Per-paper accrued capital</h2><img class="chart-img" id="img-paper_ac" alt="Per-paper accrued capital"><canvas id="paperAcChart"></canvas></div>
+      <div class="panel" id="panel-choices"><h2>Agent choices (write / review / finish)</h2><img class="chart-img" id="img-choice_breakdown" alt="Agent choices"><canvas id="choiceChart"></canvas></div>
+      <div class="panel" id="panel-effort-hist"><h2>Completed peer reviews by effort</h2><img class="chart-img" id="img-review_effort_histogram" alt="Completed peer reviews by effort"><canvas id="effortHistChart"></canvas></div>
+      <div class="panel" id="panel-effort-scatter"><h2>Completed peer reviews over time</h2><img class="chart-img" id="img-review_effort_scatter" alt="Completed peer reviews over time"><canvas id="effortScatterChart"></canvas></div>
+      <div class="panel" id="panel-writing"><h2>Writing effort distribution</h2><img class="chart-img" id="img-writing_effort_distribution" alt="Writing effort distribution"><canvas id="writingChart"></canvas></div>
+      <div class="panel" id="panel-paper-writing"><h2>Writing effort per paper</h2><img class="chart-img" id="img-paper_writing_effort_distribution" alt="Writing effort per paper"><canvas id="paperWritingChart"></canvas></div>
     </div>
     <div class="side">
+      <div class="panel" id="panel-ranking">
+        <h2>Ranked agents (by academic capital)</h2>
+        <div class="ranking">
+          <table>
+            <thead><tr><th>#</th><th>Agent</th><th>Kind</th><th>AC</th><th>Reliability</th></tr></thead>
+            <tbody id="ranking"></tbody>
+          </table>
+        </div>
+      </div>
       <div class="panel" id="panel-config">
         <h2>Run configuration</h2>
         <div id="configList"></div>
       </div>
       <div class="panel feed">
-        <h2>Action feed</h2>
+        <div class="feed-head">
+          <h2>Action feed</h2>
+          <select id="feedFilter" title="Filter by agent"></select>
+        </div>
         <table>
           <thead><tr><th>Timestep</th><th>Agent</th><th>Action</th><th>Paper</th></tr></thead>
           <tbody id="feed"></tbody>
@@ -141,6 +170,14 @@
     ];
     const color = (i) => PALETTE[i % PALETTE.length];
     const agentColor = (name, i) => color(i % PALETTE.length);
+
+    // Friendly labels for agent classes (from agent_groups in History).
+    const KIND_LABELS = {
+      HeuristicAgent: "Heuristic", QLearningAgent: "RL",
+      RandomAgent: "Random", ProbabilisticDiscreteAgent: "Probabilistic",
+    };
+    const kindLabel = (cls) =>
+      cls ? (KIND_LABELS[cls] || cls.replace(/Agent$/, "") || cls) : "—";
 
     // Stable display order + colors for action kinds (kinds from Agent.py).
     const ACTION_ORDER = ["write_paper", "bad_faith_review", "good_faith_review",
@@ -343,10 +380,13 @@
     };
 
     let agentChart, aggChart, actionChart, groupChart;
-    let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart;
+    let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart, paperWritingChart;
+    let marketplaceChart, reputationChart, qualityChart, effortRateChart;
     const statusEl = document.getElementById("status");
     const ratesEl = document.getElementById("actionRates");
     const feedEl = document.getElementById("feed");
+    const rankingEl = document.getElementById("ranking");
+    const feedFilterEl = document.getElementById("feedFilter");
     const configListEl = document.getElementById("configList");
     const groupSummaryEl = document.getElementById("groupSummary");
     const pickerEl = document.getElementById("runPicker");
@@ -358,6 +398,8 @@
 
     // Currently loaded run, kept so the Replay button can animate it on demand.
     let currentData = null, currentTitle = "";
+    // Active action-feed agent filter ("" = all agents).
+    let feedFilter = "";
     // Active playback context (null when idle/finished). `i` is the next day index
     // to draw, so pausing just stops the timer and resuming picks up at `replay.i`.
     let replay = null;
@@ -545,6 +587,135 @@
       });
     }
 
+    // Histogram of writing effort across all papers (effort vs paper count).
+    function setupPaperWritingChart() {
+      if (paperWritingChart) paperWritingChart.destroy();
+      paperWritingChart = new Chart(document.getElementById("paperWritingChart"), {
+        type: "bar",
+        data: { datasets: [{ label: "papers", data: [],
+          backgroundColor: "#60a5facc", borderColor: "#1e3a5f", borderWidth: 1 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Writing effort per paper") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Papers") } } },
+      });
+    }
+
+    // Market supply (papers listed) vs cumulative reviews completed, dual y-axes.
+    function setupMarketplaceChart() {
+      if (marketplaceChart) marketplaceChart.destroy();
+      marketplaceChart = new Chart(document.getElementById("marketplaceChart"), {
+        type: "line",
+        data: { labels: [], datasets: [
+          { label: "papers on market", data: [], borderColor: "#f59e0b", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+          { label: "cumulative reviews", data: [], borderColor: "#a855f7", borderWidth: 1.6, borderDash: [5,4], pointRadius: 0, yAxisID: "y1" },
+        ]},
+        options: { ...baseOpts, plugins: { legend: legendOpts },
+          scales: { ...baseOpts.scales,
+            y: { ...baseOpts.scales.y, title: axisTitle("Papers on market") },
+            y1: { position: "right", ticks: { color: "#a855f7" }, grid: { drawOnChartArea: false },
+                  title: axisTitle("Reviews completed") } } },
+      });
+    }
+
+    // One thin line per agent: peer-review reputation, with the mean highlighted.
+    function setupReputationChart(labels) {
+      if (reputationChart) reputationChart.destroy();
+      reputationChart = new Chart(document.getElementById("reputationChart"), {
+        type: "line",
+        data: { labels: [], datasets: labels.map(name => ({
+          label: name, data: [], borderColor: "#38bdf866", borderWidth: 0.8, pointRadius: 0,
+        })).concat([
+          { label: "mean reputation", data: [], borderColor: "#0369a1", borderWidth: 2, pointRadius: 0 },
+        ])},
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            y: { ...baseOpts.scales.y, title: axisTitle("AC earned per review") } } },
+      });
+    }
+
+    // Scatter of final accrued capital vs paper quality, split by reviewed/not.
+    function setupQualityChart() {
+      if (qualityChart) qualityChart.destroy();
+      qualityChart = new Chart(document.getElementById("qualityChart"), {
+        type: "scatter",
+        data: { datasets: [
+          { label: "not reviewed", data: [], backgroundColor: "#94a3b899", pointRadius: 3 },
+          { label: "reviewed", data: [], backgroundColor: "#a855f7cc", borderColor: "#4c1d95", pointRadius: 4 },
+        ]},
+        options: { ...baseOpts, plugins: { legend: legendOpts },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Paper quality") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Final accrued capital (AC)") } } },
+      });
+    }
+
+    // Scatter of per-paper writing effort vs the base accrual rate it locked in.
+    function setupEffortRateChart() {
+      if (effortRateChart) effortRateChart.destroy();
+      effortRateChart = new Chart(document.getElementById("effortRateChart"), {
+        type: "scatter",
+        data: { datasets: [{ label: "papers", data: [],
+          backgroundColor: "#0ea5e988", borderColor: "#075985", pointRadius: 3 }] },
+        options: { ...baseOpts, plugins: { legend: { display: false } },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Writing effort invested (timesteps)") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Base accrual rate at finish") } } },
+      });
+    }
+
+    // Static charts are pre-rendered (dark, transparent) PNGs. Each static panel
+    // maps to its PNG name + the canvas used only as a fallback for legacy runs
+    // archived before charts were imaged.
+    const STATIC_CHART_PANELS = [
+      { panel: "panel-groups", chart: "agent_group_comparison", canvasId: "groupChart", imgId: "img-agent_group_comparison" },
+      { panel: "panel-review", chart: "review_behavior", canvasId: "reviewChart", imgId: "img-review_behavior" },
+      { panel: "panel-marketplace", chart: "marketplace_activity", canvasId: "marketplaceChart", imgId: "img-marketplace_activity" },
+      { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
+      { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
+      { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },
+      { panel: "panel-paperac", chart: "paper_ac", canvasId: "paperAcChart", imgId: "img-paper_ac" },
+      { panel: "panel-choices", chart: "choice_breakdown", canvasId: "choiceChart", imgId: "img-choice_breakdown" },
+      { panel: "panel-effort-hist", chart: "review_effort_histogram", canvasId: "effortHistChart", imgId: "img-review_effort_histogram" },
+      { panel: "panel-effort-scatter", chart: "review_effort_scatter", canvasId: "effortScatterChart", imgId: "img-review_effort_scatter" },
+      { panel: "panel-writing", chart: "writing_effort_distribution", canvasId: "writingChart", imgId: "img-writing_effort_distribution" },
+      { panel: "panel-paper-writing", chart: "paper_writing_effort_distribution", canvasId: "paperWritingChart", imgId: "img-paper_writing_effort_distribution" },
+    ];
+
+    // PNG mode (runs archived with a `charts` list): show each static chart as
+    // its image, hide the canvas, and reveal a panel only when its PNG exists —
+    // so simpler runs show fewer panels, exactly like the data-gated canvases.
+    function renderStaticImages(data) {
+      const have = new Set(data.charts || []);
+      for (const { panel, chart, canvasId, imgId } of STATIC_CHART_PANELS) {
+        const img = document.getElementById(imgId);
+        const canvas = document.getElementById(canvasId);
+        const present = have.has(chart);
+        if (canvas) canvas.style.display = "none";
+        if (img) {
+          if (present) {
+            img.src = `data/${data._runId}/charts/${chart}.png`;
+            img.style.display = "block";
+          } else {
+            img.style.display = "none";
+            img.removeAttribute("src");
+          }
+        }
+        // The groups panel's visibility tracks its summary table (set elsewhere).
+        if (panel !== "panel-groups") setPanel(panel, present);
+      }
+    }
+
+    // Legacy runs (no `charts` list): hide images, let the canvas charts render.
+    function hideStaticImages() {
+      for (const { canvasId, imgId } of STATIC_CHART_PANELS) {
+        const img = document.getElementById(imgId);
+        const canvas = document.getElementById(canvasId);
+        if (img) { img.style.display = "none"; img.removeAttribute("src"); }
+        if (canvas) canvas.style.display = "";
+      }
+    }
+
     // Draw the extra charts from a loaded run (static: not animated during replay).
     function renderExtraCharts(data, threshold) {
       const days = data.days || [];
@@ -562,9 +733,76 @@
         reviewChart.update();
       }
 
-      // Per-paper accrued capital
+      // Review marketplace: papers on market vs cumulative reviews completed
+      const hasMarket = (s.papers_on_market || []).length || (s.completed_peer_reviews || []).length;
+      setPanel("panel-marketplace", !!hasMarket);
+      if (hasMarket) {
+        setupMarketplaceChart();
+        marketplaceChart.data.labels = days;
+        marketplaceChart.data.datasets[0].data = s.papers_on_market || [];
+        marketplaceChart.data.datasets[1].data = s.completed_peer_reviews || [];
+        marketplaceChart.update();
+      }
+
+      // Reviewer reputation over time (per-agent lines + mean)
+      const repHistory = data.agent_review_history || {};
+      const repLabels = Object.keys(repHistory).filter(name => (repHistory[name] || []).some(v => v));
+      const meanRep = s.mean_peer_review_history || [];
+      const hasRep = repLabels.length > 0 || meanRep.length > 0;
+      setPanel("panel-reputation", hasRep);
+      if (hasRep) {
+        setupReputationChart(repLabels);
+        reputationChart.data.labels = days;
+        repLabels.forEach((name, i) => { reputationChart.data.datasets[i].data = repHistory[name] || []; });
+        reputationChart.data.datasets[repLabels.length].data = meanRep;  // mean line
+        reputationChart.update();
+      }
+
+      // Paper quality vs final accrued capital, split by whether reviewed.
+      // Prefer paper_final_ac (one value per paper, present even when the full
+      // per-paper series is trimmed for size); fall back to the series tail.
+      const paperQuality = data.paper_quality || {};
+      const paperReviewed = data.paper_reviewed || {};
+      const finalAc = data.paper_final_ac || {};
+      const finalAcFor = name => {
+        if (name in finalAc) return finalAc[name];
+        const series = (data.paper_ac || {})[name];
+        return series && series.length ? series[series.length - 1] : null;
+      };
+      const qualityPoints = Object.keys(paperQuality)
+        .map(name => ({ name, x: paperQuality[name], y: finalAcFor(name), reviewed: !!paperReviewed[name] }))
+        .filter(p => p.y !== null);
+      setPanel("panel-quality", qualityPoints.length > 0);
+      if (qualityPoints.length) {
+        setupQualityChart();
+        qualityChart.data.datasets[0].data = qualityPoints.filter(p => !p.reviewed).map(p => ({ x: p.x, y: p.y }));
+        qualityChart.data.datasets[1].data = qualityPoints.filter(p => p.reviewed).map(p => ({ x: p.x, y: p.y }));
+        qualityChart.update();
+      }
+
+      // Writing effort vs base accrual rate (continuous mode only)
+      const effortMap = data.paper_writing_effort || {};
+      const rateMap = data.paper_accrual_rate || {};
+      const effortRatePoints = Object.keys(effortMap).filter(name => name in rateMap)
+        .map(name => ({ x: effortMap[name], y: rateMap[name] }));
+      setPanel("panel-effort-rate", effortRatePoints.length > 0);
+      if (effortRatePoints.length) {
+        setupEffortRateChart();
+        effortRateChart.data.datasets[0].data = effortRatePoints;
+        effortRateChart.update();
+      }
+
+      // Per-paper accrued capital. The full series may be trimmed to the top
+      // papers for size; reflect that in the heading using the total count.
       const paperAc = data.paper_ac || {};
       const paperLabels = Object.keys(paperAc);
+      const totalPapers = Object.keys(data.paper_final_ac || {}).length || paperLabels.length;
+      const paperAcHeading = document.querySelector("#panel-paperac h2");
+      if (paperAcHeading) {
+        paperAcHeading.textContent = paperLabels.length < totalPapers
+          ? `Per-paper accrued capital (top ${paperLabels.length} of ${totalPapers})`
+          : "Per-paper accrued capital";
+      }
       setPanel("panel-paperac", paperLabels.length > 0);
       if (paperLabels.length) {
         setupPaperAcChart(paperLabels);
@@ -609,9 +847,18 @@
         writingChart.data.datasets[0].data = histogramBins(writing);
         writingChart.update();
       }
+
+      // Per-paper writing effort distribution (continuous mode only)
+      const paperWriting = Object.values(data.paper_writing_effort || {});
+      setPanel("panel-paper-writing", paperWriting.length > 0);
+      if (paperWriting.length) {
+        setupPaperWritingChart();
+        paperWritingChart.data.datasets[0].data = histogramBins(paperWriting);
+        paperWritingChart.update();
+      }
     }
 
-    function renderGroupSummary(data) {
+    function renderGroupSummary(data, pngMode = false) {
       const summary = data.agent_group_summary || {};
       const entries = Object.entries(summary)
         .sort((a, b) => (b[1].mean_final_capital || 0) - (a[1].mean_final_capital || 0));
@@ -634,7 +881,8 @@
         `<td>${fmt(stats.mean_peer_review_epsilon, 3)}</td></tr>`
       ).join("");
 
-      if (groupChart) groupChart.destroy();
+      if (groupChart) { groupChart.destroy(); groupChart = null; }
+      if (pngMode) return;  // the comparison chart is shown as a PNG image
       groupChart = new Chart(document.getElementById("groupChart"), {
         type: "bar",
         data: {
@@ -663,6 +911,54 @@
     const actionRow = (a) =>
       `<tr><td>${a.day}</td><td>${a.agent}</td>` +
       `<td class="kind-${a.kind}">${a.kind}</td><td>${a.paper ?? ""}</td></tr>`;
+
+    // Fill the agent filter with "All agents" + the run's agents, keeping the
+    // current selection if that agent still exists.
+    function populateFeedFilter(agentNames) {
+      const prev = feedFilter;
+      const opts = ['<option value="">All agents</option>']
+        .concat(agentNames.map(n => `<option value="${n}">${n}</option>`));
+      feedFilterEl.innerHTML = opts.join("");
+      feedFilter = agentNames.includes(prev) ? prev : "";
+      feedFilterEl.value = feedFilter;
+    }
+
+    // Render the action feed from the loaded run, honoring the agent filter and
+    // showing the most recent FEED_LIMIT matching rows (newest first).
+    function renderFeed() {
+      const actions = (currentData && currentData.actions) || [];
+      const rows = feedFilter ? actions.filter(a => a.agent === feedFilter) : actions;
+      feedEl.innerHTML = rows.slice(-FEED_LIMIT).reverse().map(actionRow).join("");
+    }
+
+    // Ranked agents table: AC descending, with kind and reliability
+    // (peer_review_history = review AC / number of reviews).
+    function renderRanking(data) {
+      const capital = data.agent_capital || {};
+      const groups = data.agent_groups || {};
+      // Slim runs ship one final reputation per agent; legacy runs carry the
+      // full per-timestep series, so fall back to its last value.
+      const reputation = data.agent_review_history || {};
+      const finalRep = data.agent_final_reputation || {};
+      const rows = Object.keys(capital).map(name => ({
+        name,
+        ac: last(capital[name]),
+        kind: kindLabel(groups[name]),
+        reliability: (name in finalRep) ? finalRep[name] : last(reputation[name]),
+      })).sort((a, b) => b.ac - a.ac);
+
+      setPanel("panel-ranking", rows.length > 0);
+      if (!rows.length) {
+        rankingEl.innerHTML = '<tr><td colspan="5" class="empty">No agents recorded.</td></tr>';
+        return;
+      }
+      rankingEl.innerHTML = rows.map((r, i) =>
+        `<tr><td class="rank">${i + 1}</td><td>${r.name}</td>` +
+        `<td class="kind">${r.kind}</td>` +
+        `<td class="num">${r.ac.toFixed(1)}</td>` +
+        `<td class="num">${r.reliability.toFixed(2)}</td></tr>`
+      ).join("");
+    }
 
     function setTiles(s, i) {  // i = day index, or use last value when omitted
       const v = (arr) => (i == null ? last(arr) : at(arr, i));
@@ -742,13 +1038,25 @@
 
       setTiles(data.scalars || {});
 
-      // Show the most recent actions (newest first), capped for performance.
-      const actions = data.actions || [];
-      feedEl.innerHTML = actions.slice(-FEED_LIMIT).reverse().map(actionRow).join("");
+      renderRanking(data);
 
-      const threshold = (config && config.min_review_effort_threshold) || DEFAULT_REVIEW_THRESHOLD;
-      renderExtraCharts(data, threshold);
-      renderGroupSummary(data);
+      // Reset the agent filter on a new run, then show the most recent actions
+      // (newest first), capped for performance.
+      feedFilter = "";
+      populateFeedFilter(Object.keys(data.agent_capital || {}));
+      renderFeed();
+
+      // Runs archived with a `charts` list render static charts from PNGs;
+      // older runs fall back to building the canvas charts in-browser.
+      const pngMode = Array.isArray(data.charts);
+      if (pngMode) {
+        renderStaticImages(data);
+      } else {
+        hideStaticImages();
+        const threshold = (config && config.min_review_effort_threshold) || DEFAULT_REVIEW_THRESHOLD;
+        renderExtraCharts(data, threshold);
+      }
+      renderGroupSummary(data, pngMode);
       renderConfig(config);
 
       setStatus(`${title} — ${days.length} timesteps`, "done");
@@ -794,7 +1102,10 @@
 
       setTiles(s, i);
 
-      for (const a of (byDay[day] || [])) feedEl.insertAdjacentHTML("afterbegin", actionRow(a));
+      for (const a of (byDay[day] || [])) {
+        if (feedFilter && a.agent !== feedFilter) continue;
+        feedEl.insertAdjacentHTML("afterbegin", actionRow(a));
+      }
       while (feedEl.childElementCount > FEED_LIMIT) feedEl.lastElementChild.remove();
 
       setStatus(`replaying ${title} — timestep ${day} / ${days[days.length - 1]}`);
@@ -854,6 +1165,12 @@
     });
     // Apply a new speed immediately if we're mid-playback (keeps current position).
     speedEl.addEventListener("change", () => { if (replayTimer) armTimer(); });
+    // Filter the action feed by agent. While replaying, rebuild from the run so
+    // the visible rows immediately match the new filter.
+    feedFilterEl.addEventListener("change", () => {
+      feedFilter = feedFilterEl.value;
+      renderFeed();
+    });
 
     let runsById = {};  // id -> manifest entry, so loadRun can read each run's config
 
@@ -863,7 +1180,9 @@
       try {
         const res = await fetch(`data/${id}/history.json`, { cache: "no-cache" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        renderRun(await res.json(), title, (runsById[id] || {}).config);
+        const data = await res.json();
+        data._runId = id;  // used to resolve this run's static-chart PNG paths
+        renderRun(data, title, (runsById[id] || {}).config);
       } catch (err) {
         setStatus(`couldn't load run (${err.message})`, "error");
       }

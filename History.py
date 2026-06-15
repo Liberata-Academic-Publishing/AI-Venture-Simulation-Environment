@@ -279,9 +279,29 @@ class History:
         return name
 
     # ---- export ----------------------------------------------------------
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, max_paper_series: int | None = None) -> dict[str, Any]:
         # ``days``/``day`` are kept as aliases of the timestep axis so the static
         # gallery (which reads older runs too) keeps working unchanged.
+        #
+        # ``max_paper_series`` slims the gallery payload: the full per-paper AC
+        # time series (by far the heaviest field for large runs) is kept only for
+        # the highest-final-AC papers, while ``paper_final_ac`` always carries one
+        # final value per paper so the quality-vs-AC scatter stays complete. Pass
+        # ``None`` (the default) for a full, lossless export.
+        paper_ac_full = {k: list(v) for k, v in self.paper_ac.items()}
+        paper_final_ac = {
+            k: (v[-1] if v else 0.0) for k, v in paper_ac_full.items()
+        }
+        if max_paper_series is not None and len(paper_ac_full) > max_paper_series:
+            top = sorted(
+                paper_ac_full,
+                key=lambda k: paper_final_ac[k],
+                reverse=True,
+            )[:max_paper_series]
+            paper_ac_out = {k: paper_ac_full[k] for k in top}
+        else:
+            paper_ac_out = paper_ac_full
+
         return {
             "timesteps": list(self.timesteps),
             "days": list(self.timesteps),
@@ -294,7 +314,8 @@ class History:
                 k: list(v) for k, v in self.agent_review_epsilon_history.items()
             },
             "agent_groups": dict(self.agent_groups),
-            "paper_ac": {k: list(v) for k, v in self.paper_ac.items()},
+            "paper_ac": paper_ac_out,
+            "paper_final_ac": paper_final_ac,
             "paper_authors": dict(self.paper_authors),
             "paper_quality": dict(self.paper_quality),
             "paper_reviewed": dict(self.paper_reviewed),
@@ -421,9 +442,118 @@ class History:
             output[group] = summary
         return output
 
-    def to_json(self, path: str) -> str:
+    def to_gallery_dict(self) -> dict[str, Any]:
+        """Slim payload for the static gallery.
+
+        The committed gallery renders the heavy static charts from PNGs (see
+        ``visualize.render_gallery_charts``), so this carries only what the
+        *animated* charts, the action feed/replay, and the side tables need:
+        per-agent capital, scalar series, the decisions/action log, group
+        summary, and each agent's final reputation (for the ranking table).
+        The full, lossless history is kept locally in ``local_data/``.
+        """
+        return {
+            "timesteps": list(self.timesteps),
+            "days": list(self.timesteps),
+            "scalars": {k: list(v) for k, v in self.scalars.items()},
+            "agent_capital": {k: list(v) for k, v in self.agent_capital.items()},
+            "agent_groups": dict(self.agent_groups),
+            "agent_group_summary": self.agent_group_summary(),
+            "action_counts": dict(self.action_counts),
+            # One value per agent: the final peer-review reputation, so the
+            # ranking table keeps its "reliability" column without shipping the
+            # full per-timestep reputation series (that chart is now a PNG).
+            "agent_final_reputation": {
+                label: (series[-1] if series else 0.0)
+                for label, series in self.agent_review_history.items()
+            },
+            # Decisions/action log for the feed + replay. ``day`` is the only
+            # timestep key the gallery reads, so the duplicate ``timestep`` is
+            # dropped to keep this compact.
+            "actions": [
+                {"day": d, "agent": a, "kind": k, "paper": p}
+                for (d, a, k, p) in self.actions
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "History":
+        """Reconstruct a History from a saved (full) ``history.json`` dict.
+
+        Lets ``visualize`` rebuild charts for any archived run. Accepts the
+        full export produced by :meth:`to_dict`; missing fields default to
+        empty so partial exports still load.
+        """
+        history = cls()
+        timesteps = data.get("timesteps") or data.get("days") or []
+        history.timesteps = [int(t) for t in timesteps]
+
+        history.scalars = {
+            k: [float(x) for x in v] for k, v in (data.get("scalars") or {}).items()
+        }
+        history.agent_capital = {
+            k: [float(x) for x in v]
+            for k, v in (data.get("agent_capital") or {}).items()
+        }
+        history.agent_review_history = {
+            k: [float(x) for x in v]
+            for k, v in (data.get("agent_review_history") or {}).items()
+        }
+        history.agent_review_epsilon_history = {
+            k: [float(x) for x in v]
+            for k, v in (data.get("agent_review_epsilon_history") or {}).items()
+        }
+        history.agent_groups = dict(data.get("agent_groups") or {})
+
+        history.paper_ac = {
+            k: [float(x) for x in v] for k, v in (data.get("paper_ac") or {}).items()
+        }
+        history.paper_quality = dict(data.get("paper_quality") or {})
+        history.paper_authors = dict(data.get("paper_authors") or {})
+        history.paper_reviewed = dict(data.get("paper_reviewed") or {})
+        history.paper_writing_effort = dict(data.get("paper_writing_effort") or {})
+        history.paper_accrual_rate = dict(data.get("paper_accrual_rate") or {})
+
+        def _ts(row: dict[str, Any]) -> int:
+            return int(row.get("timestep", row.get("day", 0)))
+
+        history.actions = [
+            (_ts(r), r.get("agent"), r.get("kind"), r.get("paper"))
+            for r in (data.get("actions") or [])
+        ]
+        history.completed_reviews = [
+            (
+                _ts(r),
+                r.get("agent"),
+                r.get("paper"),
+                float(r.get("effort", 0.0)),
+                r.get("review_kind"),
+            )
+            for r in (data.get("completed_reviews") or [])
+        ]
+        history.writing_efforts = [
+            (
+                _ts(r),
+                r.get("agent"),
+                float(r.get("effort", 0.0)),
+                bool(r.get("published", False)),
+            )
+            for r in (data.get("writing_efforts") or [])
+        ]
+
+        counts = data.get("action_counts")
+        if counts:
+            history.action_counts = Counter(
+                {k: int(v) for k, v in counts.items()}
+            )
+        else:
+            history.action_counts = Counter(kind for _, _, kind, _ in history.actions)
+
+        return history
+
+    def to_json(self, path: str, *, max_paper_series: int | None = None) -> str:
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(self.to_dict(), fh, indent=2)
+            json.dump(self.to_dict(max_paper_series=max_paper_series), fh, indent=2)
         return path
 
     def to_csv(self, path: str) -> str:

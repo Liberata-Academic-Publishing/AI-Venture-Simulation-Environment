@@ -8,8 +8,8 @@ the CSV/JSON export.
 
 from __future__ import annotations
 
+import math
 import os
-from collections import Counter
 from typing import TYPE_CHECKING
 
 from Paper import MIN_REVIEW_EFFORT_THRESHOLD
@@ -22,7 +22,6 @@ try:
 
     matplotlib.use("Agg")  # headless: render straight to PNG, no display needed
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import MaxNLocator
 except ImportError as exc:  # pragma: no cover - exercised only without matplotlib
     raise ImportError(
         "visualize requires matplotlib. Install it with: pip install matplotlib"
@@ -251,8 +250,10 @@ def _draw_marketplace(ax, history: "History") -> None:
         )
         handles.append(line)
     ax.set_xlabel("Timestep")
-    ax.set_ylabel("Papers on market", color="#b45309")
-    ax.tick_params(axis="y", labelcolor="#b45309")
+    # Use the bright line colors for the axis labels too, so they read on both
+    # the light runs/ PNGs and the transparent dark-themed gallery PNGs.
+    ax.set_ylabel("Papers on market", color="#f59e0b")
+    ax.tick_params(axis="y", labelcolor="#f59e0b")
 
     if "completed_peer_reviews" in scalars:
         twin = ax.twinx()
@@ -264,8 +265,8 @@ def _draw_marketplace(ax, history: "History") -> None:
             linewidth=1.6,
             label="cumulative reviews",
         )
-        twin.set_ylabel("Reviews completed", color="#7e22ce")
-        twin.tick_params(axis="y", labelcolor="#7e22ce")
+        twin.set_ylabel("Reviews completed", color="#a855f7")
+        twin.tick_params(axis="y", labelcolor="#a855f7")
         handles.append(line)
 
     if handles:
@@ -425,26 +426,24 @@ def _writing_effort_by_agent(history: "History") -> dict[str, float]:
     return totals
 
 
-def _effort_histogram(history: "History") -> tuple[list[int], list[int]]:
-    """Bin completed reviews by integer effort level."""
-    counts: Counter[int] = Counter()
-    for _, effort in _completed_reviews(history):
-        counts[int(effort)] += 1
-    if not counts:
-        return [], []
-    efforts = sorted(counts)
-    return efforts, [counts[e] for e in efforts]
-
-
-def _draw_effort_histogram(ax, history: "History") -> None:
-    efforts, values = _effort_histogram(history)
+def _draw_effort_histogram(
+    ax, history: "History", threshold: float = MIN_REVIEW_EFFORT_THRESHOLD
+) -> None:
+    efforts = [effort for _, effort in _completed_reviews(history)]
     if not efforts:
         ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
         ax.set_axis_off()
         return
-    ax.bar(efforts, values, width=0.9, color="#60a5fa", edgecolor="#1e3a5f")
+    lo = math.floor(min(efforts))
+    hi = math.ceil(max(efforts))
+    bins = range(lo, hi + 2)
+    ax.hist(efforts, bins=bins, align="left", rwidth=0.9, color="#60a5fa", edgecolor="#1e3a5f")
+    # One tick per integer effort when the range is small; otherwise let
+    # matplotlib thin them so wide-effort runs don't overlap their labels.
+    if hi - lo <= 30:
+        ax.set_xticks(range(lo, hi + 1))
     ax.axvline(
-        MIN_REVIEW_EFFORT_THRESHOLD,
+        threshold,
         color="#dc2626",
         linestyle="--",
         linewidth=1,
@@ -452,11 +451,12 @@ def _draw_effort_histogram(ax, history: "History") -> None:
     )
     ax.set_xlabel("Review effort")
     ax.set_ylabel("Completed peer reviews")
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins="auto"))
     ax.legend(fontsize=8)
 
 
-def _draw_effort_scatter(ax, history: "History") -> None:
+def _draw_effort_scatter(
+    ax, history: "History", threshold: float = MIN_REVIEW_EFFORT_THRESHOLD
+) -> None:
     points = _completed_reviews(history)
     if not points:
         ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
@@ -465,7 +465,7 @@ def _draw_effort_scatter(ax, history: "History") -> None:
     timesteps, efforts = zip(*points)
     ax.scatter(timesteps, efforts, alpha=0.65, s=28, color="#a855f7", edgecolors="#4c1d95")
     ax.axhline(
-        MIN_REVIEW_EFFORT_THRESHOLD,
+        threshold,
         color="#dc2626",
         linestyle="--",
         linewidth=1,
@@ -477,22 +477,30 @@ def _draw_effort_scatter(ax, history: "History") -> None:
 
 
 def plot_review_effort_histogram(
-    history: "History", path: str | None = None, show: bool = False
+    history: "History",
+    path: str | None = None,
+    show: bool = False,
+    *,
+    threshold: float = MIN_REVIEW_EFFORT_THRESHOLD,
 ):
     """Histogram of completed peer reviews by effort level."""
     fig, ax = plt.subplots(figsize=(11, 6))
-    _draw_effort_histogram(ax, history)
+    _draw_effort_histogram(ax, history, threshold)
     ax.set_title("Completed peer reviews by effort")
     fig.tight_layout()
     return _finish(fig, path, show)
 
 
 def plot_review_effort_scatter(
-    history: "History", path: str | None = None, show: bool = False
+    history: "History",
+    path: str | None = None,
+    show: bool = False,
+    *,
+    threshold: float = MIN_REVIEW_EFFORT_THRESHOLD,
 ):
     """Scatter of each completed review: day vs effort invested."""
     fig, ax = plt.subplots(figsize=(11, 6))
-    _draw_effort_scatter(ax, history)
+    _draw_effort_scatter(ax, history, threshold)
     ax.set_title("Completed peer reviews over time")
     fig.tight_layout()
     return _finish(fig, path, show)
@@ -514,6 +522,28 @@ def plot_writing_effort_distribution(
         ax.set_xlabel("Total writing effort per agent")
         ax.set_ylabel("Agents")
         ax.set_title("Distribution of paper-writing effort")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_paper_writing_effort_distribution(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Histogram of writing effort across all papers (effort vs paper count)."""
+    values = list(getattr(history, "paper_writing_effort", {}).values())
+    fig, ax = plt.subplots(figsize=(11, 6))
+    if not values:
+        ax.text(
+            0.5, 0.5, "No per-paper writing effort recorded\n(continuous mode only)",
+            ha="center", va="center",
+        )
+        ax.set_axis_off()
+    else:
+        bins = max(1, min(20, len(values)))
+        ax.hist(values, bins=bins, color="#60a5fa", edgecolor="#1e3a5f")
+        ax.set_xlabel("Writing effort per paper")
+        ax.set_ylabel("Papers")
+        ax.set_title("Distribution of per-paper writing effort")
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -669,6 +699,113 @@ def plot_run_summary(history: "History", path: str | None = None, show: bool = F
     return _finish(fig, path, show)
 
 
+# ---- static gallery charts (dark-themed, transparent PNGs) ----------------
+#
+# The committed gallery (docs/) shows the *static* charts as images instead of
+# rebuilding them in the browser. They are rendered transparent with light text
+# so they sit cleanly on the dark panel background (#161d24) and match the live
+# Chart.js look closely. Only charts that have data for a given run are emitted,
+# mirroring the front-end's per-panel ``setPanel`` gating, so simpler runs get
+# fewer PNGs.
+_DARK_RC = {
+    "figure.facecolor": "none",
+    "axes.facecolor": "none",
+    "savefig.facecolor": "none",
+    "savefig.edgecolor": "none",
+    "text.color": "#c4cdd5",
+    "axes.labelcolor": "#c4cdd5",
+    "axes.titlecolor": "#e6edf3",
+    "axes.edgecolor": "#3a4450",
+    "xtick.color": "#8b98a5",
+    "ytick.color": "#8b98a5",
+    "grid.color": "#1f272f",
+    "legend.facecolor": "#161d24",
+    "legend.edgecolor": "#30363d",
+    "legend.framealpha": 0.85,
+}
+
+
+def _has_review_behavior(history: "History") -> bool:
+    s = history.scalars
+    return bool(s.get("num_papers") or s.get("completed_peer_reviews"))
+
+
+def _has_marketplace(history: "History") -> bool:
+    s = history.scalars
+    return bool(s.get("papers_on_market") or s.get("completed_peer_reviews"))
+
+
+def _has_reputation(history: "History") -> bool:
+    series = getattr(history, "agent_review_history", {})
+    if any(any(values) for values in series.values()):
+        return True
+    return bool(history.scalars.get("mean_peer_review_history"))
+
+
+def _has_groups(history: "History") -> bool:
+    return bool(history.agent_group_summary())
+
+
+# Static charts shown in the gallery: (png name, data gate, plot function).
+_GALLERY_CHARTS = (
+    ("review_behavior", _has_review_behavior, plot_review_behavior),
+    ("marketplace_activity", _has_marketplace, plot_marketplace_activity),
+    ("review_reputation", _has_reputation, plot_review_reputation),
+    ("paper_quality_vs_ac",
+     lambda h: bool(_paper_quality_ac_points(h)), plot_paper_quality_vs_ac),
+    ("writing_effort_vs_rate",
+     lambda h: any(l in h.paper_accrual_rate for l in h.paper_writing_effort),
+     plot_writing_effort_vs_rate),
+    ("paper_ac", lambda h: bool(h.paper_ac), plot_paper_ac),
+    ("choice_breakdown", lambda h: bool(_choice_tallies(h)), plot_choice_breakdown),
+    ("review_effort_histogram",
+     lambda h: bool(h.completed_reviews), plot_review_effort_histogram),
+    ("review_effort_scatter",
+     lambda h: bool(h.completed_reviews), plot_review_effort_scatter),
+    ("writing_effort_distribution",
+     lambda h: bool(_writing_effort_by_agent(h)), plot_writing_effort_distribution),
+    ("paper_writing_effort_distribution",
+     lambda h: bool(getattr(h, "paper_writing_effort", {})),
+     plot_paper_writing_effort_distribution),
+    ("agent_group_comparison", _has_groups, plot_agent_group_comparison),
+)
+
+
+# Charts whose reward-threshold line must use the run's own configured value
+# rather than the current global default.
+_THRESHOLD_CHARTS = frozenset({"review_effort_histogram", "review_effort_scatter"})
+
+
+def render_gallery_charts(
+    history: "History",
+    outdir: str,
+    *,
+    threshold: float = MIN_REVIEW_EFFORT_THRESHOLD,
+) -> list[str]:
+    """Render the dark-themed static charts a run has data for into ``outdir``.
+
+    ``threshold`` is the run's ``min_review_effort_threshold`` so the review
+    effort charts draw the reward-threshold line at the value that run used.
+
+    Returns the list of chart names produced (the front-end shows a panel only
+    when its chart name is present), so runs with fewer recorded fields get
+    fewer images.
+    """
+    os.makedirs(outdir, exist_ok=True)
+    produced: list[str] = []
+    with plt.rc_context(_DARK_RC):
+        for name, has_data, plot_fn in _GALLERY_CHARTS:
+            if not has_data(history):
+                continue
+            path = os.path.join(outdir, f"{name}.png")
+            if name in _THRESHOLD_CHARTS:
+                plot_fn(history, path, threshold=threshold)
+            else:
+                plot_fn(history, path)
+            produced.append(name)
+    return produced
+
+
 def plot_all(
     history: "History", outdir: str = "runs", *, show: bool = False
 ) -> dict[str, str]:
@@ -711,6 +848,11 @@ def plot_all(
         "writing_effort_distribution": plot_writing_effort_distribution(
             history,
             os.path.join(outdir, "writing_effort_distribution.png"),
+            show=show,
+        ),
+        "paper_writing_effort_distribution": plot_paper_writing_effort_distribution(
+            history,
+            os.path.join(outdir, "paper_writing_effort_distribution.png"),
             show=show,
         ),
         "paper_ac": plot_paper_ac(

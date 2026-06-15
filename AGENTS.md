@@ -65,7 +65,7 @@ CLI flags for one-off overrides.
 - `run_simulation.py` - main entry point (run a sim, print summary, optionally
   archive to the `docs/` gallery).
 - `train_rl.py` - self-play RL training + greedy evaluation; auto-saves policies.
-- `visualize.py`, `dashboard_server.py` - charts + live localhost dashboard.
+- `visualize.py` - charts and summary figures for saved runs.
 - `docs/` - static GitHub Pages gallery of saved runs (`docs/data/<run_id>/`).
 
 ## Commands
@@ -86,9 +86,6 @@ python train_rl.py --load policies/policy_tabular.pkl --episodes 0   # eval only
 # Tests (stdlib unittest)
 python test_simulation.py
 python -m unittest test_simulation
-
-# Live dashboard at http://127.0.0.1:8000
-python dashboard_server.py
 ```
 
 ## Conventions

@@ -236,6 +236,7 @@ CHART_DESCRIPTIONS = {
     "choice_breakdown": "Agent decisions (write / review / finish)",
     "review_effort_histogram": "Completed peer reviews by effort level",
     "writing_effort_distribution": "Total paper-writing effort by agent",
+    "paper_writing_effort_distribution": "Writing effort per paper (frequency)",
     "paper_ac": "Accrued capital per paper over time",
 }
 
@@ -555,7 +556,8 @@ def main(argv=None):
     args = parse_args(argv)
 
     rl_policy_path = args.rl_policy
-    if rl_policy_path is None and not args.rl_from_scratch:
+    if (rl_policy_path is None and not args.rl_from_scratch
+            and SIM.rl_autoload_policy):
         rl_policy_path = default_policy_path(args.rl_backend)
 
     history = History()

@@ -47,16 +47,6 @@ Our environment stresses a few main features:
 - Flexible interfaces for agent, environment, market, and paper classes. This allows for multiple implementations of various algorithms.
 - Various methods for more complex simulation. This can be chosen to be turned on or off depending on the simulation we want to run.
 
-## Live dashboard
-Watch a run unfold in the browser.
-
-```
-python dashboard_server.py
-```
-
-Then open http://127.0.0.1:8000. The server is stdlib-only and runs entirely on
-localhost. Each browser connection streams a fresh, deterministic run with a small delay every step so the run is watchable.
-
 Run a discrete CLI simulation with random controls:
 
 ```
@@ -64,7 +54,7 @@ python run_simulation.py --review-paradigm discrete --random-agents 5 --no-archi
 ```
 
 ## Logging runs
-Separately from the live dashboard, you can save completed runs and browse them later in a static web page . This is gets published to GitHub
+You can save completed runs and browse them later in a static web page. This gets published to GitHub
 Pages.
 
 After running the simulation, the terminal will prompt you whether or not to save this run to the log and ask for a name.

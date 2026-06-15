@@ -167,6 +167,14 @@ venv.bak/
 # Simulation outputs (CSV/JSON/PNG written by run_simulation.py)
 runs/
 
+# Full per-run history archive kept local only. The committed gallery
+# (docs/data/) holds slim JSON + static-chart PNGs; the complete, lossless
+# history for every run lives here so diagrams can be rebuilt in the future.
+local_data/
+
+# Full per-run history kept local; only the slimmed history.json is published
+docs/data/**/history.full.json
+
 # mkdocs documentation
 /site
 
