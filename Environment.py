@@ -7,7 +7,13 @@ from statistics import median
 from typing import TYPE_CHECKING
 
 from Agent import Agent
-from Paper import REVIEW_PARADIGM_DISCRETE, Paper, validate_review_paradigm
+from config import SIM
+from Paper import (
+    REVIEW_PARADIGM_DISCRETE,
+    Paper,
+    fair_market_price_from_epsilons,
+    validate_review_paradigm,
+)
 
 if TYPE_CHECKING:
     from History import History
@@ -43,6 +49,9 @@ class Environment:
         self.review_paradigm = validate_review_paradigm(review_paradigm)
         self.history = history
         self.timestep = 0
+        self.fair_market_price = fair_market_price_from_epsilons(
+            [SIM.prior_review_epsilon]
+        )
 
         if agents is None:
             count = 0 if num_agents is None else num_agents
@@ -161,10 +170,23 @@ class Environment:
         if not listed:
             return
         median_quality = median(p.quality for p in listed)
-        histories = [getattr(a, "peer_review_history", 0.0) for a in self.agents]
-        mean_history = sum(histories) / len(histories) if histories else 0.0
+        epsilons = [
+            getattr(a, "peer_review_epsilon_history", SIM.prior_review_epsilon)
+            for a in self.agents
+        ]
+        mean_epsilon = (
+            sum(epsilons) / len(epsilons)
+            if epsilons
+            else SIM.prior_review_epsilon
+        )
+        self.fair_market_price = fair_market_price_from_epsilons(epsilons)
         for paper in listed:
-            paper.update_price_table(self.agents, median_quality, mean_history)
+            paper.update_price_table(
+                self.agents,
+                median_quality,
+                mean_epsilon,
+                fair_market_price=self.fair_market_price,
+            )
 
     def _list_scheduled_papers(self) -> None:
         for paper in self.papers:

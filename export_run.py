@@ -18,7 +18,17 @@ if TYPE_CHECKING:
 
 # Final-day scalars surfaced in the manifest so the picker can show a quick
 # summary without loading each run's full history.json.
-SUMMARY_KEYS = ("total_capital", "mean_capital", "capital_gini", "num_papers")
+SUMMARY_KEYS = (
+    "total_capital",
+    "mean_capital",
+    "capital_gini",
+    "num_papers",
+    "completed_peer_reviews",
+    "good_faith_reviews",
+    "bad_faith_reviews",
+    "fair_market_price",
+    "mean_peer_review_epsilon",
+)
 
 
 def _unique_run_id(data_dir: str) -> str:

@@ -20,6 +20,8 @@ from Paper import (
     Paper,
     accrual_rate_from_effort,
     accrual_rate_from_quality,
+    fair_market_component,
+    fair_market_price_from_epsilons,
     review_accrual_bump,
 )
 from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
@@ -166,15 +168,22 @@ class EconomicsTest(unittest.TestCase):
     def setUp(self):
         Agent.all_papers = []
 
-    def test_review_bump_grows_with_diminishing_returns(self):
+    def test_review_bump_rises_and_saturates_with_sigmoid(self):
         self.assertEqual(review_accrual_bump(MIN_REVIEW_EFFORT_THRESHOLD - 0.5), 0.0)
         b1 = review_accrual_bump(1.0)
         b2 = review_accrual_bump(2.0)
-        b3 = review_accrual_bump(3.0)
+        b5 = review_accrual_bump(5.0)
+        b20 = review_accrual_bump(20.0)
         self.assertGreater(b1, 0.0)
         self.assertGreater(b2, b1)
-        self.assertGreater(b3, b2)
-        self.assertGreater(b2 - b1, b3 - b2)
+        self.assertGreater(b5, b2)
+        self.assertAlmostEqual(b20, b5)
+
+    def test_fair_market_price_uses_empirical_epsilon_distribution(self):
+        epsilons = [0.0, 0.05, 0.20]
+        expected = sum(fair_market_component(e) for e in epsilons) / len(epsilons)
+
+        self.assertAlmostEqual(fair_market_price_from_epsilons(epsilons), expected)
 
     def test_higher_quality_raises_bump(self):
         self.assertGreater(
@@ -208,14 +217,36 @@ class EconomicsTest(unittest.TestCase):
 
         self.assertGreater(low_q.offered_share(reviewer), high_q.offered_share(reviewer))
 
-    def test_price_rises_for_stronger_reviewer_history(self):
+    def test_price_table_uses_fair_market_price_base(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        reviewer.peer_review_epsilon_history = 0.10
+        paper = _listed_paper(author, quality=1.0)
+        fair_price = fair_market_price_from_epsilons([0.10])
+
+        paper.update_price_table(
+            [author, reviewer],
+            market_median_quality=1.0,
+            mean_peer_review_epsilon=0.10,
+            fair_market_price=fair_price,
+        )
+
+        self.assertAlmostEqual(paper.offered_share(reviewer), fair_price)
+
+    def test_price_rises_for_stronger_reviewer_epsilon_history(self):
         author = ScriptAgent("author")
         rookie = ScriptAgent("rookie")
         veteran = ScriptAgent("veteran")
-        veteran.peer_review_history = 5.0
+        rookie.peer_review_epsilon_history = 0.02
+        veteran.peer_review_epsilon_history = 0.20
         paper = _listed_paper(author, quality=1.0)
 
-        paper.update_price_table([rookie, veteran], 1.0, mean_peer_review_history=2.5)
+        paper.update_price_table(
+            [rookie, veteran],
+            market_median_quality=1.0,
+            mean_peer_review_epsilon=0.11,
+            fair_market_price=fair_market_price_from_epsilons([0.02, 0.20]),
+        )
 
         self.assertGreater(paper.offered_share(veteran), paper.offered_share(rookie))
 
@@ -243,6 +274,7 @@ class ReviewerStateTest(unittest.TestCase):
         self.assertEqual(finished.kind, "review_finished_write")
         self.assertEqual(reviewer.completed_review_count, 1)
         self.assertGreater(reviewer.peer_review_history, 0.0)
+        self.assertGreater(reviewer.peer_review_epsilon_history, 0.0)
         self.assertIsNone(reviewer.active_review_paper)
 
     def test_grabbing_new_paper_finalizes_active_review(self):
@@ -486,6 +518,37 @@ class EnvironmentTest(unittest.TestCase):
         self.assertEqual(len(history.actions), 2)
         self.assertAlmostEqual(history.agent_capital["author"][0], 9.0)
         self.assertEqual(history.scalars["num_papers"][0], 1.0)
+
+    def test_history_exports_agent_group_summary(self):
+        author = ScriptAgent("author")
+        reviewer = ReviewKindScriptAgent(
+            GOOD_FAITH_REVIEW, name="reviewer", marketplace=[]
+        )
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        reviewer.marketplace = [paper]
+        Agent.all_papers = [paper]
+        history = History()
+        env = Environment(
+            agents=[author, reviewer],
+            papers=Agent.all_papers,
+            history=history,
+            review_paradigm="discrete",
+        )
+
+        env.run(int(GOOD_REVIEW_TIMESTEPS))
+        data = history.to_dict()
+        summary = data["agent_group_summary"]
+
+        self.assertEqual(data["agent_groups"]["author"], "ScriptAgent")
+        self.assertEqual(
+            data["agent_groups"]["reviewer"],
+            "ReviewKindScriptAgent",
+        )
+        self.assertIn("agent_review_epsilon_history", data)
+        self.assertGreaterEqual(
+            summary["ReviewKindScriptAgent"]["completed_reviews"],
+            1,
+        )
 
     def test_full_run_produces_reviews(self):
         from run_simulation import build_simulation

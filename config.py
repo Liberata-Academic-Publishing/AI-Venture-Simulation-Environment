@@ -46,9 +46,11 @@ class SimConfig:
 
     # --- Paper economics -------------------------------------------------
     default_accrual_rate: float = 1.0       # base AC gained per timestep, before bumps
-    default_review_share: float = 0.05      # base ownership share a review offer grants
+    default_review_share: float = 0.05      # legacy fallback when fair-market pricing is off
     default_max_reviewer_share: float = 0.25       # cap on a single review's share
     min_offer_share: float = 0.005          # floor on a non-zero review offer
+    use_fair_market_pricing: bool = True
+    prior_review_epsilon: float = 0.05      # prior reviewer effect before review history exists
 
     # --- Paper quality ---------------------------------------------------
     # Each paper's quality is drawn from N(author talent, quality_sigma) and is
@@ -68,8 +70,13 @@ class SimConfig:
     good_faith_review_threshold: float = 2.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
     good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
-    base_review_accrual_bump: float = 0.20      # rate bump at exactly the threshold
-    first_extra_day_bump: float = 0.10          # added by the first timestep past threshold
+    review_effort_curve: str = "sigmoid"        # "sigmoid" | "log"
+    min_review_accrual_bump: float = 0.05       # sigmoid bump at one timestep
+    max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
+    review_sigmoid_midpoint: float = 2.5        # review length where impact accelerates
+    review_sigmoid_steepness: float = 1.4
+    base_review_accrual_bump: float = 0.20      # log-mode rate bump at exactly the threshold
+    first_extra_day_bump: float = 0.10          # log-mode first extra timestep bump
 
     # --- Publishing ------------------------------------------------------
     paper_threshold: float = 10.0   # writing effort needed to publish a paper
