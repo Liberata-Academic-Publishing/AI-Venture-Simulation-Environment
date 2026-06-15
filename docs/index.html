@@ -98,6 +98,19 @@
         <canvas id="actionChart"></canvas>
         <div id="actionRates" class="rates"></div>
       </div>
+      <div class="panel" id="panel-groups">
+        <h2>Agent type comparison</h2>
+        <canvas id="groupChart"></canvas>
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th>Type</th><th>Agents</th><th>Mean AC</th><th>Papers</th>
+              <th>Reviews</th><th>Good</th><th>Bad</th><th>Mean epsilon</th>
+            </tr>
+          </thead>
+          <tbody id="groupSummary"></tbody>
+        </table>
+      </div>
       <div class="panel" id="panel-review"><h2>Review behavior</h2><canvas id="reviewChart"></canvas></div>
       <div class="panel" id="panel-paperac"><h2>Per-paper accrued capital</h2><canvas id="paperAcChart"></canvas></div>
       <div class="panel" id="panel-choices"><h2>Agent choices (write / review / finish)</h2><canvas id="choiceChart"></canvas></div>
@@ -168,8 +181,8 @@
       finish_and_write: "#f59e0b", finish_and_review: "#a855f7", idle: "#6b7280",
     };
     // Reward threshold for review effort; used to draw a reference line. Runs that
-    // record it in their config override this fallback (Paper.py default is 10).
-    const DEFAULT_REVIEW_THRESHOLD = 10;
+    // record it in their config override this fallback.
+    const DEFAULT_REVIEW_THRESHOLD = 1;
 
     // Curated grouping + friendly labels for the SimConfig fields a run records,
     // mirroring the sections in config.py. Keys not listed here still render,
@@ -197,6 +210,8 @@
         ["default_review_share", "Base review share"],
         ["default_max_reviewer_share", "Max reviewer share"],
         ["min_offer_share", "Min offer share"],
+        ["use_fair_market_pricing", "Fair-market pricing"],
+        ["prior_review_epsilon", "Prior review epsilon"],
       ]],
       ["Paper quality", [
         ["quality_sigma", "Quality sigma"],
@@ -211,6 +226,11 @@
         ["good_faith_review_threshold", "Good-faith threshold"],
         ["bad_review_timesteps", "Bad review timesteps"],
         ["good_review_timesteps", "Good review timesteps"],
+        ["review_effort_curve", "Review effort curve"],
+        ["min_review_accrual_bump", "Min review bump"],
+        ["max_review_accrual_bump", "Max review bump"],
+        ["review_sigmoid_midpoint", "Sigmoid midpoint"],
+        ["review_sigmoid_steepness", "Sigmoid steepness"],
         ["base_review_accrual_bump", "Base accrual bump"],
         ["first_extra_day_bump", "First extra-timestep bump"],
       ]],
@@ -322,12 +342,13 @@
       }
     };
 
-    let agentChart, aggChart, actionChart;
+    let agentChart, aggChart, actionChart, groupChart;
     let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart;
     const statusEl = document.getElementById("status");
     const ratesEl = document.getElementById("actionRates");
     const feedEl = document.getElementById("feed");
     const configListEl = document.getElementById("configList");
+    const groupSummaryEl = document.getElementById("groupSummary");
     const pickerEl = document.getElementById("runPicker");
     const replayBtn = document.getElementById("replayBtn");
     const pauseBtn = document.getElementById("pauseBtn");
@@ -524,7 +545,7 @@
       });
     }
 
-    // Draw the six new charts from a loaded run (static: not animated during replay).
+    // Draw the extra charts from a loaded run (static: not animated during replay).
     function renderExtraCharts(data, threshold) {
       const days = data.days || [];
       const s = data.scalars || {};
@@ -588,6 +609,53 @@
         writingChart.data.datasets[0].data = histogramBins(writing);
         writingChart.update();
       }
+    }
+
+    function renderGroupSummary(data) {
+      const summary = data.agent_group_summary || {};
+      const entries = Object.entries(summary)
+        .sort((a, b) => (b[1].mean_final_capital || 0) - (a[1].mean_final_capital || 0));
+      setPanel("panel-groups", entries.length > 0);
+      if (!entries.length) {
+        groupSummaryEl.innerHTML = "";
+        if (groupChart) { groupChart.destroy(); groupChart = null; }
+        return;
+      }
+
+      const fmt = (value, digits = 2) => Number(value || 0).toFixed(digits);
+      groupSummaryEl.innerHTML = entries.map(([group, stats]) =>
+        `<tr><td>${group}</td>` +
+        `<td>${stats.agent_count || 0}</td>` +
+        `<td>${fmt(stats.mean_final_capital)}</td>` +
+        `<td>${stats.papers_authored || 0}</td>` +
+        `<td>${stats.completed_reviews || 0}</td>` +
+        `<td>${stats.good_faith_reviews || 0}</td>` +
+        `<td>${stats.bad_faith_reviews || 0}</td>` +
+        `<td>${fmt(stats.mean_peer_review_epsilon, 3)}</td></tr>`
+      ).join("");
+
+      if (groupChart) groupChart.destroy();
+      groupChart = new Chart(document.getElementById("groupChart"), {
+        type: "bar",
+        data: {
+          labels: entries.map(([group]) => group),
+          datasets: [{
+            label: "mean final AC",
+            data: entries.map(([, stats]) => stats.mean_final_capital || 0),
+            backgroundColor: "#60a5facc",
+            borderColor: "#1e3a5f",
+            borderWidth: 1,
+          }]
+        },
+        options: {
+          ...baseOpts,
+          plugins: { legend: { display: false } },
+          scales: {
+            ...baseOpts.scales,
+            y: { ...baseOpts.scales.y, title: axisTitle("Mean final AC") }
+          }
+        },
+      });
     }
 
     const last = (arr) => (arr && arr.length ? arr[arr.length - 1] : 0);
@@ -680,6 +748,7 @@
 
       const threshold = (config && config.min_review_effort_threshold) || DEFAULT_REVIEW_THRESHOLD;
       renderExtraCharts(data, threshold);
+      renderGroupSummary(data);
       renderConfig(config);
 
       setStatus(`${title} — ${days.length} timesteps`, "done");
@@ -806,6 +875,8 @@
       const heuristic = c.num_heuristic_agents != null ? c.num_heuristic_agents : c.num_agents;
       if (heuristic != null) parts.push(`${heuristic} heuristic`);
       if (c.num_rl_agents != null) parts.push(`${c.num_rl_agents} RL`);
+      if (c.num_random_agents != null) parts.push(`${c.num_random_agents} random`);
+      if (c.num_probabilistic_agents != null) parts.push(`${c.num_probabilistic_agents} probabilistic`);
       const runLen = run.num_timesteps != null ? run.num_timesteps : run.num_days;
       if (runLen != null) parts.push(`${runLen} steps`);
       return parts.length ? `${run.title} (${parts.join(", ")})` : run.title;
