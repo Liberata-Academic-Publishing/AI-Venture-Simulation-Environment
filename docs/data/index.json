@@ -58,7 +58,13 @@
       "num_agents": 0,
       "num_days": 1000,
       "forecast_horizon_days": 30,
-      "review_effort_per_day": 1.0
+      "review_effort_per_day": 1.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 1054428.6261,
@@ -125,7 +131,13 @@
       "num_agents": 0,
       "num_days": 1000,
       "forecast_horizon_days": 30,
-      "review_effort_per_day": 1.0
+      "review_effort_per_day": 1.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 349810.8012,
@@ -178,7 +190,13 @@
       "num_agents": 20,
       "num_days": 1000,
       "forecast_horizon_days": 30,
-      "review_effort_per_day": 1.0
+      "review_effort_per_day": 1.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 549914.8043,
@@ -224,7 +242,13 @@
       "talent_min": 0.8,
       "talent_max": 1.2,
       "policies_dir": "policies",
-      "num_agents": 0
+      "num_agents": 0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 283408.9106,
@@ -243,7 +267,13 @@
       "num_rl_agents": 20,
       "num_days": 1000,
       "seed": 7,
-      "min_review_effort_threshold": 10.0
+      "min_review_effort_threshold": 10.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 375698.9624,
@@ -262,7 +292,13 @@
       "num_rl_agents": 5,
       "num_days": 1000,
       "seed": 7,
-      "min_review_effort_threshold": 10.0
+      "min_review_effort_threshold": 10.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 330575.8439,
@@ -281,7 +317,13 @@
       "num_rl_agents": 5,
       "num_days": 1000,
       "seed": 7,
-      "min_review_effort_threshold": 10.0
+      "min_review_effort_threshold": 10.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 296858.0914,
@@ -299,7 +341,13 @@
       "num_agents": 20,
       "num_days": 200,
       "seed": 7,
-      "min_review_effort_threshold": 10.0
+      "min_review_effort_threshold": 10.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 20284.6928,
@@ -318,7 +366,13 @@
       "num_bad_agents": 30,
       "num_days": 120,
       "seed": 42,
-      "min_review_effort_threshold": 10.0
+      "min_review_effort_threshold": 10.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 13654.936,
@@ -337,7 +391,13 @@
       "num_bad_agents": 20,
       "num_days": 200,
       "seed": 7,
-      "min_review_effort_threshold": 10.0
+      "min_review_effort_threshold": 10.0,
+      "train_episodes": 200,
+      "train_timesteps": 200,
+      "train_num_rl": 10,
+      "train_num_heuristic": 10,
+      "train_eps_start": 1.0,
+      "train_eps_end": 0.05
     },
     "summary": {
       "total_capital": 39192.1437,

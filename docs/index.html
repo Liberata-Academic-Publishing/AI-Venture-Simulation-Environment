@@ -44,7 +44,8 @@
     .charts { display: grid; gap: 16px; }
     .side { display: grid; gap: 16px; align-content: start; }
     .feed { max-height: 60vh; overflow-y: auto; }
-    .feed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .feed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+      position: sticky; top: 0; z-index: 2; background: #161d24; padding-bottom: 8px; }
     .feed-head h2 { margin: 0; }
     #feedFilter { margin-left: auto; max-width: 180px; padding: 4px 8px; font-size: 12px; }
     #panel-ranking .ranking { max-height: 40vh; overflow-y: auto; }
@@ -52,19 +53,21 @@
     #ranking .rank { color: #8b98a5; text-align: right; }
     #ranking .kind { color: #c4cdd5; }
     #ranking .empty { font-size: 12px; color: #6b7280; }
-    #panel-config { max-height: 40vh; overflow-y: auto; }
-    .cfg-group { font-size: 11px; color: #8b98a5; text-transform: uppercase;
-      letter-spacing: .04em; margin: 12px 0 4px; }
-    .cfg-group:first-child { margin-top: 0; }
+    /* Run configuration: separate, non-scrolling panels (one per config section)
+       stacked in the sidebar below the feed and ranking. */
+    .config-heading { font-size: 13px; color: #c4cdd5; font-weight: 600;
+      margin: 4px 0 -6px; text-transform: uppercase; letter-spacing: .04em; }
+    .config-grid { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
     .cfg-row { display: flex; justify-content: space-between; gap: 12px;
       font-size: 12px; padding: 3px 0; border-bottom: 1px solid #1f272f; }
     .cfg-row .k { color: #8b98a5; }
     .cfg-row .v { color: #e6e6e6; font-weight: 600; text-align: right;
       font-variant-numeric: tabular-nums; }
-    #configList .empty { font-size: 12px; color: #6b7280; }
+    .config-grid .empty { font-size: 12px; color: #6b7280; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #1f272f; }
     th { color: #8b98a5; font-weight: 500; position: sticky; top: 0; background: #161d24; }
+    .feed thead th { top: 42px; }
     .kind-write_paper { color: #60a5fa; }
     .kind-peer_review, .kind-review_started, .kind-review_completed, .kind-review_continued { color: #4ade80; }
     .kind-bad_faith_review { color: #f87171; }
@@ -136,19 +139,6 @@
       <div class="panel" id="panel-paper-writing"><h2>Writing effort per paper</h2><img class="chart-img" id="img-paper_writing_effort_distribution" alt="Writing effort per paper"><canvas id="paperWritingChart"></canvas></div>
     </div>
     <div class="side">
-      <div class="panel" id="panel-ranking">
-        <h2>Ranked agents (by academic capital)</h2>
-        <div class="ranking">
-          <table>
-            <thead><tr><th>#</th><th>Agent</th><th>Kind</th><th>AC</th><th>Reliability</th></tr></thead>
-            <tbody id="ranking"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="panel" id="panel-config">
-        <h2>Run configuration</h2>
-        <div id="configList"></div>
-      </div>
       <div class="panel feed">
         <div class="feed-head">
           <h2>Action feed</h2>
@@ -159,6 +149,17 @@
           <tbody id="feed"></tbody>
         </table>
       </div>
+      <div class="panel" id="panel-ranking">
+        <h2>Ranked agents (by academic capital)</h2>
+        <div class="ranking">
+          <table>
+            <thead><tr><th>#</th><th>Agent</th><th>Kind</th><th>AC</th><th>Reliability</th></tr></thead>
+            <tbody id="ranking"></tbody>
+          </table>
+        </div>
+      </div>
+      <h2 class="config-heading">Run configuration</h2>
+      <div id="configPanels" class="config-grid"></div>
     </div>
   </main>
 
@@ -294,6 +295,14 @@
         ["talent_max", "Talent max"],
         ["policies_dir", "Policies dir"],
       ]],
+      ["Training configuration", [
+        ["train_episodes", "Episodes"],
+        ["train_timesteps", "Timesteps per episode"],
+        ["train_num_rl", "RL agents (training)"],
+        ["train_num_heuristic", "Heuristic agents (training)"],
+        ["train_eps_start", "Epsilon start"],
+        ["train_eps_end", "Epsilon end"],
+      ]],
     ];
     // Keys we never surface (internal alias / redundant with the labeled fields).
     const CONFIG_HIDDEN = new Set(["num_agents"]);
@@ -387,7 +396,7 @@
     const feedEl = document.getElementById("feed");
     const rankingEl = document.getElementById("ranking");
     const feedFilterEl = document.getElementById("feedFilter");
-    const configListEl = document.getElementById("configList");
+    const configPanelsEl = document.getElementById("configPanels");
     const groupSummaryEl = document.getElementById("groupSummary");
     const pickerEl = document.getElementById("runPicker");
     const replayBtn = document.getElementById("replayBtn");
@@ -932,19 +941,27 @@
     }
 
     // Ranked agents table: AC descending, with kind and reliability
-    // (peer_review_history = review AC / number of reviews).
-    function renderRanking(data) {
+    // (peer_review_history = review AC / number of reviews). Pass a day index
+    // `i` to rank by that timestep (used during replay); omit it for the final
+    // standings.
+    function renderRanking(data, i = null) {
       const capital = data.agent_capital || {};
       const groups = data.agent_groups || {};
       // Slim runs ship one final reputation per agent; legacy runs carry the
-      // full per-timestep series, so fall back to its last value.
+      // full per-timestep series, so prefer that when ranking a given timestep.
       const reputation = data.agent_review_history || {};
       const finalRep = data.agent_final_reputation || {};
+      const acOf = (name) => (i == null ? last(capital[name]) : at(capital[name], i));
+      const relOf = (name) => {
+        const series = reputation[name];
+        if (series && series.length) return i == null ? last(series) : at(series, i);
+        return (name in finalRep) ? finalRep[name] : 0;
+      };
       const rows = Object.keys(capital).map(name => ({
         name,
-        ac: last(capital[name]),
+        ac: acOf(name),
         kind: kindLabel(groups[name]),
-        reliability: (name in finalRep) ? finalRep[name] : last(reputation[name]),
+        reliability: relOf(name),
       })).sort((a, b) => b.ac - a.ac);
 
       setPanel("panel-ranking", rows.length > 0);
@@ -973,8 +990,10 @@
     // Unknown keys (not in CONFIG_GROUPS) are collected under "Other" so any
     // future config fields still show up without code changes.
     function renderConfig(config) {
+      const empty = '<div class="panel"><div class="empty">' +
+        'No configuration recorded for this run.</div></div>';
       if (!config || typeof config !== "object" || !Object.keys(config).length) {
-        configListEl.innerHTML = '<div class="empty">No configuration recorded for this run.</div>';
+        configPanelsEl.innerHTML = empty;
         return;
       }
 
@@ -982,24 +1001,26 @@
       const row = (label, value) =>
         `<div class="cfg-row"><span class="k">${label}</span>` +
         `<span class="v">${formatConfigValue(value)}</span></div>`;
+      const panel = (groupName, rows) =>
+        `<div class="panel"><h2>${groupName}</h2>${rows.join("")}</div>`;
 
-      let html = "";
+      // One separate panel per config section (no inner scrolling); sections
+      // with no recorded fields for this run are skipped.
+      const panels = [];
       for (const [groupName, fields] of CONFIG_GROUPS) {
         const rows = [];
         for (const [key, label] of fields) {
           if (key in config) { rows.push(row(label, config[key])); seen.add(key); }
         }
-        if (rows.length) html += `<div class="cfg-group">${groupName}</div>${rows.join("")}`;
+        if (rows.length) panels.push(panel(groupName, rows));
       }
 
       const extras = Object.keys(config).filter(k => !seen.has(k));
       if (extras.length) {
-        html += `<div class="cfg-group">Other</div>` +
-          extras.map(k => row(prettyKey(k), config[k])).join("");
+        panels.push(panel("Other", extras.map(k => row(prettyKey(k), config[k]))));
       }
 
-      configListEl.innerHTML = html ||
-        '<div class="empty">No configuration recorded for this run.</div>';
+      configPanelsEl.innerHTML = panels.length ? panels.join("") : empty;
     }
 
     // Instant render: draw the whole run at once (default when a run is selected).
@@ -1101,6 +1122,7 @@
       renderRates(runningCounts);
 
       setTiles(s, i);
+      renderRanking(currentData, i);  // re-rank by this timestep's capital
 
       for (const a of (byDay[day] || [])) {
         if (feedFilter && a.agent !== feedFilter) continue;
@@ -1127,6 +1149,7 @@
       setupActionChart(actionKinds(data.action_counts || {}));
       feedEl.innerHTML = "";
       ratesEl.innerHTML = "";
+      renderRanking(data, 0);  // start the standings at the first timestep
 
       // Group actions by day so each frame can append just that day's events.
       const byDay = {};

@@ -8,7 +8,7 @@ from collections import Counter
 from dataclasses import asdict
 
 from Agent import Agent
-from config import SIM, default_policy_path
+from config import SIM, TRAIN, default_policy_path
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History
@@ -486,6 +486,14 @@ def build_run_config(
     config["num_days"] = config["num_timesteps"]
     config["forecast_horizon_days"] = config["forecast_horizon_timesteps"]
     config["review_effort_per_day"] = config["review_effort_per_timestep"]
+    # Training-harness settings used to produce the RL policy these agents load,
+    # surfaced under their own keys so the gallery can show a Training panel.
+    config["train_episodes"] = TRAIN.episodes
+    config["train_timesteps"] = TRAIN.timesteps
+    config["train_num_rl"] = TRAIN.num_rl
+    config["train_num_heuristic"] = TRAIN.num_heuristic
+    config["train_eps_start"] = TRAIN.eps_start
+    config["train_eps_end"] = TRAIN.eps_end
     return config
 
 
