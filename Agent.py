@@ -77,6 +77,8 @@ class Agent(ABC):
         # Public peer-review reputation: mean AC earned per completed review.
         self.peer_review_history: float = 0.0
         self.total_ac_from_reviews: float = 0.0
+        self.peer_review_epsilon_history: float = SIM.prior_review_epsilon
+        self.total_review_epsilon: float = 0.0
         self.completed_review_count: int = 0
 
     # ---- action interface (two phases per timestep) ----------------------
@@ -350,11 +352,21 @@ class Agent(ABC):
         effort: float,
         review_kind: str,
     ) -> None:
-        """Update the agent's public peer-review history on completion."""
+        """Update public peer-review reputation and epsilon history on completion."""
         self.completed_review_count += 1
         self.total_ac_from_reviews += share * paper.current_ac
         self.peer_review_history = (
             self.total_ac_from_reviews / self.completed_review_count
+        )
+        epsilon = 0.0
+        if getattr(paper, "review_records", None):
+            try:
+                epsilon = float(paper.review_records[-1].get("epsilon", 0.0))
+            except (TypeError, ValueError):
+                epsilon = 0.0
+        self.total_review_epsilon += max(0.0, epsilon)
+        self.peer_review_epsilon_history = (
+            self.total_review_epsilon / self.completed_review_count
         )
         self.last_review_kind = review_kind
         if share > 0.0:

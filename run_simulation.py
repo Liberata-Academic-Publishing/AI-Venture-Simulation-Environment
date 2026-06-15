@@ -87,6 +87,11 @@ def print_summary(env: Environment, history: History):
     )
     print(f"- papers on market (unclaimed): {on_market}")
     print(f"- papers in review right now: {in_review}")
+    if history.timesteps:
+        fair_market = history.scalars.get("fair_market_price", [0.0])[-1]
+        mean_epsilon = history.scalars.get("mean_peer_review_epsilon", [0.0])[-1]
+        print(f"- fair-market review price: {fair_market:.2%}")
+        print(f"- mean reviewer epsilon: {mean_epsilon:.3f}")
     if qualities:
         print(
             f"- paper quality: mean={sum(qualities) / len(qualities):.2f}, "
@@ -105,12 +110,15 @@ def print_summary(env: Environment, history: History):
         for agent in reviewers[:5]:
             print(
                 f"- {agent.name}: reputation={agent.peer_review_history:.2f} "
+                f"epsilon={agent.peer_review_epsilon_history:.3f} "
                 f"over {agent.completed_review_count} reviews"
             )
 
     print("\nAction counts")
     for action, count in history.action_counts.most_common():
         print(f"- {action}: {count}")
+
+    print_agent_group_summary(history)
 
     print("\nFinal agent capital")
     for agent in sorted(env.agents, key=lambda item: item.academic_capital, reverse=True):
@@ -155,6 +163,37 @@ def print_summary(env: Environment, history: History):
             print(f"- {line}")
 
 
+def print_agent_group_summary(history: History):
+    """Display outcome comparisons across heuristic/RL/random/probability agents."""
+    summary = history.agent_group_summary()
+    print("\nAgent type comparison")
+    if not summary:
+        print("- no grouped agent data recorded")
+        return
+
+    ordered = sorted(
+        summary.items(),
+        key=lambda item: item[1].get("mean_final_capital", 0.0),
+        reverse=True,
+    )
+    for group, stats in ordered:
+        count = int(stats.get("agent_count", 0))
+        reviews = int(stats.get("completed_reviews", 0))
+        good = int(stats.get("good_faith_reviews", 0))
+        bad = int(stats.get("bad_faith_reviews", 0))
+        papers = int(stats.get("papers_authored", 0))
+        mean_capital = float(stats.get("mean_final_capital", 0.0))
+        mean_reputation = float(stats.get("mean_peer_review_history", 0.0))
+        mean_epsilon = float(stats.get("mean_peer_review_epsilon", 0.0))
+        avg_effort = float(stats.get("average_review_effort", 0.0))
+        print(
+            f"- {group}: agents={count}, mean AC={mean_capital:.2f}, "
+            f"papers={papers}, reviews={reviews} "
+            f"(good={good}, bad={bad}), avg effort={avg_effort:.2f}, "
+            f"mean reputation={mean_reputation:.2f}, mean epsilon={mean_epsilon:.3f}"
+        )
+
+
 def print_choice_breakdown(history: History):
     """Show the share of top-level agent decisions (see ``DECISION_LABELS``)."""
     tallies: Counter[str] = Counter()
@@ -187,6 +226,7 @@ def print_choice_breakdown(history: History):
 CHART_DESCRIPTIONS = {
     "summary": "Overview dashboard (capital, inequality, market, quality, reputation)",
     "agent_capital": "Academic capital per agent over time",
+    "agent_group_comparison": "Mean capital and review outcomes by agent type",
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
     "marketplace_activity": "Papers on market vs cumulative reviews completed",
     "paper_quality_vs_ac": "Paper quality vs accrued capital (reviewed or not)",

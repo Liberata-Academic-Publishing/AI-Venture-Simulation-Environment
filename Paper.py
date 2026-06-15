@@ -12,6 +12,8 @@ from config import SIM
 # many internal references and default-argument signatures below.
 DEFAULT_ACCRUAL_RATE = SIM.default_accrual_rate
 DEFAULT_REVIEW_SHARE = SIM.default_review_share
+USE_FAIR_MARKET_PRICING = SIM.use_fair_market_pricing
+PRIOR_REVIEW_EPSILON = SIM.prior_review_epsilon
 MIN_REVIEW_EFFORT_THRESHOLD = SIM.min_review_effort_threshold
 GOOD_FAITH_REVIEW_THRESHOLD = SIM.good_faith_review_threshold
 REVIEW_EFFORT_PER_TIMESTEP = SIM.review_effort_per_timestep
@@ -19,6 +21,11 @@ BAD_REVIEW_TIMESTEPS = SIM.bad_review_timesteps
 GOOD_REVIEW_TIMESTEPS = SIM.good_review_timesteps
 DISCRETE_PAPER_TIMESTEPS = SIM.discrete_paper_timesteps
 DISCRETE_WRITING_EFFORT_PER_TIMESTEP = SIM.discrete_writing_effort_per_timestep
+REVIEW_EFFORT_CURVE = SIM.review_effort_curve
+MIN_REVIEW_ACCRUAL_BUMP = SIM.min_review_accrual_bump
+MAX_REVIEW_ACCRUAL_BUMP = SIM.max_review_accrual_bump
+REVIEW_SIGMOID_MIDPOINT = SIM.review_sigmoid_midpoint
+REVIEW_SIGMOID_STEEPNESS = SIM.review_sigmoid_steepness
 BASE_REVIEW_ACCRUAL_BUMP = SIM.base_review_accrual_bump
 FIRST_EXTRA_DAY_BUMP = SIM.first_extra_day_bump
 DEFAULT_MAX_REVIEWER_SHARE = SIM.default_max_reviewer_share
@@ -103,20 +110,82 @@ def accrual_rate_from_effort(quality: float, writing_effort: float) -> float:
     return ceiling * (1.0 - math.exp(-WRITING_SATURATION * effort))
 
 
+def fair_market_component(epsilon: float) -> float:
+    """One reviewer's fair-market share term: epsilon / (1 + epsilon)."""
+    value = max(0.0, float(epsilon))
+    return value / (1.0 + value)
+
+
+def fair_market_price_from_epsilons(
+    epsilons,
+    prior_epsilon: float = PRIOR_REVIEW_EPSILON,
+) -> float:
+    """Expected fair-market price from the empirical reviewer epsilon distribution.
+
+    This implements the schematic's formula
+    ``sum(epsilon / (1 + epsilon) * Probability(epsilon))`` by treating the
+    current reviewer epsilon list as an equally weighted empirical distribution.
+    """
+    cleaned = []
+    for epsilon in epsilons:
+        try:
+            value = float(epsilon)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(value) or math.isinf(value) or value < 0.0:
+            continue
+        cleaned.append(value)
+
+    if not cleaned:
+        cleaned = [max(0.0, float(prior_epsilon))]
+
+    return sum(fair_market_component(value) for value in cleaned) / len(cleaned)
+
+
+def _normalized_sigmoid(effort: float) -> float:
+    """Map effort into [0, 1] between one timestep and the long-review target."""
+    lower = MIN_REVIEW_EFFORT_THRESHOLD
+    upper = max(lower + 1e-9, GOOD_REVIEW_TIMESTEPS)
+    steepness = max(1e-9, REVIEW_SIGMOID_STEEPNESS)
+    midpoint = REVIEW_SIGMOID_MIDPOINT
+
+    def sig(x: float) -> float:
+        return 1.0 / (1.0 + math.exp(-steepness * (x - midpoint)))
+
+    lo = sig(lower)
+    hi = sig(upper)
+    if abs(hi - lo) < 1e-12:
+        return 1.0 if effort >= upper else 0.0
+    scaled = (sig(effort) - lo) / (hi - lo)
+    return min(1.0, max(0.0, scaled))
+
+
 def review_accrual_bump(effort: float, quality: float = 1.0) -> float:
     """Accrual-rate bump fraction for a single review of ``effort`` and ``quality``.
 
-    Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` (one timestep) yields 0. At the
-    threshold the reviewer earns the quality-scaled base bump. Each extra
-    timestep adds a positive but logarithmically diminishing marginal bump, so a
-    longer review is worth more but with falling returns.
+    Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` yields 0. The default sigmoid
+    mode approximates the review-length evidence discussed by the team: short
+    reviews have little effect, impact rises after the good-faith threshold, and
+    long reviews saturate. The previous logarithmic curve remains available by
+    setting ``SIM.review_effort_curve = "log"``.
     """
     if effort < MIN_REVIEW_EFFORT_THRESHOLD:
         return 0.0
 
-    base = BASE_REVIEW_ACCRUAL_BUMP * quality_multiplier(quality)
-    extra = effort - MIN_REVIEW_EFFORT_THRESHOLD
-    return base + FIRST_EXTRA_DAY_BUMP * math.log2(1 + extra)
+    curve = str(REVIEW_EFFORT_CURVE).strip().lower()
+    if curve == "log":
+        base = BASE_REVIEW_ACCRUAL_BUMP * quality_multiplier(quality)
+        extra = effort - MIN_REVIEW_EFFORT_THRESHOLD
+        return base + FIRST_EXTRA_DAY_BUMP * math.log2(1 + extra)
+
+    span = max(0.0, MAX_REVIEW_ACCRUAL_BUMP - MIN_REVIEW_ACCRUAL_BUMP)
+    bump = MIN_REVIEW_ACCRUAL_BUMP + span * _normalized_sigmoid(float(effort))
+    return bump * quality_multiplier(quality)
+
+
+def review_epsilon_from_effort(effort: float, quality: float = 1.0) -> float:
+    """Public helper for the review-induced proportional accrual improvement."""
+    return review_accrual_bump(effort, quality)
 
 
 class Paper:
@@ -211,16 +280,22 @@ class Paper:
         self,
         reviewers,
         market_median_quality: float,
-        mean_peer_review_history: float,
+        mean_peer_review_epsilon: float,
+        fair_market_price: float | None = None,
     ) -> None:
         """Recompute the per-reviewer share offer for this listed paper.
 
         Higher paper quality (relative to the market) lowers the offered share;
-        a stronger reviewer peer-review history raises it. The result is clamped
-        to ``[min_offer_share, author share]`` and the single-review cap.
+        a stronger reviewer epsilon history raises it. The base price is the
+        diagram's fair-market expectation ``E[epsilon / (1 + epsilon)]`` unless
+        disabled in config. The result is clamped to ``[min_offer_share, author
+        share]`` and the single-review cap.
         """
         author_share = self.share_distribution.get(self.author, 0.0)
         ceiling = min(self.max_reviewer_share, max(0.0, author_share))
+        if fair_market_price is None:
+            fair_market_price = fair_market_price_from_epsilons([PRIOR_REVIEW_EPSILON])
+        base_offer = fair_market_price if USE_FAIR_MARKET_PRICING else DEFAULT_REVIEW_SHARE
         table: dict[Agent, float] = {}
         for agent in reviewers:
             if agent is self.author:
@@ -228,12 +303,12 @@ class Paper:
             quality_factor = math.exp(
                 -QUALITY_PRICE_SCALE * (self.quality - market_median_quality)
             )
-            history = getattr(agent, "peer_review_history", 0.0)
+            history = getattr(agent, "peer_review_epsilon_history", PRIOR_REVIEW_EPSILON)
             history_factor = max(
                 0.0,
-                1.0 + HISTORY_PRICE_SCALE * (history - mean_peer_review_history),
+                1.0 + HISTORY_PRICE_SCALE * (history - mean_peer_review_epsilon),
             )
-            offer = DEFAULT_REVIEW_SHARE * quality_factor * history_factor
+            offer = base_offer * quality_factor * history_factor
             offer = min(max(offer, MIN_OFFER_SHARE), ceiling)
             table[agent] = offer
         self.price_table = table
@@ -285,6 +360,7 @@ class Paper:
         self.reviewer = agent
 
         share = 0.0
+        epsilon = review_epsilon_from_effort(review_effort, self.quality)
         if review_effort >= MIN_REVIEW_EFFORT_THRESHOLD:
             share = min(
                 self.agreed_review_share,
@@ -303,6 +379,7 @@ class Paper:
                 "reviewer": agent,
                 "share": share,
                 "effort": review_effort,
+                "epsilon": epsilon,
                 "review_kind": completed_review_kind,
                 "accrual_rate": self.accrual_rate,
             }

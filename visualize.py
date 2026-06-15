@@ -138,6 +138,42 @@ def plot_agent_capital_by_group(
     return _finish(fig, path, show)
 
 
+def plot_agent_group_comparison(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Executive summary by agent type: mean capital and review behavior."""
+    summary = history.agent_group_summary()
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    if not summary:
+        axes[0].text(0.5, 0.5, "No agent group data", ha="center", va="center")
+        axes[0].set_axis_off()
+        axes[1].set_axis_off()
+        return _finish(fig, path, show)
+
+    groups = sorted(summary)
+    mean_capital = [summary[g]["mean_final_capital"] for g in groups]
+    good = [summary[g]["good_faith_reviews"] for g in groups]
+    bad = [summary[g]["bad_faith_reviews"] for g in groups]
+    x = range(len(groups))
+
+    axes[0].bar(x, mean_capital, color="#60a5fa", edgecolor="#1e3a5f")
+    axes[0].set_xticks(list(x))
+    axes[0].set_xticklabels(groups, rotation=20, ha="right")
+    axes[0].set_ylabel("Mean final AC")
+    axes[0].set_title("Mean final capital by agent type")
+
+    axes[1].bar(x, good, color="#16a34a", label="good faith")
+    axes[1].bar(x, bad, bottom=good, color="#f87171", label="bad faith")
+    axes[1].set_xticks(list(x))
+    axes[1].set_xticklabels(groups, rotation=20, ha="right")
+    axes[1].set_ylabel("Completed reviews")
+    axes[1].set_title("Review outcomes by agent type")
+    axes[1].legend(fontsize=8)
+
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _draw_system_aggregates(ax, history: "History") -> None:
     scalars = history.scalars
     for key in ("total_capital", "mean_capital", "max_capital"):
@@ -644,6 +680,9 @@ def plot_all(
         ),
         "agent_capital": plot_agent_capital(
             history, os.path.join(outdir, "agent_capital.png"), show=show
+        ),
+        "agent_group_comparison": plot_agent_group_comparison(
+            history, os.path.join(outdir, "agent_group_comparison.png"), show=show
         ),
         "system_aggregates": plot_system_aggregates(
             history, os.path.join(outdir, "system_aggregates.png"), show=show

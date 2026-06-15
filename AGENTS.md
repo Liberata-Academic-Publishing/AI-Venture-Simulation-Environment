@@ -34,9 +34,18 @@ CLI flags for one-off overrides.
 - **Discrete review effort**: agents choose `bad_faith` or `good_faith` when
   claiming a review. By default `T_B = 1`, `T_G = 5 * T_B`, and discrete
   manuscript work uses `T_M = 200 * T_B`.
+- **Review reward curve**: by default `review_effort_curve = "sigmoid"` models
+  `E = F(T)` with low impact for short reviews, a rise through the good-faith
+  region, and saturation for long reviews. Set it to `"log"` to use the older
+  logarithmic curve.
 - **Review-share economics**: a review grants ownership share on the reviewed
-  paper (`default_review_share`, higher for high-AC reviewers, capped at
-  `default_max_reviewer_share`).
+  paper. The default base price is the schematic's fair-market formula,
+  `sum(epsilon / (1 + epsilon) * Probability(epsilon))`, using the empirical
+  distribution of reviewer epsilon histories, then adjusted by paper quality and
+  reviewer epsilon history and capped at `default_max_reviewer_share`.
+- **Results display**: `History.to_dict()` exports `agent_group_summary`, and
+  both `run_simulation.py` and the static `docs/` gallery compare heuristic,
+  random, probabilistic, and RL agent outcomes.
 - **RL settings** live in `SimConfig` too (`rl_backend`, `rl_epsilon`,
   `rl_gamma`); RL agents are part of the simulation.
 

@@ -6,9 +6,9 @@ This project is an agent-based simulation designed to model the incentive struct
 
 Each paper has a `quality` sampled from a Gaussian centered on its author's intrinsic talent, known to the author before they start writing. Quality sets the paper's base accrual rate and the accrual bump a review can earn. A paper is listed on the market one timestep after it is written, and it can be reviewed exactly once: the first agent to claim it takes it off the market permanently.
 
-While a paper is listed, its author offers each potential reviewer a distinct share price (`Paper.price_table`). A higher-quality paper (relative to the market) offers a smaller share; a reviewer with a stronger peer-review history is offered a larger one. The price table refreshes every timestep because it depends on which papers are currently on the market.
+While a paper is listed, its author offers each potential reviewer a distinct share price (`Paper.price_table`). The default base offer is the schematic's fair-market expectation, `sum(epsilon / (1 + epsilon) * Probability(epsilon))`, estimated from the current empirical distribution of reviewer epsilon histories. A higher-quality paper (relative to the market) offers a smaller share; a reviewer with a stronger epsilon history is offered a larger one. The price table refreshes every timestep because it depends on which papers are currently on the market.
 
-`peer_review_history` is a public per-agent metric: the total academic capital an agent has earned from reviews divided by the number of reviews it has completed.
+`peer_review_history` remains a public per-agent AC reputation metric: the total academic capital an agent has earned from reviews divided by the number of reviews it has completed. `peer_review_epsilon_history` separately tracks the average proportional accrual improvement caused by that reviewer, and is the metric used for fair-market pricing.
 
 ## Timestep structure
 
@@ -31,8 +31,12 @@ default, bad faith takes `T_B = 1` timestep, good faith takes `T_G = 5 * T_B`,
 and manuscript work uses `T_M = 200 * T_B`.
 
 The minimum reward threshold is one timestep, so a one-timestep review earns the
-smallest quality-scaled accrual bump. Additional timesteps add a logarithmically
-diminishing bump.
+smallest quality-scaled accrual bump. The default review reward curve is a
+sigmoid-like `E = F(T)` curve inspired by the team discussion of review length
+and citation impact: very short reviews have limited effect, the bump rises
+around the good-faith region, and long reviews saturate. The previous
+logarithmic curve remains available by setting `review_effort_curve = "log"` in
+`config.py`.
 
 ## Writing Effort Model
 
@@ -64,6 +68,11 @@ Separately from the live dashboard, you can save completed runs and browse them 
 Pages.
 
 After running the simulation, the terminal will prompt you whether or not to save this run to the log and ask for a name.
+
+Saved runs include an agent-type comparison report for heuristic, random,
+probabilistic, and RL agents. The CLI summary prints the same comparison, and
+the static gallery displays it as a table/chart next to the existing action and
+review behavior plots.
 
 ## Reinforcement-learning agents
 

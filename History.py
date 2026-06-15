@@ -89,6 +89,15 @@ def default_metrics() -> dict[str, MetricFn]:
             if env.agents
             else 0.0
         ),
+        "mean_peer_review_epsilon": lambda env: (
+            sum(getattr(a, "peer_review_epsilon_history", 0.0) for a in env.agents)
+            / len(env.agents)
+            if env.agents
+            else 0.0
+        ),
+        "fair_market_price": lambda env: float(
+            getattr(env, "fair_market_price", 0.0)
+        ),
     }
 
 
@@ -115,10 +124,12 @@ class History:
         self.scalars: dict[str, list[float]] = {name: [] for name in self.metrics}
         self.agent_capital: dict[str, list[float]] = {}
         self.agent_review_history: dict[str, list[float]] = {}
+        self.agent_review_epsilon_history: dict[str, list[float]] = {}
         self.agent_groups: dict[str, str] = {}  # agent label -> class name
         self.paper_ac: dict[str, list[float]] = {}
         # Per-paper attributes (constant or final snapshot) for outcome charts.
         self.paper_quality: dict[str, float] = {}
+        self.paper_authors: dict[str, str] = {}
         self.paper_reviewed: dict[str, bool] = {}
         self.paper_writing_effort: dict[str, float] = {}
         self.paper_accrual_rate: dict[str, float] = {}
@@ -161,6 +172,12 @@ class History:
                 lambda a: float(getattr(a, "peer_review_history", 0.0)),
                 "Agent",
             )
+            self._record_series(
+                env.agents,
+                self.agent_review_epsilon_history,
+                lambda a: float(getattr(a, "peer_review_epsilon_history", 0.0)),
+                "Agent",
+            )
         if self.track_papers:
             self._record_series(
                 env.papers,
@@ -170,6 +187,7 @@ class History:
             )
             for paper in env.papers:
                 label = self._label(paper, "Paper")
+                self.paper_authors[label] = self._label(paper.author, "Agent")
                 self.paper_quality[label] = float(getattr(paper, "quality", 0.0))
                 self.paper_reviewed[label] = bool(getattr(paper, "reviewed", False))
                 effort = getattr(paper, "writing_effort", None)
@@ -272,7 +290,12 @@ class History:
             "agent_review_history": {
                 k: list(v) for k, v in self.agent_review_history.items()
             },
+            "agent_review_epsilon_history": {
+                k: list(v) for k, v in self.agent_review_epsilon_history.items()
+            },
+            "agent_groups": dict(self.agent_groups),
             "paper_ac": {k: list(v) for k, v in self.paper_ac.items()},
+            "paper_authors": dict(self.paper_authors),
             "paper_quality": dict(self.paper_quality),
             "paper_reviewed": dict(self.paper_reviewed),
             "paper_writing_effort": dict(self.paper_writing_effort),
@@ -303,7 +326,100 @@ class History:
                 for (d, a, e, p) in self.writing_efforts
             ],
             "action_counts": dict(self.action_counts),
+            "agent_group_summary": self.agent_group_summary(),
         }
+
+    def agent_group_summary(self) -> dict[str, dict[str, Any]]:
+        """Aggregate final outcomes by concrete agent class."""
+        groups: dict[str, dict[str, Any]] = {}
+
+        def ensure(group: str) -> dict[str, Any]:
+            if group not in groups:
+                groups[group] = {
+                    "agent_count": 0,
+                    "total_final_capital": 0.0,
+                    "min_final_capital": None,
+                    "max_final_capital": None,
+                    "papers_authored": 0,
+                    "completed_reviews": 0,
+                    "good_faith_reviews": 0,
+                    "bad_faith_reviews": 0,
+                    "total_review_effort": 0.0,
+                    "total_peer_review_history": 0.0,
+                    "total_peer_review_epsilon": 0.0,
+                    "total_writing_effort": 0.0,
+                    "actions": Counter(),
+                }
+            return groups[group]
+
+        for agent_label, series in self.agent_capital.items():
+            group = self.agent_groups.get(agent_label, "Agent")
+            stats = ensure(group)
+            final_capital = float(series[-1]) if series else 0.0
+            stats["agent_count"] += 1
+            stats["total_final_capital"] += final_capital
+            current_min = stats["min_final_capital"]
+            current_max = stats["max_final_capital"]
+            stats["min_final_capital"] = (
+                final_capital if current_min is None else min(current_min, final_capital)
+            )
+            stats["max_final_capital"] = (
+                final_capital if current_max is None else max(current_max, final_capital)
+            )
+
+            review_series = self.agent_review_history.get(agent_label, [])
+            if review_series:
+                stats["total_peer_review_history"] += float(review_series[-1])
+            epsilon_series = self.agent_review_epsilon_history.get(agent_label, [])
+            if epsilon_series:
+                stats["total_peer_review_epsilon"] += float(epsilon_series[-1])
+
+        for author_label in self.paper_authors.values():
+            group = self.agent_groups.get(author_label, "Agent")
+            ensure(group)["papers_authored"] += 1
+
+        for _, agent_label, _, effort, review_kind in self.completed_reviews:
+            group = self.agent_groups.get(agent_label, "Agent")
+            stats = ensure(group)
+            stats["completed_reviews"] += 1
+            stats["total_review_effort"] += float(effort)
+            if review_kind == GOOD_FAITH_REVIEW:
+                stats["good_faith_reviews"] += 1
+            elif review_kind == BAD_FAITH_REVIEW:
+                stats["bad_faith_reviews"] += 1
+
+        for _, agent_label, effort, _ in self.writing_efforts:
+            group = self.agent_groups.get(agent_label, "Agent")
+            ensure(group)["total_writing_effort"] += float(effort)
+
+        for _, agent_label, kind, _ in self.actions:
+            group = self.agent_groups.get(agent_label, "Agent")
+            ensure(group)["actions"][kind] += 1
+
+        output: dict[str, dict[str, Any]] = {}
+        for group, stats in groups.items():
+            count = stats["agent_count"]
+            reviews = stats["completed_reviews"]
+            summary = dict(stats)
+            summary["mean_final_capital"] = (
+                stats["total_final_capital"] / count if count else 0.0
+            )
+            summary["mean_peer_review_history"] = (
+                stats["total_peer_review_history"] / count if count else 0.0
+            )
+            summary["mean_peer_review_epsilon"] = (
+                stats["total_peer_review_epsilon"] / count if count else 0.0
+            )
+            summary["average_review_effort"] = (
+                stats["total_review_effort"] / reviews if reviews else 0.0
+            )
+            summary["actions"] = dict(stats["actions"])
+            if summary["min_final_capital"] is None:
+                summary["min_final_capital"] = 0.0
+            if summary["max_final_capital"] is None:
+                summary["max_final_capital"] = 0.0
+            output[group] = summary
+        return output
 
     def to_json(self, path: str) -> str:
         with open(path, "w", encoding="utf-8") as fh:
