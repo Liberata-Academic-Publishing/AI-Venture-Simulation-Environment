@@ -4,6 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Venture Simulation — Run Gallery</title>
+  <script>
+    // GitHub project pages break relative URLs when the path has no trailing slash
+    // (e.g. .../AI-Venture-Simulation-Environment vs .../AI-Venture-Simulation-Environment/).
+    (function () {
+      const marker = "/AI-Venture-Simulation-Environment";
+      const idx = location.pathname.indexOf(marker);
+      const href = idx !== -1
+        ? location.origin + location.pathname.slice(0, idx + marker.length) + "/"
+        : new URL("./", location.href).href;
+      const base = document.createElement("base");
+      base.href = href;
+      document.head.appendChild(base);
+    })();
+  </script>
   <script src="chart.umd.js"></script>
   <style>
     :root { color-scheme: dark; }
@@ -1454,6 +1468,14 @@
     }
 
     async function init() {
+      if (location.protocol === "file:") {
+        setStatus(
+          "open via HTTP — use https://liberata-academic-publishing.github.io/AI-Venture-Simulation-Environment/ or run: python3 -m http.server 8765 --directory docs",
+          "error"
+        );
+        return;
+      }
+
       let runs;
       try {
         const res = await fetch("data/index.json", { cache: "no-cache" });

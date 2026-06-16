@@ -105,8 +105,8 @@ class SimConfig:
     rl_backend: str = "tabular"     # "tabular" | "linear"
     rl_epsilon: float = 0.1         # exploration when learning online
     rl_gamma: float = 0.95          # TD discount
-    rl_reward_ac_weight: float = 1.0       # weight on Δ academic capital
-    rl_reward_rank_weight: float = 100.0   # weight on Δ AC percentile rank (0..1)
+    rl_reward_ac_weight: float = 0       # weight on Δ academic capital
+    rl_reward_rank_weight: float = 0   # weight on Δ AC percentile rank (0..1)
     rl_reward_accrual_weight: float = 1.0  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
     talent_min: float = 0.8         # talent spread (inert until the sim uses it)
@@ -130,10 +130,10 @@ class TrainConfig:
     """Defaults for the training harness (train_rl.py) — kept separate from the
     simulation parameters above."""
 
-    episodes: int = 200
-    timesteps: int = 100
-    num_rl: int = 10
-    num_heuristic: int = 0
+    episodes: int = 20
+    timesteps: int = 1000
+    num_rl: int = 0
+    num_heuristic: int = 10
     eps_start: float = 1.0
     eps_end: float = 0.05
 
@@ -142,8 +142,8 @@ class TrainConfig:
 class TrainDQNConfig:
     """Defaults for the DQN training harness (train_dqn.py)."""
 
-    episodes: int = 200
-    timesteps: int = 100
+    episodes: int = 4
+    timesteps: int = 1000
     num_dqn: int = 10
     num_heuristic: int = 0
     eps_start: float = 1.0
