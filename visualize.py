@@ -413,9 +413,9 @@ def _daily_action_counts(history: "History") -> dict[str, list[int]]:
     return counts
 
 
-def _completed_reviews(history: "History") -> list[tuple[int, float]]:
-    """Return (day, effort) for each completed peer review."""
-    return [(row[0], row[3]) for row in history.completed_reviews]
+def _completed_reviews(history: "History") -> list[tuple[int, str, float]]:
+    """Return (day, reviewer label, effort) for each completed peer review."""
+    return [(row[0], row[1], row[3]) for row in history.completed_reviews]
 
 
 def _writing_effort_by_agent(history: "History") -> dict[str, float]:
@@ -429,15 +429,43 @@ def _writing_effort_by_agent(history: "History") -> dict[str, float]:
 def _draw_effort_histogram(
     ax, history: "History", threshold: float = MIN_REVIEW_EFFORT_THRESHOLD
 ) -> None:
-    efforts = [effort for _, effort in _completed_reviews(history)]
+    reviews = _completed_reviews(history)
+    efforts = [effort for _, _, effort in reviews]
     if not efforts:
         ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
         ax.set_axis_off()
         return
     lo = math.floor(min(efforts))
     hi = math.ceil(max(efforts))
+    efforts_by_group: dict[str, list[float]] = {}
+    for _, agent, effort in reviews:
+        group = history.agent_groups.get(agent, "Agent")
+        efforts_by_group.setdefault(group, []).append(effort)
+
     bins = range(lo, hi + 2)
-    ax.hist(efforts, bins=bins, align="left", rwidth=0.9, color="#60a5fa", edgecolor="#1e3a5f")
+    if len(efforts_by_group) > 1:
+        groups = sorted(efforts_by_group)
+        cmap = plt.get_cmap("tab10")
+        colors = [cmap(i % 10) for i, _ in enumerate(groups)]
+        ax.hist(
+            [efforts_by_group[group] for group in groups],
+            bins=bins,
+            align="left",
+            rwidth=0.9,
+            stacked=True,
+            color=colors,
+            edgecolor="#1e3a5f",
+            label=groups,
+        )
+    else:
+        ax.hist(
+            efforts,
+            bins=bins,
+            align="left",
+            rwidth=0.9,
+            color="#60a5fa",
+            edgecolor="#1e3a5f",
+        )
     # One tick per integer effort when the range is small; otherwise let
     # matplotlib thin them so wide-effort runs don't overlap their labels.
     if hi - lo <= 30:
@@ -462,7 +490,8 @@ def _draw_effort_scatter(
         ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
         ax.set_axis_off()
         return
-    timesteps, efforts = zip(*points)
+    timesteps = [day for day, _, _ in points]
+    efforts = [effort for _, _, effort in points]
     ax.scatter(timesteps, efforts, alpha=0.65, s=28, color="#a855f7", edgecolors="#4c1d95")
     ax.axhline(
         threshold,
