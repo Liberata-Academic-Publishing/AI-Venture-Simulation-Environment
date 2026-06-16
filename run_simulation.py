@@ -121,6 +121,7 @@ def print_summary(env: Environment, history: History):
         print(f"- {action}: {count}")
 
     print_agent_group_summary(history)
+    print_agent_extremes(history)
 
     print("\nFinal agent capital")
     for agent in sorted(env.agents, key=lambda item: item.academic_capital, reverse=True):
@@ -196,6 +197,44 @@ def print_agent_group_summary(history: History):
         )
 
 
+def print_agent_extremes(history: History, limit: int = 3):
+    """Display top/bottom agents with concise policy/outcome diagnostics."""
+    rows = history.agent_outcome_summary()
+    print("\nTop and bottom agents")
+    if not rows:
+        print("- no per-agent outcome data recorded")
+        return
+
+    top_rows = rows[:limit]
+    bottom_rows = list(reversed(rows[-limit:]))
+
+    def action_text(row: dict) -> str:
+        actions = row.get("most_common_actions") or []
+        if not actions:
+            return "none"
+        return ", ".join(
+            f"{item.get('kind', 'unknown')}={int(item.get('count', 0))}"
+            for item in actions
+        )
+
+    def print_row(bucket: str, row: dict) -> None:
+        print(
+            f"- {bucket}: {row.get('agent')} ({row.get('group')}), "
+            f"AC={float(row.get('final_capital', 0.0)):.2f}, "
+            f"papers={int(row.get('papers_authored', 0))}, "
+            f"reviews={int(row.get('completed_reviews', 0))} "
+            f"(good={int(row.get('good_faith_reviews', 0))}, "
+            f"bad={int(row.get('bad_faith_reviews', 0))}), "
+            f"avg review effort={float(row.get('average_review_effort', 0.0)):.2f}, "
+            f"top actions: {action_text(row)}"
+        )
+
+    for row in top_rows:
+        print_row("top", row)
+    for row in bottom_rows:
+        print_row("bottom", row)
+
+
 def print_choice_breakdown(history: History):
     """Show the share of top-level agent decisions (see ``DECISION_LABELS``)."""
     tallies: Counter[str] = Counter()
@@ -233,6 +272,7 @@ CHART_DESCRIPTIONS = {
     "marketplace_activity": "Papers on market vs cumulative reviews completed",
     "paper_quality_vs_ac": "Paper quality vs accrued capital (reviewed or not)",
     "writing_effort_vs_rate": "Writing effort invested vs base accrual rate (asymptote)",
+    "paper_writing_effort_over_time": "Paper-writing effort at publication over time",
     "review_reputation": "Reviewer reputation (AC earned per review) over time",
     "action_mix": "What every agent did each timestep (stacked bars)",
     "choice_breakdown": "Agent decisions (write / review / finish)",
