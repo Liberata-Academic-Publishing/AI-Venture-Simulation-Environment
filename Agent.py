@@ -48,6 +48,7 @@ class ActionRecord:
 class Agent(ABC):
 
     all_papers: list[Paper] = []  # class variable shared across all agents
+    all_agents: list[Agent] = []  # live roster for cross-agent signals (e.g. RL rank)
 
     def __init__(
         self,

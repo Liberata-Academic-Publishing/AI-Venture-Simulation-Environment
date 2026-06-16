@@ -47,7 +47,9 @@ CLI flags for one-off overrides.
   both `run_simulation.py` and the static `docs/` gallery compare heuristic,
   random, probabilistic, and RL agent outcomes.
 - **RL settings** live in `SimConfig` too (`rl_backend`, `rl_epsilon`,
-  `rl_gamma`); RL agents are part of the simulation.
+  `rl_gamma`, reward weights); tabular/linear RL uses `train_rl.py`.
+- **DQN settings** are separate (`num_dqn_agents`, `dqn_*` hyperparameters);
+  train with `train_dqn.py`, policies saved to `policies/policy_dqn.pkl`.
 
 ## Architecture map
 
@@ -56,7 +58,7 @@ CLI flags for one-off overrides.
 - `Agent.py` - abstract `Agent` base + the action protocol: `write_paper`,
   `peer_review`, `finish_review_write_paper`, `finish_review_peer_review`.
   `ActionRecord` describes one turn. `Agent.all_papers` is a shared class list.
-- `HeuristicAgent.py`, `QLearningAgent.py`, `RandomAgent.py` - agent variants,
+- `HeuristicAgent.py`, `QLearningAgent.py`, `DQNAgent.py`, `RandomAgent.py` - agent variants,
   including random controls and discrete-only probability agents.
 - `Paper.py` - paper economics, reviews, and accrual; defines
   `MIN_REVIEW_EFFORT_THRESHOLD`, `REVIEW_EFFORT_PER_DAY`.
@@ -65,6 +67,7 @@ CLI flags for one-off overrides.
 - `run_simulation.py` - main entry point (run a sim, print summary, optionally
   archive to the `docs/` gallery).
 - `train_rl.py` - self-play RL training + greedy evaluation; auto-saves policies.
+- `train_dqn.py` - DQN self-play training; auto-saves to `policies/policy_dqn.pkl`.
 - `visualize.py` - charts and summary figures for saved runs.
 - `docs/` - static GitHub Pages gallery of saved runs (`docs/data/<run_id>/`).
 
@@ -82,6 +85,11 @@ python run_simulation.py --rl-agents 20 --rl-backend tabular
 python train_rl.py
 python train_rl.py --backend linear --episodes 300
 python train_rl.py --load policies/policy_tabular.pkl --episodes 0   # eval only
+
+# Train the DQN agent (auto-saves to policies/policy_dqn.pkl)
+python train_dqn.py
+python train_dqn.py --num-dqn 20 --episodes 300
+python run_simulation.py --dqn-agents 10 --rl-agents 0 --no-archive
 
 # Tests (stdlib unittest)
 python test_simulation.py

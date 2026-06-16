@@ -152,3 +152,120 @@ def export_run(
         json.dump(runs, fh, indent=2)
 
     return run_id
+
+
+def _training_summary(training_log: list[dict[str, Any]]) -> dict[str, float]:
+    if not training_log:
+        return {}
+    last = training_log[-1]
+    return {"final_mean_return": round(float(last.get("mean_return", 0.0)), 4)}
+
+
+def write_training_gallery(
+    training_log: list[dict[str, Any]], run_dir: str
+) -> list[str]:
+    """Render episode-return PNG + ``training.json`` into ``run_dir``."""
+    os.makedirs(run_dir, exist_ok=True)
+    charts: list[str] = []
+    episodes = [int(row["episode"]) for row in training_log]
+    returns = [float(row["mean_return"]) for row in training_log]
+    epsilon = [float(row["epsilon"]) for row in training_log]
+    avg_review_times = [float(row.get("mean_review_effort", 0.0)) for row in training_log]
+
+    try:
+        import visualize
+
+        if visualize.render_episode_return_gallery(
+            episodes, returns, epsilon, os.path.join(run_dir, "charts")
+        ):
+            charts.append("episode_return")
+        if visualize.render_avg_peer_review_time_gallery(
+            episodes, avg_review_times, os.path.join(run_dir, "charts")
+        ):
+            charts.append("avg_peer_review_time")
+    except ImportError:
+        print(
+            "matplotlib not installed; skipping episode return PNG. "
+            "Install it with: python -m pip install matplotlib"
+        )
+
+    payload = {
+        "kind": "training",
+        "episodes": episodes,
+        "mean_return": returns,
+        "mean_review_effort": avg_review_times,
+        "epsilon": epsilon,
+        "charts": charts,
+    }
+    with open(os.path.join(run_dir, "training.json"), "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    return charts
+
+
+def write_full_training(
+    training_log: list[dict[str, Any]], run_id: str, local_dir: str = LOCAL_DATA_DIR
+) -> str:
+    """Write the full training log to ``local_dir/<run_id>/training.json``."""
+    run_dir = os.path.join(local_dir, run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    path = os.path.join(run_dir, "training.json")
+    payload = {
+        "kind": "training",
+        "log": training_log,
+        "episodes": [int(row["episode"]) for row in training_log],
+        "mean_return": [float(row["mean_return"]) for row in training_log],
+        "mean_review_effort": [
+            float(row.get("mean_review_effort", 0.0)) for row in training_log
+        ],
+        "epsilon": [float(row["epsilon"]) for row in training_log],
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    return path
+
+
+def export_training_run(
+    training_log: list[dict[str, Any]],
+    *,
+    config: dict[str, Any],
+    title: str | None = None,
+    docs_dir: str = "docs",
+    local_dir: str = LOCAL_DATA_DIR,
+) -> str:
+    """Archive a training run: full log local, slim JSON + PNG to the gallery."""
+    data_dir = os.path.join(docs_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+
+    run_id = _unique_run_id(data_dir)
+    write_full_training(training_log, run_id, local_dir)
+
+    run_dir = os.path.join(data_dir, run_id)
+    write_training_gallery(training_log, run_dir)
+
+    entry = {
+        "id": run_id,
+        "kind": "training",
+        "title": title or f"Training {run_id}",
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "num_episodes": len(training_log),
+        "config": config,
+        "summary": _training_summary(training_log),
+    }
+
+    manifest_path = os.path.join(data_dir, "index.json")
+    runs: list[dict[str, Any]] = []
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            if isinstance(loaded, list):
+                runs = loaded
+        except (json.JSONDecodeError, OSError):
+            runs = []
+
+    runs.append(entry)
+    runs.sort(key=lambda r: r.get("created", ""), reverse=True)
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump(runs, fh, indent=2)
+
+    return run_id

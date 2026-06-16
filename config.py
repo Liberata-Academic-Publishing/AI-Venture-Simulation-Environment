@@ -9,7 +9,8 @@ defaults here to change behavior everywhere; pass flags for one-off runs.
 run — world size, initial papers, paper economics, the effort/reward model, the
 publishing threshold, heuristic forecasting weights, and the RL agents'
 settings (the RL agents are part of the simulation). ``TrainConfig`` (``TRAIN``)
-is kept separate: it holds only the training-loop knobs used by ``train_rl.py``.
+and ``TrainDQNConfig`` (``TRAIN_DQN``) hold training-loop knobs for
+``train_rl.py`` and ``train_dqn.py`` respectively.
 
 Stdlib only (``dataclasses``) — no extra dependencies.
 """
@@ -27,6 +28,7 @@ class SimConfig:
     # --- World -----------------------------------------------------------
     num_heuristic_agents: int = 0
     num_rl_agents: int = 20
+    num_dqn_agents: int = 0
     num_random_agents: int = 0
     num_probabilistic_agents: int = 0
     num_timesteps: int = 1000
@@ -103,10 +105,24 @@ class SimConfig:
     rl_backend: str = "tabular"     # "tabular" | "linear"
     rl_epsilon: float = 0.1         # exploration when learning online
     rl_gamma: float = 0.95          # TD discount
+    rl_reward_ac_weight: float = 1.0       # weight on Δ academic capital
+    rl_reward_rank_weight: float = 100.0   # weight on Δ AC percentile rank (0..1)
+    rl_reward_accrual_weight: float = 1.0  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
     talent_min: float = 0.8         # talent spread (inert until the sim uses it)
     talent_max: float = 1.2
     policies_dir: str = "policies"
+
+    # --- DQN agents (separate from tabular/linear RL) ------------------
+    dqn_hidden_size: int = 64
+    dqn_hidden_layers: int = 2
+    dqn_lr: float = 0.001
+    dqn_gamma: float = 0.95
+    dqn_epsilon: float = 0.1
+    dqn_replay_capacity: int = 10000
+    dqn_batch_size: int = 32
+    dqn_target_sync: int = 200
+    dqn_autoload_policy: bool = True
 
 
 @dataclass(frozen=True)
@@ -115,8 +131,20 @@ class TrainConfig:
     simulation parameters above."""
 
     episodes: int = 200
-    timesteps: int = 1000
+    timesteps: int = 100
     num_rl: int = 10
+    num_heuristic: int = 0
+    eps_start: float = 1.0
+    eps_end: float = 0.05
+
+
+@dataclass(frozen=True)
+class TrainDQNConfig:
+    """Defaults for the DQN training harness (train_dqn.py)."""
+
+    episodes: int = 200
+    timesteps: int = 100
+    num_dqn: int = 10
     num_heuristic: int = 0
     eps_start: float = 1.0
     eps_end: float = 0.05
@@ -124,6 +152,7 @@ class TrainConfig:
 
 SIM = SimConfig()
 TRAIN = TrainConfig()
+TRAIN_DQN = TrainDQNConfig()
 
 
 def default_policy_path(backend_kind: str) -> str:
@@ -134,3 +163,8 @@ def default_policy_path(backend_kind: str) -> str:
     """
     ext = ".pkl" if backend_kind == "tabular" else ".npy"
     return os.path.join(SIM.policies_dir, f"policy_{backend_kind}{ext}")
+
+
+def default_dqn_policy_path() -> str:
+    """Canonical on-disk path for a trained DQN policy."""
+    return os.path.join(SIM.policies_dir, "policy_dqn.pkl")

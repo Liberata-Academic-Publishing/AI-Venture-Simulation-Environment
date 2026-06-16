@@ -708,6 +708,107 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
         self.assertGreater(reviewer.paper_progress, 0.0)
 
 
+class QLearningRewardTest(unittest.TestCase):
+    def test_ac_percentile_rank_handles_ties(self):
+        from QLearningAgent import ac_percentile_rank
+
+        self.assertAlmostEqual(ac_percentile_rank(5.0, [1.0, 5.0, 5.0, 9.0]), 0.5)
+        self.assertAlmostEqual(ac_percentile_rank(9.0, [1.0, 5.0, 5.0, 9.0]), 0.875)
+        self.assertAlmostEqual(ac_percentile_rank(1.0, [1.0, 5.0, 5.0, 9.0]), 0.125)
+
+    def test_reward_includes_delta_rank(self):
+        from config import SIM
+        from QLearningAgent import QLearningAgent, ac_percentile_rank
+
+        peers = [
+            ScriptAgent("peer-a"),
+            ScriptAgent("peer-b"),
+        ]
+        peers[0].academic_capital = 10.0
+        peers[1].academic_capital = 30.0
+        agent = QLearningAgent(intrinsic_talent=1.0, academic_capital=20.0, learning=False)
+        Agent.all_agents = [agent, *peers]
+        agent._last_capital = 15.0
+        agent._last_rank = ac_percentile_rank(15.0, [15.0, 10.0, 30.0])
+
+        reward = agent._compute_reward()
+        expected_ac = 5.0
+        expected_rank = ac_percentile_rank(20.0, [20.0, 10.0, 30.0]) - agent._last_rank
+
+        self.assertAlmostEqual(
+            reward,
+            SIM.rl_reward_ac_weight * expected_ac
+            + SIM.rl_reward_rank_weight * expected_rank,
+        )
+
+    def test_reward_includes_delta_accrual_rate(self):
+        from config import SIM
+        from QLearningAgent import QLearningAgent
+
+        author = ScriptAgent("author")
+        paper = Paper(author=author, accrual_rate=1.0, current_ac=10.0)
+        Agent.all_papers = [paper]
+        agent = QLearningAgent(intrinsic_talent=1.0, learning=False)
+        agent._last_accrual_rate = 0.5
+
+        reward = agent._compute_reward()
+        expected_accrual = agent._portfolio_accrual_rate() - 0.5
+
+        self.assertAlmostEqual(
+            reward,
+            SIM.rl_reward_accrual_weight * expected_accrual,
+        )
+
+
+class DQNAgentTest(unittest.TestCase):
+    def test_dqn_backend_q_values_shape(self):
+        import numpy as np
+
+        from DQNAgent import make_dqn_backend
+        from QLearningAgent import NUM_ACTIONS, NUM_FEATURES
+
+        backend = make_dqn_backend(hidden_size=8, hidden_layers=1)
+        q = backend.q_values(np.zeros(NUM_FEATURES, dtype=np.float64))
+        self.assertEqual(q.shape, (NUM_ACTIONS,))
+
+    def test_dqn_remember_and_train(self):
+        import numpy as np
+
+        from DQNAgent import make_dqn_backend
+        from QLearningAgent import NUM_ACTIONS, NUM_FEATURES
+
+        backend = make_dqn_backend(batch_size=4, replay_capacity=32)
+        state = np.random.rand(NUM_FEATURES)
+        next_state = np.random.rand(NUM_FEATURES)
+        mask = np.ones(NUM_ACTIONS)
+        for _ in range(8):
+            backend.remember(state, 0, 1.0, next_state, mask, done=False)
+        loss = backend.train_step()
+        self.assertIsNotNone(loss)
+
+    def test_dqn_save_load_roundtrip(self):
+        import tempfile
+
+        import numpy as np
+
+        from DQNAgent import make_dqn_backend
+        from QLearningAgent import NUM_FEATURES
+
+        backend = make_dqn_backend(hidden_size=16, hidden_layers=1)
+        features = np.linspace(0.1, 0.9, NUM_FEATURES)
+        before = backend.q_values(features).copy()
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as fh:
+            path = fh.name
+        try:
+            backend.save(path)
+            reloaded = make_dqn_backend(hidden_size=8, hidden_layers=1)
+            reloaded.load(path)
+            after = reloaded.q_values(features)
+            np.testing.assert_allclose(before, after)
+        finally:
+            os.remove(path)
+
+
 class UtilityTest(unittest.TestCase):
     def test_gini_ranges_from_equal_to_unequal(self):
         self.assertEqual(gini([]), 0.0)

@@ -165,7 +165,9 @@ venv.bak/
 .ropeproject
 
 # Simulation outputs (CSV/JSON/PNG written by run_simulation.py)
-runs/
+runs/*
+!runs/episode_return.png
+!runs/training_log.json
 
 # Full per-run history archive kept local only. The committed gallery
 # (docs/data/) holds slim JSON + static-chart PNGs; the complete, lossless

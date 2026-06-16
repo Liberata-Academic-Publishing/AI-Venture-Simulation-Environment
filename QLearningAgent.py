@@ -1,8 +1,10 @@
 """Reinforcement-learning agent for the single-review peer-review market.
 
-Reward = Δ academic capital. The agent learns *which action type* to take each
-timestep; the target paper for a claim is chosen by the inherited heuristic
-forecast, so the action space stays tiny and fixed.
+Reward = weighted Δ academic capital + weighted Δ AC percentile rank + weighted
+Δ portfolio accrual rate (share-weighted sum of owned papers' accrual rates).
+The agent learns *which action type* to take each timestep; the target
+paper for a claim is chosen by the inherited heuristic forecast, so the action
+space stays tiny and fixed.
 
 The agent makes one decision per timestep, and the wiring depends on the active
 review paradigm:
@@ -48,6 +50,7 @@ from Agent import (
     CONTINUOUS_RESEARCH_FINISH,
     CONTINUOUS_REVIEW,
 )
+from config import SIM
 from HeuristicAgent import HeuristicAgent
 from Paper import (
     DEFAULT_MAX_REVIEWER_SHARE,
@@ -72,6 +75,22 @@ NUM_ACTIONS = len(QAction)
 
 # Scale used to squash invested review effort into ~[0, 1) for the feature.
 EFFORT_FEATURE_SCALE = 5.0
+
+
+def ac_percentile_rank(agent_ac: float, capitals: list[float]) -> float:
+    """Tie-aware percentile rank in [0, 1] among ``capitals``.
+
+    Uses average rank normalized by cohort size: 0 when everyone is ahead,
+    1 when everyone is behind or tied at the top.
+    """
+    if not capitals:
+        return 0.0
+    n = len(capitals)
+    if n == 1:
+        return 1.0
+    less = sum(1 for value in capitals if value < agent_ac)
+    equal = sum(1 for value in capitals if value == agent_ac)
+    return (less + 0.5 * equal) / n
 
 
 # --------------------------------------------------------------------------- #
@@ -188,6 +207,8 @@ class QLearningAgent(HeuristicAgent):
         self._last_features: np.ndarray | None = None
         self._last_action: int | None = None
         self._last_capital: float = academic_capital
+        self._last_rank: float = self._current_ac_rank()
+        self._last_accrual_rate: float = self._portfolio_accrual_rate()
 
         # Decision cached in the marketplace phase, replayed in the work phase.
         self._pending_action: int = int(QAction.WRITE)
@@ -203,18 +224,13 @@ class QLearningAgent(HeuristicAgent):
         legal = self._legal_actions(in_review, best_paper is not None)
 
         # TD update for the transition that ended at this state.
-        if self.learning and self._last_features is not None:
-            reward = self.academic_capital - self._last_capital
-            q_next = self.backend.q_values(features)
-            max_next = max((q_next[a] for a in legal), default=0.0)
-            target = reward + self.gamma * max_next
-            self.backend.update(self._last_features, self._last_action, target)
+        self._learn_transition(features, legal)
 
         action = self._select(features, legal)
 
         self._last_features = features
         self._last_action = int(action)
-        self._last_capital = self.academic_capital
+        self._remember_reward_baseline()
         self._pending_action = int(action)
         self._pending_paper = best_paper
 
@@ -240,17 +256,13 @@ class QLearningAgent(HeuristicAgent):
         legal = self._legal_continuous_actions(in_review, best_paper is not None)
 
         if self.learning and self._last_features is not None:
-            reward = self.academic_capital - self._last_capital
-            q_next = self.backend.q_values(features)
-            max_next = max((q_next[a] for a in legal), default=0.0)
-            target = reward + self.gamma * max_next
-            self.backend.update(self._last_features, self._last_action, target)
+            self._learn_transition(features, legal)
 
         action = self._select(features, legal)
 
         self._last_features = features
         self._last_action = int(action)
-        self._last_capital = self.academic_capital
+        self._remember_reward_baseline()
 
         if action in (QAction.CLAIM, QAction.CLAIM_NEW):
             return (CONTINUOUS_CLAIM, best_paper)
@@ -273,13 +285,55 @@ class QLearningAgent(HeuristicAgent):
             actions.append(QAction.CLAIM)
         return actions
 
+    def _learn_transition(self, features: np.ndarray, legal: list[int]) -> None:
+        """Apply one TD update for the transition ending in ``features``."""
+        if not self.learning or self._last_features is None:
+            return
+        reward = self._compute_reward()
+        q_next = self.backend.q_values(features)
+        max_next = max((q_next[a] for a in legal), default=0.0)
+        target = reward + self.gamma * max_next
+        self.backend.update(self._last_features, self._last_action, target)
+
     def end_episode(self) -> None:
         """Terminal flush: bootstrap-free update for the final transition."""
         if self.learning and self._last_features is not None:
-            reward = self.academic_capital - self._last_capital
-            self.backend.update(self._last_features, self._last_action, reward)
+            self.backend.update(
+                self._last_features, self._last_action, self._compute_reward()
+            )
         self._last_features = None
         self._last_action = None
+
+    # ---- reward ----------------------------------------------------------- #
+    def _peer_capitals(self) -> list[float]:
+        return [agent.academic_capital for agent in Agent.all_agents]
+
+    def _current_ac_rank(self) -> float:
+        return ac_percentile_rank(self.academic_capital, self._peer_capitals())
+
+    def _portfolio_accrual_rate(self) -> float:
+        """Share-weighted sum of accrual rates on papers this agent owns."""
+        total = 0.0
+        for paper in Agent.all_papers:
+            share = paper.share_distribution.get(self, 0.0)
+            if share:
+                total += share * paper.accrual_rate
+        return total
+
+    def _compute_reward(self) -> float:
+        delta_ac = self.academic_capital - self._last_capital
+        delta_rank = self._current_ac_rank() - self._last_rank
+        delta_accrual = self._portfolio_accrual_rate() - self._last_accrual_rate
+        return (
+            SIM.rl_reward_ac_weight * delta_ac
+            + SIM.rl_reward_rank_weight * delta_rank
+            + SIM.rl_reward_accrual_weight * delta_accrual
+        )
+
+    def _remember_reward_baseline(self) -> None:
+        self._last_capital = self.academic_capital
+        self._last_rank = self._current_ac_rank()
+        self._last_accrual_rate = self._portfolio_accrual_rate()
 
     # ---- action helpers --------------------------------------------------- #
     def _legal_actions(self, in_review: bool, has_reviewable: bool) -> list[int]:

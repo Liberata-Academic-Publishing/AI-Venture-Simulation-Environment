@@ -64,6 +64,7 @@ class Environment:
 
         self.papers = list(Agent.all_papers if papers is None else papers)
         Agent.all_papers = self.papers
+        Agent.all_agents = self.agents
         self._configure_agents()
 
     # ---- main loop -------------------------------------------------------

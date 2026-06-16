@@ -8,9 +8,10 @@ the CSV/JSON export.
 
 from __future__ import annotations
 
+import json
 import math
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from Paper import MIN_REVIEW_EFFORT_THRESHOLD
 
@@ -699,6 +700,111 @@ def plot_run_summary(history: "History", path: str | None = None, show: bool = F
     return _finish(fig, path, show)
 
 
+
+def _draw_episode_return(
+    ax,
+    episodes: list[int],
+    returns: list[float],
+    epsilon: list[float] | None = None,
+) -> None:
+    del epsilon  # kept for call-site compatibility; chart is raw returns only
+    if not episodes or not returns:
+        ax.text(0.5, 0.5, "No training episodes recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    ax.plot(episodes, returns, linewidth=1.5, color="#60a5fa")
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Mean episode return (final AC)")
+
+
+def plot_episode_return(
+    episodes: list[int],
+    returns: list[float],
+    epsilon: list[float] | None = None,
+    path: str | None = None,
+    show: bool = False,
+):
+    """Episode return curve for RL training (mean final AC per episode)."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_episode_return(ax, episodes, returns, epsilon)
+    ax.set_title("Episode return")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def _draw_avg_peer_review_time(
+    ax,
+    episodes: list[int],
+    avg_review_times: list[float],
+) -> None:
+    if not episodes or not avg_review_times:
+        ax.text(0.5, 0.5, "No peer review data recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    ax.plot(episodes, avg_review_times, linewidth=1.5, color="#34d399")
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Mean peer review time (timesteps)")
+
+
+def plot_avg_peer_review_time(
+    episodes: list[int],
+    avg_review_times: list[float],
+    path: str | None = None,
+    show: bool = False,
+):
+    """Average completed peer-review duration per training episode."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_avg_peer_review_time(ax, episodes, avg_review_times)
+    ax.set_title("Average peer review time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_avg_peer_review_time_from_log(
+    log_path: str,
+    png_path: str | None = None,
+    *,
+    show: bool = False,
+) -> str | None:
+    """Render ``avg_peer_review_time.png`` from a ``training_log.json`` file."""
+    if not os.path.exists(log_path):
+        return None
+    with open(log_path, encoding="utf-8") as fh:
+        log: list[dict[str, Any]] = json.load(fh)
+    if not log or "mean_review_effort" not in log[0]:
+        return None
+    episodes = [int(row["episode"]) for row in log]
+    avg_times = [float(row["mean_review_effort"]) for row in log]
+    if png_path is None:
+        png_path = os.path.join(os.path.dirname(log_path), "avg_peer_review_time.png")
+    plot_avg_peer_review_time(episodes, avg_times, png_path, show=show)
+    return png_path if os.path.exists(png_path) else None
+
+
+def plot_episode_return_from_log(
+    log_path: str,
+    png_path: str | None = None,
+    *,
+    show: bool = False,
+) -> str | None:
+    """Render ``episode_return.png`` from a ``training_log.json`` file."""
+    if not os.path.exists(log_path):
+        return None
+    with open(log_path, encoding="utf-8") as fh:
+        log: list[dict[str, Any]] = json.load(fh)
+    if not log:
+        return None
+    episodes = [int(row["episode"]) for row in log]
+    returns = [float(row["mean_return"]) for row in log]
+    epsilon = [float(row["epsilon"]) for row in log]
+    if png_path is None:
+        png_path = os.path.join(os.path.dirname(log_path), "episode_return.png")
+    plot_episode_return(episodes, returns, epsilon, png_path, show=show)
+    return png_path if os.path.exists(png_path) else None
+
+
 # ---- static gallery charts (dark-themed, transparent PNGs) ----------------
 #
 # The committed gallery (docs/) shows the *static* charts as images instead of
@@ -723,6 +829,33 @@ _DARK_RC = {
     "legend.edgecolor": "#30363d",
     "legend.framealpha": 0.85,
 }
+
+
+def render_episode_return_gallery(
+    episodes: list[int],
+    returns: list[float],
+    epsilon: list[float] | None,
+    outdir: str,
+) -> str | None:
+    """Render a dark-themed episode-return PNG for the static gallery."""
+    os.makedirs(outdir, exist_ok=True)
+    path = os.path.join(outdir, "episode_return.png")
+    with plt.rc_context(_DARK_RC):
+        plot_episode_return(episodes, returns, epsilon, path)
+    return path if os.path.exists(path) else None
+
+
+def render_avg_peer_review_time_gallery(
+    episodes: list[int],
+    avg_review_times: list[float],
+    outdir: str,
+) -> str | None:
+    """Render a dark-themed average peer-review-time PNG for the gallery."""
+    os.makedirs(outdir, exist_ok=True)
+    path = os.path.join(outdir, "avg_peer_review_time.png")
+    with plt.rc_context(_DARK_RC):
+        plot_avg_peer_review_time(episodes, avg_review_times, path)
+    return path if os.path.exists(path) else None
 
 
 def _has_review_behavior(history: "History") -> bool:

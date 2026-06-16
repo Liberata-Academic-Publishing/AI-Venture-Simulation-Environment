@@ -8,11 +8,12 @@ from collections import Counter
 from dataclasses import asdict
 
 from Agent import Agent
-from config import SIM, TRAIN, default_policy_path
+from config import SIM, TRAIN, TRAIN_DQN, default_dqn_policy_path, default_policy_path
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History
 from Paper import Paper
+from DQNAgent import DQNAgent, make_dqn_backend
 from QLearningAgent import QLearningAgent, make_backend
 from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 
@@ -20,6 +21,7 @@ from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 NUM_AGENTS = SIM.num_heuristic_agents
 NUM_TIMESTEPS = SIM.num_timesteps
 NUM_RL_AGENTS = SIM.num_rl_agents
+NUM_DQN_AGENTS = SIM.num_dqn_agents
 NUM_RANDOM_AGENTS = SIM.num_random_agents
 NUM_PROBABILISTIC_AGENTS = SIM.num_probabilistic_agents
 OUTPUT_DIR = SIM.output_dir
@@ -238,6 +240,8 @@ CHART_DESCRIPTIONS = {
     "writing_effort_distribution": "Total paper-writing effort by agent",
     "paper_writing_effort_distribution": "Writing effort per paper (frequency)",
     "paper_ac": "Accrued capital per paper over time",
+    "episode_return": "Episode return from RL training (if training_log.json exists)",
+    "avg_peer_review_time": "Average peer review time per training episode",
 }
 
 
@@ -266,6 +270,22 @@ def save_outputs(history: History, *, show: bool = False, open_charts: bool = Fa
         return
 
     paths = visualize.plot_all(history, OUTPUT_DIR, show=show)
+    training_log_path = os.path.join(OUTPUT_DIR, "training_log.json")
+    training_chart = visualize.plot_episode_return_from_log(
+        training_log_path,
+        os.path.join(OUTPUT_DIR, "episode_return.png"),
+        show=show,
+    )
+    if training_chart:
+        paths["episode_return"] = training_chart
+    review_time_chart = visualize.plot_avg_peer_review_time_from_log(
+        training_log_path,
+        os.path.join(OUTPUT_DIR, "avg_peer_review_time.png"),
+        show=show,
+    )
+    if review_time_chart:
+        paths["avg_peer_review_time"] = review_time_chart
+
     print("\nWrote charts to the runs/ folder:")
     for name, path in paths.items():
         description = CHART_DESCRIPTIONS.get(name, name)
@@ -330,6 +350,50 @@ def build_rl_agents(
     return agents
 
 
+def build_dqn_agents(
+    count: int,
+    *,
+    policy_path: str | None,
+    freeze: bool,
+) -> list[DQNAgent]:
+    """Create independent DQN agents (one private backend each)."""
+    if count <= 0:
+        return []
+
+    loaded = bool(policy_path) and os.path.exists(policy_path)
+    if policy_path and not loaded:
+        print(f"DQN: policy {policy_path} not found; starting from scratch.")
+
+    agents: list[DQNAgent] = []
+    for i in range(count):
+        backend = make_dqn_backend()
+        if loaded:
+            try:
+                backend.load(policy_path)
+            except (ValueError, EOFError, OSError, KeyError):
+                if i == 0:
+                    print(f"DQN: policy {policy_path} is incompatible; using scratch.")
+                loaded = False
+                backend = make_dqn_backend()
+        agents.append(
+            DQNAgent(
+                intrinsic_talent=_talent_for(i, count),
+                forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
+                name=f"DQN Agent {i + 1}",
+                backend=backend,
+                epsilon=0.0 if freeze else SIM.dqn_epsilon,
+                learning=not freeze,
+            )
+        )
+
+    source = (
+        f"loaded baseline {policy_path}" if loaded else "starting from scratch"
+    )
+    mode = "frozen (greedy)" if freeze else "learning online"
+    print(f"DQN: {count} independent agents, {source}, {mode}.")
+    return agents
+
+
 def build_random_agents(count: int) -> list[RandomAgent]:
     if count <= 0:
         return []
@@ -357,11 +421,14 @@ def build_simulation(
     num_agents: int = NUM_AGENTS,
     seed: int = SIM.seed,
     rl_agents: int = NUM_RL_AGENTS,
+    dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
     rl_policy_path: str | None = None,
     rl_freeze: bool = False,
+    dqn_policy_path: str | None = None,
+    dqn_freeze: bool = False,
     review_paradigm: str = SIM.review_paradigm,
 ) -> Environment:
     """Construct a simulation of heuristics plus independent RL agents."""
@@ -382,6 +449,13 @@ def build_simulation(
             backend_kind=rl_backend,
             policy_path=rl_policy_path,
             freeze=rl_freeze,
+        )
+    )
+    agents.extend(
+        build_dqn_agents(
+            dqn_agents,
+            policy_path=dqn_policy_path,
+            freeze=dqn_freeze,
         )
     )
 
@@ -423,7 +497,11 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--rl-agents", dest="rl_agents", type=int, default=NUM_RL_AGENTS,
-        metavar="N", help="Number of RL agents (0 disables RL).",
+        metavar="N", help="Number of tabular/linear RL agents (0 disables).",
+    )
+    parser.add_argument(
+        "--dqn-agents", dest="dqn_agents", type=int, default=NUM_DQN_AGENTS,
+        metavar="N", help="Number of deep Q-network agents (0 disables).",
     )
     parser.add_argument(
         "--random-agents", dest="random_agents", type=int,
@@ -456,12 +534,25 @@ def parse_args(argv=None):
         "--rl-freeze", dest="rl_freeze", action="store_true",
         help="Run RL agents greedily with no online learning.",
     )
+    parser.add_argument(
+        "--dqn-from-scratch", dest="dqn_from_scratch", action="store_true",
+        help="Start DQN agents from a blank network instead of the saved baseline.",
+    )
+    parser.add_argument(
+        "--dqn-policy", dest="dqn_policy", metavar="PATH", default=None,
+        help="Explicit DQN policy path (overrides the default baseline).",
+    )
+    parser.add_argument(
+        "--dqn-freeze", dest="dqn_freeze", action="store_true",
+        help="Run DQN agents greedily with no online learning.",
+    )
     return parser.parse_args(argv)
 
 
 def build_run_config(
     *,
     rl_agents: int = NUM_RL_AGENTS,
+    dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
@@ -476,6 +567,7 @@ def build_run_config(
     """
     config = asdict(SIM)
     config["num_rl_agents"] = rl_agents
+    config["num_dqn_agents"] = dqn_agents
     config["num_random_agents"] = random_agents
     config["num_probabilistic_agents"] = probabilistic_agents
     config["rl_backend"] = rl_backend
@@ -494,6 +586,12 @@ def build_run_config(
     config["train_num_heuristic"] = TRAIN.num_heuristic
     config["train_eps_start"] = TRAIN.eps_start
     config["train_eps_end"] = TRAIN.eps_end
+    config["train_dqn_episodes"] = TRAIN_DQN.episodes
+    config["train_dqn_timesteps"] = TRAIN_DQN.timesteps
+    config["train_dqn_num_dqn"] = TRAIN_DQN.num_dqn
+    config["train_dqn_num_heuristic"] = TRAIN_DQN.num_heuristic
+    config["train_dqn_eps_start"] = TRAIN_DQN.eps_start
+    config["train_dqn_eps_end"] = TRAIN_DQN.eps_end
     return config
 
 
@@ -502,6 +600,7 @@ def archive_run(
     title: str | None,
     *,
     rl_agents: int = NUM_RL_AGENTS,
+    dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
@@ -513,6 +612,7 @@ def archive_run(
         history,
         config=build_run_config(
             rl_agents=rl_agents,
+            dqn_agents=dqn_agents,
             random_agents=random_agents,
             probabilistic_agents=probabilistic_agents,
             rl_backend=rl_backend,
@@ -529,6 +629,7 @@ def prompt_and_archive(
     history: History,
     *,
     rl_agents: int = NUM_RL_AGENTS,
+    dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
@@ -553,6 +654,7 @@ def prompt_and_archive(
         history,
         name or None,
         rl_agents=rl_agents,
+        dqn_agents=dqn_agents,
         random_agents=random_agents,
         probabilistic_agents=probabilistic_agents,
         rl_backend=rl_backend,
@@ -568,15 +670,23 @@ def main(argv=None):
             and SIM.rl_autoload_policy):
         rl_policy_path = default_policy_path(args.rl_backend)
 
+    dqn_policy_path = args.dqn_policy
+    if (dqn_policy_path is None and not args.dqn_from_scratch
+            and SIM.dqn_autoload_policy):
+        dqn_policy_path = default_dqn_policy_path()
+
     history = History()
     env = build_simulation(
         history,
         rl_agents=args.rl_agents,
+        dqn_agents=args.dqn_agents,
         random_agents=args.random_agents,
         probabilistic_agents=args.probabilistic_agents,
         rl_backend=args.rl_backend,
         rl_policy_path=rl_policy_path,
         rl_freeze=args.rl_freeze,
+        dqn_policy_path=dqn_policy_path,
+        dqn_freeze=args.dqn_freeze,
         review_paradigm=args.review_paradigm,
     )
     for _ in range(NUM_TIMESTEPS):
@@ -593,6 +703,7 @@ def main(argv=None):
             history,
             args.name,
             rl_agents=args.rl_agents,
+            dqn_agents=args.dqn_agents,
             random_agents=args.random_agents,
             probabilistic_agents=args.probabilistic_agents,
             rl_backend=args.rl_backend,
@@ -602,6 +713,7 @@ def main(argv=None):
         prompt_and_archive(
             history,
             rl_agents=args.rl_agents,
+            dqn_agents=args.dqn_agents,
             random_agents=args.random_agents,
             probabilistic_agents=args.probabilistic_agents,
             rl_backend=args.rl_backend,
