@@ -67,6 +67,9 @@
     #ranking .rank { color: #8b98a5; text-align: right; }
     #ranking .kind { color: #c4cdd5; }
     #ranking .empty { font-size: 12px; color: #6b7280; }
+    #agentExtremes td.notes { color: #c4cdd5; line-height: 1.35; }
+    #agentExtremes td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #agentExtremes .bucket { color: #8b98a5; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
     /* Run configuration: separate, non-scrolling panels (one per config section)
        stacked in the sidebar below the feed and ranking. */
     .config-heading { font-size: 13px; color: #c4cdd5; font-weight: 600;
@@ -160,6 +163,7 @@
       <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
       <div class="panel" id="panel-quality"><h2>Paper quality vs accrued capital</h2><img class="chart-img" id="img-paper_quality_vs_ac" alt="Paper quality vs accrued capital"><canvas id="qualityChart"></canvas></div>
       <div class="panel" id="panel-effort-rate"><h2>Writing effort vs accrual rate</h2><img class="chart-img" id="img-writing_effort_vs_rate" alt="Writing effort vs accrual rate"><canvas id="effortRateChart"></canvas></div>
+      <div class="panel" id="panel-paper-effort-time"><h2>Paper-writing effort over time</h2><img class="chart-img" id="img-paper_writing_effort_over_time" alt="Paper-writing effort over time"><canvas id="paperEffortTimeChart"></canvas></div>
       <div class="panel" id="panel-paperac"><h2>Per-paper accrued capital</h2><img class="chart-img" id="img-paper_ac" alt="Per-paper accrued capital"><canvas id="paperAcChart"></canvas></div>
       <div class="panel" id="panel-choices"><h2>Agent choices (write / review / finish)</h2><img class="chart-img" id="img-choice_breakdown" alt="Agent choices"><canvas id="choiceChart"></canvas></div>
       <div class="panel" id="panel-effort-hist"><h2>Completed peer reviews by effort</h2><img class="chart-img" id="img-review_effort_histogram" alt="Completed peer reviews by effort"><canvas id="effortHistChart"></canvas></div>
@@ -186,6 +190,13 @@
             <tbody id="ranking"></tbody>
           </table>
         </div>
+      </div>
+      <div class="panel" id="panel-agent-extremes">
+        <h2>Top/bottom agent diagnostics</h2>
+        <table>
+          <thead><tr><th>Band</th><th>Agent</th><th>Type</th><th>AC</th><th>Notes</th></tr></thead>
+          <tbody id="agentExtremes"></tbody>
+        </table>
       </div>
       <div class="panel" id="panel-reward-curve">
         <h2>Review accrual bump vs effort</h2>
@@ -581,12 +592,13 @@
     };
 
     let agentChart, aggChart, actionChart, groupChart;
-    let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart, paperWritingChart;
+    let reviewChart, paperAcChart, choiceChart, effortHistChart, effortScatterChart, writingChart, paperWritingChart, paperEffortTimeChart;
     let marketplaceChart, reputationChart, qualityChart, effortRateChart, rewardCurveChart;
     const statusEl = document.getElementById("status");
     const ratesEl = document.getElementById("actionRates");
     const feedEl = document.getElementById("feed");
     const rankingEl = document.getElementById("ranking");
+    const agentExtremesEl = document.getElementById("agentExtremes");
     const feedFilterEl = document.getElementById("feedFilter");
     const configPanelsEl = document.getElementById("configPanels");
     const groupSummaryEl = document.getElementById("groupSummary");
@@ -865,6 +877,23 @@
       });
     }
 
+    // Scatter of paper-writing effort at publication over simulation time.
+    function setupPaperEffortTimeChart(groups) {
+      if (paperEffortTimeChart) paperEffortTimeChart.destroy();
+      paperEffortTimeChart = new Chart(document.getElementById("paperEffortTimeChart"), {
+        type: "scatter",
+        data: { datasets: groups.map((group, i) => ({
+          label: kindLabel(group), data: [],
+          backgroundColor: color(i) + "aa", borderColor: color(i),
+          pointRadius: 3,
+        })) },
+        options: { ...baseOpts, plugins: { legend: legendOpts },
+          scales: { ...baseOpts.scales,
+            x: { ...baseOpts.scales.x, type: "linear", title: axisTitle("Timestep paper appeared") },
+            y: { ...baseOpts.scales.y, title: axisTitle("Writing effort at publication") } } },
+      });
+    }
+
     // Static charts are pre-rendered (dark, transparent) PNGs. Each static panel
     // maps to its PNG name + the canvas used only as a fallback for legacy runs
     // archived before charts were imaged.
@@ -875,6 +904,7 @@
       { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
       { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
       { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },
+      { panel: "panel-paper-effort-time", chart: "paper_writing_effort_over_time", canvasId: "paperEffortTimeChart", imgId: "img-paper_writing_effort_over_time" },
       { panel: "panel-paperac", chart: "paper_ac", canvasId: "paperAcChart", imgId: "img-paper_ac" },
       { panel: "panel-choices", chart: "choice_breakdown", canvasId: "choiceChart", imgId: "img-choice_breakdown" },
       { panel: "panel-effort-hist", chart: "review_effort_histogram", canvasId: "effortHistChart", imgId: "img-review_effort_histogram" },
@@ -991,6 +1021,28 @@
         setupEffortRateChart();
         effortRateChart.data.datasets[0].data = effortRatePoints;
         effortRateChart.update();
+      }
+
+      // Paper-writing effort over time, colored by author agent type.
+      const paperFirstSeen = data.paper_first_seen_timestep || {};
+      const paperAuthors = data.paper_authors || {};
+      const agentGroups = data.agent_groups || {};
+      const paperEffortPoints = Object.keys(effortMap)
+        .filter(name => name in paperFirstSeen)
+        .map(name => {
+          const group = agentGroups[paperAuthors[name]] || "Agent";
+          return { x: paperFirstSeen[name], y: effortMap[name], group };
+        });
+      setPanel("panel-paper-effort-time", paperEffortPoints.length > 0);
+      if (paperEffortPoints.length) {
+        const effortGroups = [...new Set(paperEffortPoints.map(p => p.group))].sort();
+        setupPaperEffortTimeChart(effortGroups);
+        effortGroups.forEach((group, i) => {
+          paperEffortTimeChart.data.datasets[i].data = paperEffortPoints
+            .filter(p => p.group === group)
+            .map(p => ({ x: p.x, y: p.y }));
+        });
+        paperEffortTimeChart.update();
       }
 
       // Per-paper accrued capital. The full series may be trimmed to the top
@@ -1169,6 +1221,37 @@
       ).join("");
     }
 
+    function renderAgentExtremes(data) {
+      const rows = [...(data.agent_outcome_summary || [])]
+        .sort((a, b) => Number(b.final_capital || 0) - Number(a.final_capital || 0));
+      setPanel("panel-agent-extremes", rows.length > 0);
+      if (!rows.length) {
+        agentExtremesEl.innerHTML = "";
+        return;
+      }
+
+      const top = rows.slice(0, 3).map(row => ({ ...row, bucket: "Top" }));
+      const bottom = rows.slice(-3).reverse().map(row => ({ ...row, bucket: "Bottom" }));
+      const actionText = (row) => {
+        const actions = row.most_common_actions || [];
+        if (!actions.length) return "no actions";
+        return actions.map(a => `${String(a.kind || "").replace(/_/g, " ")} (${a.count || 0})`).join(", ");
+      };
+      const notes = (row) =>
+        `${row.papers_authored || 0} papers, ${row.completed_reviews || 0} reviews ` +
+        `(good ${row.good_faith_reviews || 0} / bad ${row.bad_faith_reviews || 0}), ` +
+        `avg effort ${Number(row.average_review_effort || 0).toFixed(2)}; ` +
+        `${actionText(row)}`;
+
+      agentExtremesEl.innerHTML = top.concat(bottom).map(row =>
+        `<tr><td class="bucket">${row.bucket}</td>` +
+        `<td>${row.agent || ""}</td>` +
+        `<td>${kindLabel(row.group)}</td>` +
+        `<td class="num">${Number(row.final_capital || 0).toFixed(1)}</td>` +
+        `<td class="notes">${notes(row)}</td></tr>`
+      ).join("");
+    }
+
     function setTiles(s, i) {  // i = day index, or use last value when omitted
       const v = (arr) => (i == null ? last(arr) : at(arr, i));
       document.getElementById("t-total").textContent  = v(s.total_capital).toFixed(1);
@@ -1287,6 +1370,7 @@
       setTiles(data.scalars || {});
 
       renderRanking(data);
+      renderAgentExtremes(data);
 
       // Reset the agent filter on a new run, then show the most recent actions
       // (newest first), capped for performance.
