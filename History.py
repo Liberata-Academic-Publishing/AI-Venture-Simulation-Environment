@@ -133,6 +133,7 @@ class History:
         self.paper_reviewed: dict[str, bool] = {}
         self.paper_writing_effort: dict[str, float] = {}
         self.paper_accrual_rate: dict[str, float] = {}
+        self.paper_first_seen_timestep: dict[str, int] = {}
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
@@ -187,6 +188,7 @@ class History:
             )
             for paper in env.papers:
                 label = self._label(paper, "Paper")
+                self.paper_first_seen_timestep.setdefault(label, env.timestep)
                 self.paper_authors[label] = self._label(paper.author, "Agent")
                 self.paper_quality[label] = float(getattr(paper, "quality", 0.0))
                 self.paper_reviewed[label] = bool(getattr(paper, "reviewed", False))
@@ -321,6 +323,7 @@ class History:
             "paper_reviewed": dict(self.paper_reviewed),
             "paper_writing_effort": dict(self.paper_writing_effort),
             "paper_accrual_rate": dict(self.paper_accrual_rate),
+            "paper_first_seen_timestep": dict(self.paper_first_seen_timestep),
             "actions": [
                 {"timestep": d, "day": d, "agent": a, "kind": k, "paper": p}
                 for (d, a, k, p) in self.actions
@@ -348,6 +351,7 @@ class History:
             ],
             "action_counts": dict(self.action_counts),
             "agent_group_summary": self.agent_group_summary(),
+            "agent_outcome_summary": self.agent_outcome_summary(),
         }
 
     def agent_group_summary(self) -> dict[str, dict[str, Any]]:
@@ -442,6 +446,73 @@ class History:
             output[group] = summary
         return output
 
+    def agent_outcome_summary(self) -> list[dict[str, Any]]:
+        """Per-agent final outcomes for interpreting top/bottom performers."""
+        papers_authored = Counter(self.paper_authors.values())
+        review_counts: Counter[str] = Counter()
+        good_counts: Counter[str] = Counter()
+        bad_counts: Counter[str] = Counter()
+        review_effort: Counter[str] = Counter()
+        writing_effort: Counter[str] = Counter()
+        actions_by_agent: dict[str, Counter[str]] = {}
+
+        for _, agent_label, _, effort, review_kind in self.completed_reviews:
+            review_counts[agent_label] += 1
+            review_effort[agent_label] += float(effort)
+            if review_kind == GOOD_FAITH_REVIEW:
+                good_counts[agent_label] += 1
+            elif review_kind == BAD_FAITH_REVIEW:
+                bad_counts[agent_label] += 1
+
+        for _, agent_label, effort, _ in self.writing_efforts:
+            writing_effort[agent_label] += float(effort)
+
+        for _, agent_label, kind, _ in self.actions:
+            actions_by_agent.setdefault(agent_label, Counter())[kind] += 1
+
+        agent_labels = set(self.agent_capital)
+        agent_labels.update(self.agent_groups)
+        agent_labels.update(papers_authored)
+        agent_labels.update(review_counts)
+        agent_labels.update(writing_effort)
+        agent_labels.update(actions_by_agent)
+
+        rows: list[dict[str, Any]] = []
+        for agent_label in sorted(agent_labels):
+            capital_series = self.agent_capital.get(agent_label, [])
+            review_series = self.agent_review_history.get(agent_label, [])
+            epsilon_series = self.agent_review_epsilon_history.get(agent_label, [])
+            reviews = int(review_counts[agent_label])
+            action_counter = actions_by_agent.get(agent_label, Counter())
+            rows.append({
+                "agent": agent_label,
+                "group": self.agent_groups.get(agent_label, "Agent"),
+                "final_capital": float(capital_series[-1]) if capital_series else 0.0,
+                "papers_authored": int(papers_authored[agent_label]),
+                "completed_reviews": reviews,
+                "good_faith_reviews": int(good_counts[agent_label]),
+                "bad_faith_reviews": int(bad_counts[agent_label]),
+                "total_review_effort": float(review_effort[agent_label]),
+                "average_review_effort": (
+                    float(review_effort[agent_label]) / reviews if reviews else 0.0
+                ),
+                "total_writing_effort": float(writing_effort[agent_label]),
+                "peer_review_history": (
+                    float(review_series[-1]) if review_series else 0.0
+                ),
+                "peer_review_epsilon": (
+                    float(epsilon_series[-1]) if epsilon_series else 0.0
+                ),
+                "actions": dict(action_counter),
+                "most_common_actions": [
+                    {"kind": kind, "count": int(count)}
+                    for kind, count in action_counter.most_common(3)
+                ],
+            })
+
+        rows.sort(key=lambda row: row["final_capital"], reverse=True)
+        return rows
+
     def to_gallery_dict(self) -> dict[str, Any]:
         """Slim payload for the static gallery.
 
@@ -459,7 +530,11 @@ class History:
             "agent_capital": {k: list(v) for k, v in self.agent_capital.items()},
             "agent_groups": dict(self.agent_groups),
             "agent_group_summary": self.agent_group_summary(),
+            "agent_outcome_summary": self.agent_outcome_summary(),
             "action_counts": dict(self.action_counts),
+            "paper_authors": dict(self.paper_authors),
+            "paper_writing_effort": dict(self.paper_writing_effort),
+            "paper_first_seen_timestep": dict(self.paper_first_seen_timestep),
             # One value per agent: the final peer-review reputation, so the
             # ranking table keeps its "reliability" column without shipping the
             # full per-timestep reputation series (that chart is now a PNG).
@@ -513,6 +588,10 @@ class History:
         history.paper_reviewed = dict(data.get("paper_reviewed") or {})
         history.paper_writing_effort = dict(data.get("paper_writing_effort") or {})
         history.paper_accrual_rate = dict(data.get("paper_accrual_rate") or {})
+        history.paper_first_seen_timestep = {
+            k: int(v)
+            for k, v in (data.get("paper_first_seen_timestep") or {}).items()
+        }
 
         def _ts(row: dict[str, Any]) -> int:
             return int(row.get("timestep", row.get("day", 0)))

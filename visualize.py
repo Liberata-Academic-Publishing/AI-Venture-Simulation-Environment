@@ -366,6 +366,78 @@ def plot_writing_effort_vs_rate(
     return _finish(fig, path, show)
 
 
+def _paper_writing_effort_over_time_points(
+    history: "History",
+) -> list[tuple[int, float, str]]:
+    """Return (first-seen timestep, writing effort, author group) per paper."""
+    efforts = getattr(history, "paper_writing_effort", {})
+    first_seen = getattr(history, "paper_first_seen_timestep", {})
+    authors = getattr(history, "paper_authors", {})
+    groups = getattr(history, "agent_groups", {})
+    paper_ac = getattr(history, "paper_ac", {})
+    days = getattr(history, "days", [])
+
+    points: list[tuple[int, float, str]] = []
+    for paper, effort in efforts.items():
+        timestep = first_seen.get(paper)
+        if timestep is None:
+            series = paper_ac.get(paper, [])
+            for i, value in enumerate(series):
+                if value > 0:
+                    timestep = days[i] if i < len(days) else i
+                    break
+        if timestep is None:
+            continue
+        author = authors.get(paper)
+        group = groups.get(author, "Agent")
+        points.append((int(timestep), float(effort), group))
+    return points
+
+
+def _draw_paper_writing_effort_over_time(ax, history: "History") -> None:
+    """Show whether papers are being published with more/less effort over time."""
+    points = _paper_writing_effort_over_time_points(history)
+    if not points:
+        ax.text(
+            0.5, 0.5, "No per-paper writing effort over time recorded",
+            ha="center", va="center",
+        )
+        ax.set_axis_off()
+        return
+
+    points_by_group: dict[str, list[tuple[int, float]]] = {}
+    for timestep, effort, group in points:
+        points_by_group.setdefault(group, []).append((timestep, effort))
+
+    cmap = plt.get_cmap("tab10")
+    for i, group in enumerate(sorted(points_by_group)):
+        xs, ys = zip(*points_by_group[group])
+        ax.scatter(
+            xs,
+            ys,
+            s=22,
+            alpha=0.65,
+            color=cmap(i % 10),
+            edgecolors="#1e293b",
+            linewidths=0.3,
+            label=group,
+        )
+    ax.set_xlabel("Timestep paper appeared")
+    ax.set_ylabel("Writing effort at publication")
+    ax.legend(fontsize=8)
+
+
+def plot_paper_writing_effort_over_time(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Per-paper writing effort at publication, colored by author type."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_paper_writing_effort_over_time(ax, history)
+    ax.set_title("Paper-writing effort over time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _draw_review_reputation(ax, history: "History") -> None:
     """Per-agent peer-review reputation over time, with the mean highlighted."""
     series_map = getattr(history, "agent_review_history", {})
@@ -918,6 +990,9 @@ _GALLERY_CHARTS = (
     ("writing_effort_vs_rate",
      lambda h: any(l in h.paper_accrual_rate for l in h.paper_writing_effort),
      plot_writing_effort_vs_rate),
+    ("paper_writing_effort_over_time",
+     lambda h: bool(_paper_writing_effort_over_time_points(h)),
+     plot_paper_writing_effort_over_time),
     ("paper_ac", lambda h: bool(h.paper_ac), plot_paper_ac),
     ("choice_breakdown", lambda h: bool(_choice_tallies(h)), plot_choice_breakdown),
     ("review_effort_histogram",
@@ -994,6 +1069,11 @@ def plot_all(
         ),
         "writing_effort_vs_rate": plot_writing_effort_vs_rate(
             history, os.path.join(outdir, "writing_effort_vs_rate.png"), show=show
+        ),
+        "paper_writing_effort_over_time": plot_paper_writing_effort_over_time(
+            history,
+            os.path.join(outdir, "paper_writing_effort_over_time.png"),
+            show=show,
         ),
         "review_reputation": plot_review_reputation(
             history, os.path.join(outdir, "review_reputation.png"), show=show
