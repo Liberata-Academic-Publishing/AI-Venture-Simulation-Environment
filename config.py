@@ -29,7 +29,7 @@ class SimConfig:
     num_heuristic_agents: int = 10
     num_rl_agents: int = 10
     num_dqn_agents: int = 0
-    num_random_agents: int = 0
+    num_random_agents: int = 10
     num_probabilistic_agents: int = 0
     num_timesteps: int = 2000
     seed: int = 7
