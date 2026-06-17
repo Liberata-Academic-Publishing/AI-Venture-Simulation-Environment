@@ -69,6 +69,7 @@
     #ranking .empty { font-size: 12px; color: #6b7280; }
     #agentExtremes td.notes { color: #c4cdd5; line-height: 1.35; }
     #agentExtremes td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #agentExtremes td.compact { color: #c4cdd5; font-variant-numeric: tabular-nums; }
     #agentExtremes .bucket { color: #8b98a5; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
     /* Run configuration: separate, non-scrolling panels (one per config section)
        stacked in the sidebar below the feed and ranking. */
@@ -194,7 +195,7 @@
       <div class="panel" id="panel-agent-extremes">
         <h2>Top/bottom agent diagnostics</h2>
         <table>
-          <thead><tr><th>Band</th><th>Agent</th><th>Type</th><th>AC</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Band</th><th>Agent</th><th>Type</th><th>AC</th><th>Talent/Q</th><th>Papers</th><th>Reviews</th><th>Avg Effort</th><th>Top Actions</th></tr></thead>
           <tbody id="agentExtremes"></tbody>
         </table>
       </div>
@@ -220,6 +221,7 @@
     // Friendly labels for agent classes (from agent_groups in History).
     const KIND_LABELS = {
       HeuristicAgent: "Heuristic", QLearningAgent: "RL",
+      DiscreteQLearningAgent: "Discrete RL", DQNAgent: "DQN",
       RandomAgent: "Random", ProbabilisticDiscreteAgent: "Probabilistic",
     };
     const kindLabel = (cls) =>
@@ -314,13 +316,21 @@
         ["max_review_accrual_bump", "Max review bump"],
         ["review_sigmoid_midpoint", "Sigmoid midpoint"],
         ["review_sigmoid_steepness", "Sigmoid steepness"],
+        ["review_jump_threshold", "Jump threshold"],
+        ["review_jump_bump", "Jump bump"],
+        ["review_jump_width", "Jump width"],
         ["base_review_accrual_bump", "Base accrual bump"],
         ["first_extra_day_bump", "First extra-timestep bump"],
       ]],
       ["Publishing", [
         ["paper_threshold", "Paper threshold"],
+        ["continuous_publishing", "Continuous publishing"],
+        ["continuous_paper_timesteps", "Continuous paper timesteps"],
         ["discrete_paper_timesteps", "Discrete paper timesteps"],
         ["discrete_writing_effort_per_timestep", "Discrete writing / timestep"],
+        ["paper_effort_mode", "Paper effort mode"],
+        ["paper_effort_min", "Paper effort min"],
+        ["paper_effort_max", "Paper effort max"],
       ]],
       ["Control agents", [
         ["random_claim_probability", "Random claim probability"],
@@ -339,6 +349,9 @@
         ["talent_min", "Talent min"],
         ["talent_max", "Talent max"],
         ["policies_dir", "Policies dir"],
+      ]],
+      ["Export", [
+        ["gallery_action_limit", "Gallery action limit"],
       ]],
       ["Training configuration", [
         ["train_episodes", "Episodes"],
@@ -430,13 +443,24 @@
       const minBump = cfgNum(config, "min_review_accrual_bump", 0.05);
       const maxBump = cfgNum(config, "max_review_accrual_bump", 0.35);
       const span = Math.max(0.0, maxBump - minBump);
-      return (minBump + span * normalizedSigmoid(effort, config)) * qMult;
+      let bump = minBump + span * normalizedSigmoid(effort, config);
+      if (curve === "jump") {
+        const jumpThreshold = cfgNum(config, "review_jump_threshold", 15.0);
+        const jumpBump = Math.max(0.0, cfgNum(config, "review_jump_bump", 0.5));
+        const jumpWidth = Math.max(1e-9, cfgNum(config, "review_jump_width", 0.75));
+        const jump = 1.0 / (1.0 + Math.exp(-(effort - jumpThreshold) / jumpWidth));
+        bump += jumpBump * jump;
+      }
+      return bump * qMult;
     }
     function rewardCurveMaxEffort(config) {
       const threshold = cfgNum(config, "min_review_effort_threshold", 2.0);
       const goodTs = cfgNum(config, "good_review_timesteps", 5.0);
       const curve = cfgStr(config, "review_effort_curve", "log").trim().toLowerCase();
       if (curve === "log") return Math.max(goodTs * 4, threshold + 15, 20);
+      if (curve === "jump") {
+        return Math.max(goodTs * 2.5, cfgNum(config, "review_jump_threshold", 15.0) + 5);
+      }
       return Math.max(goodTs * 2.5, threshold + 8);
     }
     function rewardCurvePoints(config) {
@@ -463,7 +487,9 @@
       const paradigm = cfgStr(config, "review_paradigm", "continuous");
       const curveLabel = curve === "log"
         ? "log: base + first_extra × log₂(1 + extra effort)"
-        : "sigmoid: min + (max − min) × normalized sigmoid";
+        : curve === "jump"
+          ? "jump: sigmoid baseline + high-effort threshold bonus"
+          : "sigmoid: min + (max − min) × normalized sigmoid";
       captionEl.textContent =
         `${curveLabel} · quality 1.0 · new rate = base × (1 + bump)`;
 
@@ -657,6 +683,17 @@
         day[a.kind] = (day[a.kind] || 0) + 1;
       }
       return out;
+    }
+    function dayCountsFromData(data) {
+      const compact = data && data.action_counts_by_timestep;
+      if (compact && Object.keys(compact).length) {
+        const out = {};
+        for (const [day, counts] of Object.entries(compact)) {
+          out[Number(day)] = { ...counts };
+        }
+        return out;
+      }
+      return dayCounts((data && data.actions) || []);
     }
 
     // One day's normalized share (0–100) for `kind` given that day's counts.
@@ -1237,18 +1274,17 @@
         if (!actions.length) return "no actions";
         return actions.map(a => `${String(a.kind || "").replace(/_/g, " ")} (${a.count || 0})`).join(", ");
       };
-      const notes = (row) =>
-        `${row.papers_authored || 0} papers, ${row.completed_reviews || 0} reviews ` +
-        `(good ${row.good_faith_reviews || 0} / bad ${row.bad_faith_reviews || 0}), ` +
-        `avg effort ${Number(row.average_review_effort || 0).toFixed(2)}; ` +
-        `${actionText(row)}`;
 
       agentExtremesEl.innerHTML = top.concat(bottom).map(row =>
         `<tr><td class="bucket">${row.bucket}</td>` +
         `<td>${row.agent || ""}</td>` +
         `<td>${kindLabel(row.group)}</td>` +
         `<td class="num">${Number(row.final_capital || 0).toFixed(1)}</td>` +
-        `<td class="notes">${notes(row)}</td></tr>`
+        `<td class="compact">${Number(row.talent || 0).toFixed(2)} / ${Number(row.average_paper_quality || 0).toFixed(2)}</td>` +
+        `<td class="num">${row.papers_authored || 0}</td>` +
+        `<td class="compact">${row.completed_reviews || 0} (${row.good_faith_reviews || 0}/${row.bad_faith_reviews || 0})</td>` +
+        `<td class="num">${Number(row.average_review_effort || 0).toFixed(2)}</td>` +
+        `<td class="notes">${actionText(row)}</td></tr>`
       ).join("");
     }
 
@@ -1352,7 +1388,7 @@
       aggChart.update();
 
       // Action mix: normalize each day's kind-counts to a 0–100% share.
-      const byDay = dayCounts(data.actions);
+      const byDay = dayCountsFromData(data);
       let counts = data.action_counts;
       if (!counts || !Object.keys(counts).length) {  // older runs: tally from actions
         counts = {};
@@ -1473,7 +1509,7 @@
       replay = {
         days: data.days || [], s: data.scalars || {},
         agentCap: data.agent_capital || {}, byDay,
-        byDayCounts: dayCounts(data.actions), runningCounts: {},
+        byDayCounts: dayCountsFromData(data), runningCounts: {},
         i: 0, title: currentTitle,
       };
       pauseBtn.disabled = false;
