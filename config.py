@@ -29,8 +29,8 @@ class SimConfig:
     num_heuristic_agents: int = 10
     num_rl_agents: int = 10
     num_dqn_agents: int = 0
-    num_random_agents: int = 10
-    num_probabilistic_agents: int = 0
+    num_random_agents: int = 0
+    num_probabilistic_agents: int = 10
     num_timesteps: int = 2000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
@@ -65,7 +65,7 @@ class SimConfig:
     history_price_scale: float = 0.5    # better reviewer history -> larger offered share
 
     # --- Effort & reward model -------------------------------------------
-    review_paradigm: str = "continuous"       # "continuous" | "discrete"
+    review_paradigm: str = "discrete"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
     writing_effort_per_timestep: float = 1.0    # continuous writing effort per timestep
     min_review_effort_threshold: float = 2.0    # reward cliff: below this earns 0
@@ -154,9 +154,22 @@ class TrainDQNConfig:
     eps_end: float = 0.05
 
 
+@dataclass(frozen=True)
+class TrainDiscreteConfig:
+    """Defaults for the discrete RL harness (train_discrete_rl.py)."""
+
+    episodes: int = 200
+    timesteps: int = 1000
+    num_rl: int = 10
+    num_heuristic: int = 0
+    eps_start: float = 1.0
+    eps_end: float = 0.05
+
+
 SIM = SimConfig()
 TRAIN = TrainConfig()
 TRAIN_DQN = TrainDQNConfig()
+TRAIN_DISCRETE = TrainDiscreteConfig()
 
 
 def default_policy_path(backend_kind: str) -> str:
@@ -172,3 +185,8 @@ def default_policy_path(backend_kind: str) -> str:
 def default_dqn_policy_path() -> str:
     """Canonical on-disk path for a trained DQN policy."""
     return os.path.join(SIM.policies_dir, "policy_dqn.pkl")
+
+
+def default_discrete_policy_path(backend_kind: str) -> str:
+    """Canonical path for a discrete 3-action Q policy (``train_discrete_rl.py``)."""
+    return os.path.join(SIM.policies_dir, f"policy_{backend_kind}_discrete.pkl")

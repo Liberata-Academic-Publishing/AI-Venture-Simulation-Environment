@@ -752,6 +752,111 @@ class ContinuousThresholdPublishingTest(unittest.TestCase):
         self.assertGreater(agent.paper_progress, 0.0)
 
 
+class DiscreteQLearningAgentTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+        Agent.all_agents = []
+
+    def test_choose_review_kind_uses_q_pending_kind(self):
+        from DiscreteQLearningAgent import DiscreteQLearningAgent
+
+        author = ScriptAgent("author")
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        agent = DiscreteQLearningAgent(intrinsic_talent=1.0, learning=False)
+        agent._pending_review_kind = BAD_FAITH_REVIEW
+
+        self.assertEqual(agent.choose_review_kind(paper), BAD_FAITH_REVIEW)
+        self.assertIsNone(agent._pending_review_kind)
+
+    def test_greedy_q_selects_bad_faith_claim(self):
+        import numpy as np
+
+        from DiscreteQLearningAgent import (
+            DiscreteQLearningAgent,
+            DiscreteTabularQ,
+        )
+
+        author = ScriptAgent("author")
+        reviewer = DiscreteQLearningAgent(intrinsic_talent=1.0, learning=False)
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        paper.update_price_table([author, reviewer], 1.0, 0.0)
+        Agent.all_papers = [paper]
+
+        backend = DiscreteTabularQ()
+        _, best_share, best_ac = reviewer._best_reviewable()
+        features = reviewer._features(best_share, best_ac)
+        key = backend._key(features)
+        backend.table[key] = np.array([0.0, 10.0, 1.0], dtype=np.float64)
+        reviewer.backend = backend
+
+        claimed = reviewer.choose_marketplace_action()
+        self.assertIs(claimed, paper)
+        self.assertEqual(reviewer.choose_review_kind(paper), BAD_FAITH_REVIEW)
+
+    def test_discrete_policy_rejects_continuous_q_table(self):
+        import pickle
+        import tempfile
+
+        from DiscreteQLearningAgent import DiscreteTabularQ, NUM_DISCRETE_ACTIONS
+        from QLearningAgent import NUM_ACTIONS
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as fh:
+            path = fh.name
+            pickle.dump(
+                {
+                    "alpha": 0.1,
+                    "buckets": 5,
+                    "table": {(0,) * 9: [0.0] * NUM_ACTIONS},
+                },
+                fh,
+            )
+
+        backend = DiscreteTabularQ()
+        try:
+            with self.assertRaises(ValueError):
+                backend.load(path)
+        finally:
+            os.remove(path)
+
+        self.assertEqual(NUM_DISCRETE_ACTIONS, 3)
+
+    def test_discrete_rl_good_faith_review_runs_five_timesteps(self):
+        from DiscreteQLearningAgent import (
+            DiscreteQLearningAgent,
+            DiscreteTabularQ,
+        )
+
+        author = ScriptAgent("author")
+        reviewer = DiscreteQLearningAgent(intrinsic_talent=1.0, learning=False)
+        paper = _listed_paper(author, quality=1.0, current_ac=100.0)
+        paper.update_price_table([author, reviewer], 1.0, 0.0)
+        Agent.all_papers = [paper]
+
+        import numpy as np
+
+        backend = DiscreteTabularQ()
+        _, best_share, best_ac = reviewer._best_reviewable()
+        features = reviewer._features(best_share, best_ac)
+        key = backend._key(features)
+        backend.table[key] = np.array([0.0, 0.0, 10.0], dtype=np.float64)
+        reviewer.backend = backend
+
+        history = History()
+        env = Environment(
+            agents=[author, reviewer],
+            papers=Agent.all_papers,
+            history=history,
+            review_paradigm="discrete",
+        )
+
+        env.run(int(GOOD_REVIEW_TIMESTEPS))
+
+        self.assertTrue(paper.reviewed)
+        self.assertEqual(reviewer.last_review_kind, GOOD_FAITH_REVIEW)
+        self.assertEqual(paper.review_records[-1]["review_kind"], GOOD_FAITH_REVIEW)
+        self.assertEqual(history.action_counts["good_faith_review"], 1)
+
+
 class QLearningRewardTest(unittest.TestCase):
     def test_ac_percentile_rank_handles_ties(self):
         from QLearningAgent import ac_percentile_rank

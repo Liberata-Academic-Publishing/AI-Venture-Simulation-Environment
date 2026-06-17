@@ -47,7 +47,9 @@ CLI flags for one-off overrides.
   both `run_simulation.py` and the static `docs/` gallery compare heuristic,
   random, probabilistic, and RL agent outcomes.
 - **RL settings** live in `SimConfig` too (`rl_backend`, `rl_epsilon`,
-  `rl_gamma`, reward weights); tabular/linear RL uses `train_rl.py`.
+  `rl_gamma`, reward weights). Continuous tabular/linear RL uses `train_rl.py`;
+  discrete 3-action RL (write / bad claim / good claim) uses
+  `train_discrete_rl.py` and `DiscreteQLearningAgent`.
 - **DQN settings** are separate (`num_dqn_agents`, `dqn_*` hyperparameters);
   train with `train_dqn.py`, policies saved to `policies/policy_dqn.pkl`.
 
@@ -58,7 +60,7 @@ CLI flags for one-off overrides.
 - `Agent.py` - abstract `Agent` base + the action protocol: `write_paper`,
   `peer_review`, `finish_review_write_paper`, `finish_review_peer_review`.
   `ActionRecord` describes one turn. `Agent.all_papers` is a shared class list.
-- `HeuristicAgent.py`, `QLearningAgent.py`, `DQNAgent.py`, `RandomAgent.py` - agent variants,
+- `HeuristicAgent.py`, `QLearningAgent.py`, `DiscreteQLearningAgent.py`, `DQNAgent.py`, `RandomAgent.py` - agent variants,
   including random controls and discrete-only probability agents.
 - `Paper.py` - paper economics, reviews, and accrual; defines
   `MIN_REVIEW_EFFORT_THRESHOLD`, `REVIEW_EFFORT_PER_DAY`.
@@ -66,7 +68,8 @@ CLI flags for one-off overrides.
 - `History.py` - run logging and metrics (e.g. `gini`).
 - `run_simulation.py` - main entry point (run a sim, print summary, optionally
   archive to the `docs/` gallery).
-- `train_rl.py` - self-play RL training + greedy evaluation; auto-saves policies.
+- `train_rl.py` - continuous self-play RL training + greedy evaluation.
+- `train_discrete_rl.py` - discrete 3-action RL; saves `policies/policy_<backend>_discrete.pkl`.
 - `train_dqn.py` - DQN self-play training; auto-saves to `policies/policy_dqn.pkl`.
 - `visualize.py` - charts and summary figures for saved runs.
 - `docs/` - static GitHub Pages gallery of saved runs (`docs/data/<run_id>/`).
@@ -81,10 +84,15 @@ python run_simulation.py --name "my run"         # save non-interactively
 python run_simulation.py --review-paradigm discrete --random-agents 5 --no-archive
 python run_simulation.py --rl-agents 20 --rl-backend tabular
 
-# Train the RL agent (auto-saves to policies/)
+# Train continuous RL (6-action merged phase; auto-saves to policies/)
 python train_rl.py
 python train_rl.py --backend linear --episodes 300
 python train_rl.py --load policies/policy_tabular.pkl --episodes 0   # eval only
+
+# Train discrete RL (3-action: write / bad claim / good claim)
+python train_discrete_rl.py
+python train_discrete_rl.py --backend linear --episodes 300
+python train_discrete_rl.py --load policies/policy_tabular_discrete.pkl --episodes 0
 
 # Train the DQN agent (auto-saves to policies/policy_dqn.pkl)
 python train_dqn.py

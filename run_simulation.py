@@ -8,12 +8,20 @@ from collections import Counter
 from dataclasses import asdict
 
 from Agent import Agent
-from config import SIM, TRAIN, TRAIN_DQN, default_dqn_policy_path, default_policy_path
+from config import (
+    SIM,
+    TRAIN,
+    TRAIN_DQN,
+    default_discrete_policy_path,
+    default_dqn_policy_path,
+    default_policy_path,
+)
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History
 from Paper import Paper
 from DQNAgent import DQNAgent, make_dqn_backend
+from DiscreteQLearningAgent import DiscreteQLearningAgent, make_discrete_backend
 from QLearningAgent import QLearningAgent, make_backend
 from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 
@@ -348,6 +356,57 @@ def save_outputs(history: History, *, show: bool = False, open_charts: bool = Fa
         print(f"\nView the summary chart at: {os.path.abspath(summary_path)}")
 
 
+def build_discrete_rl_agents(
+    count: int,
+    *,
+    backend_kind: str,
+    policy_path: str | None,
+    freeze: bool,
+) -> list[DiscreteQLearningAgent]:
+    """Create independent discrete RL agents (3-action marketplace policy)."""
+    if count <= 0:
+        return []
+
+    loaded = bool(policy_path) and os.path.exists(policy_path)
+    if policy_path and not loaded:
+        print(f"Discrete RL: policy {policy_path} not found; starting from scratch.")
+
+    agents: list[DiscreteQLearningAgent] = []
+    for i in range(count):
+        backend = make_discrete_backend(backend_kind)
+        if loaded:
+            try:
+                backend.load(policy_path)
+            except (ValueError, EOFError, OSError, KeyError):
+                if i == 0:
+                    print(
+                        f"Discrete RL: policy {policy_path} is incompatible; "
+                        "using scratch."
+                    )
+                loaded = False
+                backend = make_discrete_backend(backend_kind)
+        agents.append(
+            DiscreteQLearningAgent(
+                intrinsic_talent=_talent_for(i, count),
+                forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
+                name=f"RL Agent {i + 1}",
+                backend=backend,
+                epsilon=0.0 if freeze else SIM.rl_epsilon,
+                learning=not freeze,
+            )
+        )
+
+    source = (
+        f"loaded baseline {policy_path}" if loaded else "starting from scratch"
+    )
+    mode = "frozen (greedy)" if freeze else "learning online"
+    print(
+        f"Discrete RL: {count} independent {backend_kind} agents, "
+        f"{source}, {mode}."
+    )
+    return agents
+
+
 def build_rl_agents(
     count: int,
     *,
@@ -494,14 +553,24 @@ def build_simulation(
     ]
     agents.extend(build_random_agents(random_agents))
     agents.extend(build_probabilistic_agents(probabilistic_agents))
-    agents.extend(
-        build_rl_agents(
-            rl_agents,
-            backend_kind=rl_backend,
-            policy_path=rl_policy_path,
-            freeze=rl_freeze,
+    if review_paradigm == "discrete":
+        agents.extend(
+            build_discrete_rl_agents(
+                rl_agents,
+                backend_kind=rl_backend,
+                policy_path=rl_policy_path,
+                freeze=rl_freeze,
+            )
         )
-    )
+    else:
+        agents.extend(
+            build_rl_agents(
+                rl_agents,
+                backend_kind=rl_backend,
+                policy_path=rl_policy_path,
+                freeze=rl_freeze,
+            )
+        )
     agents.extend(
         build_dqn_agents(
             dqn_agents,
@@ -747,9 +816,11 @@ def main(argv=None):
     args = parse_args(argv)
 
     rl_policy_path = args.rl_policy
-    if (rl_policy_path is None and not args.rl_from_scratch
-            and SIM.rl_autoload_policy):
-        rl_policy_path = default_policy_path(args.rl_backend)
+    if rl_policy_path is None and not args.rl_from_scratch and SIM.rl_autoload_policy:
+        if args.review_paradigm == "discrete":
+            rl_policy_path = default_discrete_policy_path(args.rl_backend)
+        else:
+            rl_policy_path = default_policy_path(args.rl_backend)
 
     dqn_policy_path = args.dqn_policy
     if (dqn_policy_path is None and not args.dqn_from_scratch
