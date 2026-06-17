@@ -23,8 +23,9 @@ affects the reviewed paper's future accrual rate.
 CLI flags for one-off overrides.
 
 - **Writing effort**: each `write_paper` adds a `writing_effort_delta`; once
-  cumulative progress reaches `paper_threshold`, a paper publishes and progress
-  resets.
+  cumulative progress reaches the current paper's effort target, a paper
+  publishes and progress resets. `paper_effort_mode` can preserve fixed targets
+  or sample the 50-150 timestep band discussed in sync.
 - **Review paradigms**: each environment run is either `continuous` or
   `discrete`, configured by `review_paradigm`; paradigms are not mixed inside one
   run.
@@ -37,7 +38,7 @@ CLI flags for one-off overrides.
 - **Review reward curve**: by default `review_effort_curve = "sigmoid"` models
   `E = F(T)` with low impact for short reviews, a rise through the good-faith
   region, and saturation for long reviews. Set it to `"log"` to use the older
-  logarithmic curve.
+  logarithmic curve, or `"jump"` to test the high-effort threshold experiment.
 - **Review-share economics**: a review grants ownership share on the reviewed
   paper. The default base price is the schematic's fair-market formula,
   `sum(epsilon / (1 + epsilon) * Probability(epsilon))`, using the empirical
@@ -83,6 +84,7 @@ python run_simulation.py --no-archive            # don't save
 python run_simulation.py --name "my run"         # save non-interactively
 python run_simulation.py --review-paradigm discrete --random-agents 5 --no-archive
 python run_simulation.py --rl-agents 20 --rl-backend tabular
+python run_simulation.py --seeds 1,2,3,4,5 --timesteps 10000 --heuristic-agents 50 --rl-agents 50 --name "discrete sweep"
 
 # Train continuous RL (6-action merged phase; auto-saves to policies/)
 python train_rl.py

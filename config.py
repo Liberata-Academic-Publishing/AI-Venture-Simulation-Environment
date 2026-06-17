@@ -68,15 +68,18 @@ class SimConfig:
     review_paradigm: str = "discrete"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
     writing_effort_per_timestep: float = 1.0    # continuous writing effort per timestep
-    min_review_effort_threshold: float = 2.0    # reward cliff: below this earns 0
+    min_review_effort_threshold: float = 1.0    # minimum valid review/share effort
     good_faith_review_threshold: float = 2.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
     good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
-    review_effort_curve: str = "sigmoid"        # "sigmoid" | "log"
+    review_effort_curve: str = "sigmoid"        # "sigmoid" | "log" | "jump"
     min_review_accrual_bump: float = 0.05       # sigmoid bump at one timestep
     max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
     review_sigmoid_midpoint: float = 2.5        # review length where impact accelerates
     review_sigmoid_steepness: float = 1.4
+    review_jump_threshold: float = 15.0          # optional jump-mode high-effort cutoff
+    review_jump_bump: float = 0.50               # optional extra bump after the cutoff
+    review_jump_width: float = 0.75              # softness of the jump-mode transition
     base_review_accrual_bump: float = 0.20      # log-mode rate bump at exactly the threshold
     first_extra_day_bump: float = 0.10          # log-mode first extra timestep bump
 
@@ -88,6 +91,13 @@ class SimConfig:
     continuous_paper_timesteps: float = 50.0    # writing effort to auto-publish
     discrete_paper_timesteps: float = 200.0      # discrete manuscript duration (T_M)
     discrete_writing_effort_per_timestep: float = 1.0
+    # Paper effort target for each manuscript. ``fixed`` preserves the existing
+    # thresholds above; ``uniform`` samples once per paper from the 50-150 band
+    # discussed in sync; ``quality_scaled`` maps higher sampled paper quality to
+    # a larger target inside that same band.
+    paper_effort_mode: str = "fixed"             # "fixed" | "uniform" | "quality_scaled"
+    paper_effort_min: float = 50.0
+    paper_effort_max: float = 150.0
     # Continuous-mode asymptotic writing model: a paper's accrual rate approaches
     # its quality-defined ceiling as accumulated writing effort grows. Higher k
     # reaches the ceiling faster (k=0.2 -> ~63% at 5 ts, ~86% at 10 ts).
@@ -116,6 +126,12 @@ class SimConfig:
     talent_min: float = 0.8         # talent spread (inert until the sim uses it)
     talent_max: float = 1.2
     policies_dir: str = "policies"
+
+    # --- Export / gallery limits -----------------------------------------
+    # Full histories remain in local_data/. The committed static gallery keeps
+    # only the most recent action rows for feed/replay while retaining compact
+    # per-timestep action counts for full action-mix plots.
+    gallery_action_limit: int = 5000
 
     # --- DQN agents (separate from tabular/linear RL) ------------------
     dqn_hidden_size: int = 64

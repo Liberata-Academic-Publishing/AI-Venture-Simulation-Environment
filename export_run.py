@@ -69,7 +69,11 @@ def write_full_history(history: "History", run_id: str, local_dir: str = LOCAL_D
 
 
 def write_gallery_run(
-    history: "History", run_dir: str, *, threshold: float | None = None
+    history: "History",
+    run_dir: str,
+    *,
+    threshold: float | None = None,
+    action_limit: int | None = None,
 ) -> list[str]:
     """Render the static-chart PNGs + slim ``history.json`` into ``run_dir``.
 
@@ -93,7 +97,7 @@ def write_gallery_run(
             "Install it with: python -m pip install matplotlib"
         )
 
-    payload = history.to_gallery_dict()
+    payload = history.to_gallery_dict(max_actions=action_limit)
     payload["charts"] = charts
     with open(os.path.join(run_dir, "history.json"), "w", encoding="utf-8") as fh:
         json.dump(payload, fh)  # no indent: gallery payload stays small
@@ -123,7 +127,12 @@ def export_run(
     # Slim JSON + static-chart PNGs -> committed gallery. The review effort
     # charts mark the reward cliff at this run's configured threshold.
     run_dir = os.path.join(data_dir, run_id)
-    write_gallery_run(history, run_dir, threshold=config.get("min_review_effort_threshold"))
+    write_gallery_run(
+        history,
+        run_dir,
+        threshold=config.get("min_review_effort_threshold"),
+        action_limit=config.get("gallery_action_limit"),
+    )
 
     entry = {
         "id": run_id,

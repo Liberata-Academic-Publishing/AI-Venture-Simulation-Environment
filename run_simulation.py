@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import random
 import sys
@@ -34,6 +35,18 @@ NUM_DQN_AGENTS = SIM.num_dqn_agents
 NUM_RANDOM_AGENTS = SIM.num_random_agents
 NUM_PROBABILISTIC_AGENTS = SIM.num_probabilistic_agents
 OUTPUT_DIR = SIM.output_dir
+
+
+def _parse_seed_list(value: str | None) -> list[int]:
+    if not value:
+        return []
+    seeds: list[int] = []
+    for part in value.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        seeds.append(int(text))
+    return seeds
 
 
 def _talent_for(index: int, count: int) -> float:
@@ -540,6 +553,10 @@ def build_simulation(
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
     continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
+    discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
+    paper_effort_mode: str = SIM.paper_effort_mode,
+    paper_effort_min: float = SIM.paper_effort_min,
+    paper_effort_max: float = SIM.paper_effort_max,
 ) -> Environment:
     """Construct a simulation of heuristics plus independent RL agents."""
     random.seed(seed)
@@ -588,6 +605,10 @@ def build_simulation(
         review_paradigm=review_paradigm,
         continuous_publishing=continuous_publishing,
         continuous_paper_timesteps=continuous_paper_timesteps,
+        discrete_paper_timesteps=discrete_paper_timesteps,
+        paper_effort_mode=paper_effort_mode,
+        paper_effort_min=paper_effort_min,
+        paper_effort_max=paper_effort_max,
         history=history,
     )
 
@@ -621,6 +642,27 @@ def parse_args(argv=None):
         "--open",
         action="store_true",
         help="Open the summary chart in your default image viewer after the run.",
+    )
+    parser.add_argument(
+        "--timesteps", dest="timesteps", type=int, default=NUM_TIMESTEPS,
+        metavar="N", help="Number of simulation timesteps for this run.",
+    )
+    parser.add_argument(
+        "--seed", dest="seed", type=int, default=SIM.seed,
+        metavar="N", help="Random seed for a single run.",
+    )
+    parser.add_argument(
+        "--seeds", dest="seeds", default=None, metavar="CSV",
+        help="Comma-separated seeds for a batch of otherwise identical runs.",
+    )
+    parser.add_argument(
+        "--batch-summary-csv", dest="batch_summary_csv", default=None,
+        metavar="PATH", help="Optional CSV summary path for --seeds batches.",
+    )
+    parser.add_argument(
+        "--heuristic-agents", dest="heuristic_agents", type=int,
+        default=NUM_AGENTS, metavar="N",
+        help="Number of heuristic agents.",
     )
     parser.add_argument(
         "--rl-agents", dest="rl_agents", type=int, default=NUM_RL_AGENTS,
@@ -657,6 +699,32 @@ def parse_args(argv=None):
         help="Writing effort required to auto-publish in continuous threshold mode.",
     )
     parser.add_argument(
+        "--discrete-paper-timesteps", dest="discrete_paper_timesteps",
+        type=float, default=SIM.discrete_paper_timesteps, metavar="N",
+        help="Writing effort required to publish in discrete mode.",
+    )
+    parser.add_argument(
+        "--paper-effort-mode", dest="paper_effort_mode",
+        choices=["fixed", "uniform", "quality_scaled"],
+        default=SIM.paper_effort_mode,
+        help="Per-paper writing target: fixed, uniform, or quality_scaled.",
+    )
+    parser.add_argument(
+        "--paper-effort-min", dest="paper_effort_min",
+        type=float, default=SIM.paper_effort_min, metavar="N",
+        help="Minimum sampled paper effort for uniform/quality_scaled modes.",
+    )
+    parser.add_argument(
+        "--paper-effort-max", dest="paper_effort_max",
+        type=float, default=SIM.paper_effort_max, metavar="N",
+        help="Maximum sampled paper effort for uniform/quality_scaled modes.",
+    )
+    parser.add_argument(
+        "--gallery-action-limit", dest="gallery_action_limit",
+        type=int, default=SIM.gallery_action_limit, metavar="N",
+        help="Max action rows committed to docs/data history.json; full data stays local.",
+    )
+    parser.add_argument(
         "--rl-backend", dest="rl_backend", choices=["tabular", "linear"],
         default=SIM.rl_backend, help="Q backend for the RL agents.",
     )
@@ -689,6 +757,9 @@ def parse_args(argv=None):
 
 def build_run_config(
     *,
+    heuristic_agents: int = NUM_AGENTS,
+    timesteps: int = NUM_TIMESTEPS,
+    seed: int = SIM.seed,
     rl_agents: int = NUM_RL_AGENTS,
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
@@ -697,6 +768,11 @@ def build_run_config(
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
     continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
+    discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
+    paper_effort_mode: str = SIM.paper_effort_mode,
+    paper_effort_min: float = SIM.paper_effort_min,
+    paper_effort_max: float = SIM.paper_effort_max,
+    gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> dict:
     """Full SimConfig snapshot for this run, with runtime overrides applied.
 
@@ -706,6 +782,9 @@ def build_run_config(
     ``num_heuristic_agents`` for backward compatibility with older gallery data.
     """
     config = asdict(SIM)
+    config["num_heuristic_agents"] = heuristic_agents
+    config["num_timesteps"] = timesteps
+    config["seed"] = seed
     config["num_rl_agents"] = rl_agents
     config["num_dqn_agents"] = dqn_agents
     config["num_random_agents"] = random_agents
@@ -714,7 +793,12 @@ def build_run_config(
     config["review_paradigm"] = review_paradigm
     config["continuous_publishing"] = continuous_publishing
     config["continuous_paper_timesteps"] = continuous_paper_timesteps
-    config["num_agents"] = config["num_heuristic_agents"]
+    config["discrete_paper_timesteps"] = discrete_paper_timesteps
+    config["paper_effort_mode"] = paper_effort_mode
+    config["paper_effort_min"] = paper_effort_min
+    config["paper_effort_max"] = paper_effort_max
+    config["gallery_action_limit"] = gallery_action_limit
+    config["num_agents"] = heuristic_agents
     # Aliases so the static gallery (which also reads pre-overhaul runs) keeps
     # rendering the time-unit config fields under their old names.
     config["num_days"] = config["num_timesteps"]
@@ -741,6 +825,9 @@ def archive_run(
     history: History,
     title: str | None,
     *,
+    heuristic_agents: int = NUM_AGENTS,
+    timesteps: int = NUM_TIMESTEPS,
+    seed: int = SIM.seed,
     rl_agents: int = NUM_RL_AGENTS,
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
@@ -749,12 +836,20 @@ def archive_run(
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
     continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
+    discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
+    paper_effort_mode: str = SIM.paper_effort_mode,
+    paper_effort_min: float = SIM.paper_effort_min,
+    paper_effort_max: float = SIM.paper_effort_max,
+    gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> None:
     from export_run import export_run
 
     run_id = export_run(
         history,
         config=build_run_config(
+            heuristic_agents=heuristic_agents,
+            timesteps=timesteps,
+            seed=seed,
             rl_agents=rl_agents,
             dqn_agents=dqn_agents,
             random_agents=random_agents,
@@ -763,6 +858,11 @@ def archive_run(
             review_paradigm=review_paradigm,
             continuous_publishing=continuous_publishing,
             continuous_paper_timesteps=continuous_paper_timesteps,
+            discrete_paper_timesteps=discrete_paper_timesteps,
+            paper_effort_mode=paper_effort_mode,
+            paper_effort_min=paper_effort_min,
+            paper_effort_max=paper_effort_max,
+            gallery_action_limit=gallery_action_limit,
         ),
         title=title,
     )
@@ -774,6 +874,9 @@ def archive_run(
 def prompt_and_archive(
     history: History,
     *,
+    heuristic_agents: int = NUM_AGENTS,
+    timesteps: int = NUM_TIMESTEPS,
+    seed: int = SIM.seed,
     rl_agents: int = NUM_RL_AGENTS,
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
@@ -782,6 +885,11 @@ def prompt_and_archive(
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
     continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
+    discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
+    paper_effort_mode: str = SIM.paper_effort_mode,
+    paper_effort_min: float = SIM.paper_effort_min,
+    paper_effort_max: float = SIM.paper_effort_max,
+    gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> None:
     """Ask whether to save this run and, if so, what to title it."""
     try:
@@ -801,6 +909,9 @@ def prompt_and_archive(
     archive_run(
         history,
         name or None,
+        heuristic_agents=heuristic_agents,
+        timesteps=timesteps,
+        seed=seed,
         rl_agents=rl_agents,
         dqn_agents=dqn_agents,
         random_agents=random_agents,
@@ -809,12 +920,15 @@ def prompt_and_archive(
         review_paradigm=review_paradigm,
         continuous_publishing=continuous_publishing,
         continuous_paper_timesteps=continuous_paper_timesteps,
+        discrete_paper_timesteps=discrete_paper_timesteps,
+        paper_effort_mode=paper_effort_mode,
+        paper_effort_min=paper_effort_min,
+        paper_effort_max=paper_effort_max,
+        gallery_action_limit=gallery_action_limit,
     )
 
 
-def main(argv=None):
-    args = parse_args(argv)
-
+def _policy_paths(args) -> tuple[str | None, str | None]:
     rl_policy_path = args.rl_policy
     if rl_policy_path is None and not args.rl_from_scratch and SIM.rl_autoload_policy:
         if args.review_paradigm == "discrete":
@@ -826,10 +940,17 @@ def main(argv=None):
     if (dqn_policy_path is None and not args.dqn_from_scratch
             and SIM.dqn_autoload_policy):
         dqn_policy_path = default_dqn_policy_path()
+    return rl_policy_path, dqn_policy_path
+
+
+def _run_once(args, *, seed: int, title: str | None = None) -> dict:
+    rl_policy_path, dqn_policy_path = _policy_paths(args)
 
     history = History()
     env = build_simulation(
         history,
+        num_agents=args.heuristic_agents,
+        seed=seed,
         rl_agents=args.rl_agents,
         dqn_agents=args.dqn_agents,
         random_agents=args.random_agents,
@@ -842,12 +963,16 @@ def main(argv=None):
         review_paradigm=args.review_paradigm,
         continuous_publishing=args.continuous_publishing,
         continuous_paper_timesteps=args.continuous_paper_timesteps,
+        discrete_paper_timesteps=args.discrete_paper_timesteps,
+        paper_effort_mode=args.paper_effort_mode,
+        paper_effort_min=args.paper_effort_min,
+        paper_effort_max=args.paper_effort_max,
     )
-    for _ in range(NUM_TIMESTEPS):
+    for _ in range(args.timesteps):
         env.run_timestep()
         if env.timestep % PROGRESS_INTERVAL == 0:
             print(
-                f"Timestep {env.timestep}/{NUM_TIMESTEPS} "
+                f"Timestep {env.timestep}/{args.timesteps} "
                 f"({len(env.papers)} papers)",
                 flush=True,
             )
@@ -859,10 +984,13 @@ def main(argv=None):
 
     if args.no_archive:
         print("\nNot archived to the gallery (--no-archive).")
-    elif args.name is not None:
+    elif args.name is not None or title is not None:
         archive_run(
             history,
-            args.name,
+            title or args.name,
+            heuristic_agents=args.heuristic_agents,
+            timesteps=args.timesteps,
+            seed=seed,
             rl_agents=args.rl_agents,
             dqn_agents=args.dqn_agents,
             random_agents=args.random_agents,
@@ -871,10 +999,18 @@ def main(argv=None):
             review_paradigm=args.review_paradigm,
             continuous_publishing=args.continuous_publishing,
             continuous_paper_timesteps=args.continuous_paper_timesteps,
+            discrete_paper_timesteps=args.discrete_paper_timesteps,
+            paper_effort_mode=args.paper_effort_mode,
+            paper_effort_min=args.paper_effort_min,
+            paper_effort_max=args.paper_effort_max,
+            gallery_action_limit=args.gallery_action_limit,
         )
     else:
         prompt_and_archive(
             history,
+            heuristic_agents=args.heuristic_agents,
+            timesteps=args.timesteps,
+            seed=seed,
             rl_agents=args.rl_agents,
             dqn_agents=args.dqn_agents,
             random_agents=args.random_agents,
@@ -883,7 +1019,86 @@ def main(argv=None):
             review_paradigm=args.review_paradigm,
             continuous_publishing=args.continuous_publishing,
             continuous_paper_timesteps=args.continuous_paper_timesteps,
+            discrete_paper_timesteps=args.discrete_paper_timesteps,
+            paper_effort_mode=args.paper_effort_mode,
+            paper_effort_min=args.paper_effort_min,
+            paper_effort_max=args.paper_effort_max,
+            gallery_action_limit=args.gallery_action_limit,
         )
+    return _summary_row(history, seed=seed, title=title or args.name or "")
+
+
+def _summary_row(history: History, *, seed: int, title: str) -> dict:
+    scalars = history.scalars
+    group_summary = history.agent_group_summary()
+    def last_scalar(name: str) -> float:
+        values = scalars.get(name) or []
+        return float(values[-1]) if values else 0.0
+
+    row = {
+        "title": title,
+        "seed": seed,
+        "timesteps": len(history.timesteps),
+        "total_capital": last_scalar("total_capital"),
+        "mean_capital": last_scalar("mean_capital"),
+        "capital_gini": last_scalar("capital_gini"),
+        "num_papers": last_scalar("num_papers"),
+        "completed_peer_reviews": last_scalar("completed_peer_reviews"),
+        "good_faith_reviews": last_scalar("good_faith_reviews"),
+        "bad_faith_reviews": last_scalar("bad_faith_reviews"),
+        "mean_completed_review_effort": last_scalar("mean_completed_review_effort"),
+    }
+    for group, stats in sorted(group_summary.items()):
+        prefix = group.replace("Agent", "").replace("QLearning", "RL").lower() or "agent"
+        row[f"{prefix}_mean_capital"] = float(stats.get("mean_final_capital", 0.0))
+        row[f"{prefix}_reviews"] = int(stats.get("completed_reviews", 0))
+        row[f"{prefix}_good_reviews"] = int(stats.get("good_faith_reviews", 0))
+        row[f"{prefix}_bad_reviews"] = int(stats.get("bad_faith_reviews", 0))
+    return row
+
+
+def _write_batch_summary(rows: list[dict], path: str) -> None:
+    if not rows:
+        return
+    fieldnames = sorted({key for row in rows for key in row})
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"\nWrote batch summary CSV to {path}")
+
+
+def _print_batch_summary(rows: list[dict]) -> None:
+    if not rows:
+        return
+    print("\nBatch summary")
+    for row in rows:
+        print(
+            f"- seed={row['seed']}: mean AC={row['mean_capital']:.2f}, "
+            f"papers={row['num_papers']:.0f}, reviews={row['completed_peer_reviews']:.0f}, "
+            f"good={row['good_faith_reviews']:.0f}, bad={row['bad_faith_reviews']:.0f}, "
+            f"mean effort={row['mean_completed_review_effort']:.2f}"
+        )
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    seeds = _parse_seed_list(args.seeds)
+    if not seeds:
+        _run_once(args, seed=args.seed)
+        return
+
+    rows: list[dict] = []
+    for index, seed in enumerate(seeds, start=1):
+        print(f"\n=== Batch run {index}/{len(seeds)} (seed={seed}) ===")
+        if args.name is not None:
+            title = f"{args.name} seed {seed}"
+        else:
+            title = f"batch seed {seed}"
+        rows.append(_run_once(args, seed=seed, title=title))
+    _print_batch_summary(rows)
+    if args.batch_summary_csv:
+        _write_batch_summary(rows, args.batch_summary_csv)
 
 
 if __name__ == "__main__":

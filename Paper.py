@@ -26,6 +26,9 @@ MIN_REVIEW_ACCRUAL_BUMP = SIM.min_review_accrual_bump
 MAX_REVIEW_ACCRUAL_BUMP = SIM.max_review_accrual_bump
 REVIEW_SIGMOID_MIDPOINT = SIM.review_sigmoid_midpoint
 REVIEW_SIGMOID_STEEPNESS = SIM.review_sigmoid_steepness
+REVIEW_JUMP_THRESHOLD = SIM.review_jump_threshold
+REVIEW_JUMP_BUMP = SIM.review_jump_bump
+REVIEW_JUMP_WIDTH = SIM.review_jump_width
 BASE_REVIEW_ACCRUAL_BUMP = SIM.base_review_accrual_bump
 FIRST_EXTRA_DAY_BUMP = SIM.first_extra_day_bump
 DEFAULT_MAX_REVIEWER_SHARE = SIM.default_max_reviewer_share
@@ -165,9 +168,10 @@ def review_accrual_bump(effort: float, quality: float = 1.0) -> float:
 
     Effort below ``MIN_REVIEW_EFFORT_THRESHOLD`` yields 0. The default sigmoid
     mode approximates the review-length evidence discussed by the team: short
-    reviews have little effect, impact rises after the good-faith threshold, and
+    reviews have limited effect, impact rises through the good-faith region, and
     long reviews saturate. The previous logarithmic curve remains available by
-    setting ``SIM.review_effort_curve = "log"``.
+    setting ``SIM.review_effort_curve = "log"``; ``"jump"`` is an optional
+    experiment for a high-effort threshold bonus discussed in sync.
     """
     if effort < MIN_REVIEW_EFFORT_THRESHOLD:
         return 0.0
@@ -180,6 +184,10 @@ def review_accrual_bump(effort: float, quality: float = 1.0) -> float:
 
     span = max(0.0, MAX_REVIEW_ACCRUAL_BUMP - MIN_REVIEW_ACCRUAL_BUMP)
     bump = MIN_REVIEW_ACCRUAL_BUMP + span * _normalized_sigmoid(float(effort))
+    if curve == "jump":
+        width = max(1e-9, float(REVIEW_JUMP_WIDTH))
+        jump = 1.0 / (1.0 + math.exp(-(float(effort) - REVIEW_JUMP_THRESHOLD) / width))
+        bump += max(0.0, REVIEW_JUMP_BUMP) * jump
     return bump * quality_multiplier(quality)
 
 
@@ -209,6 +217,7 @@ class Paper:
         market_listed: bool = False,
         max_reviewer_share: float = DEFAULT_MAX_REVIEWER_SHARE,
         writing_effort: float | None = None,
+        required_writing_effort: float | None = None,
     ):
         if author is None:
             raise ValueError("author cannot be None")
@@ -217,6 +226,11 @@ class Paper:
         self.quality = quality_multiplier(quality)
         self.writing_effort = (
             None if writing_effort is None else max(0.0, float(writing_effort))
+        )
+        self.required_writing_effort = (
+            None
+            if required_writing_effort is None
+            else max(0.0, float(required_writing_effort))
         )
         if accrual_rate is not None:
             rate = accrual_rate

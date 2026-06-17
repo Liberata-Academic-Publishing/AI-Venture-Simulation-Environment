@@ -6,10 +6,8 @@ from dataclasses import dataclass
 
 from config import SIM
 from Paper import (
-    DISCRETE_PAPER_TIMESTEPS,
     DISCRETE_WRITING_EFFORT_PER_TIMESTEP,
     GOOD_FAITH_REVIEW,
-    MIN_REVIEW_EFFORT_THRESHOLD,
     QUALITY_SIGMA,
     REVIEW_EFFORT_PER_TIMESTEP,
     REVIEW_PARADIGM_CONTINUOUS,
@@ -25,6 +23,14 @@ from Paper import (
 PAPER_THRESHOLD = SIM.paper_threshold
 EXPECTED_REVIEW_EFFORT_PER_TURN = REVIEW_EFFORT_PER_TIMESTEP
 WRITING_EFFORT_PER_TIMESTEP = SIM.writing_effort_per_timestep
+PAPER_EFFORT_MODE_FIXED = "fixed"
+PAPER_EFFORT_MODE_UNIFORM = "uniform"
+PAPER_EFFORT_MODE_QUALITY_SCALED = "quality_scaled"
+VALID_PAPER_EFFORT_MODES = frozenset({
+    PAPER_EFFORT_MODE_FIXED,
+    PAPER_EFFORT_MODE_UNIFORM,
+    PAPER_EFFORT_MODE_QUALITY_SCALED,
+})
 CONTINUOUS_PUBLISHING_CHOICE = "choice"
 CONTINUOUS_PUBLISHING_THRESHOLD = "threshold"
 VALID_CONTINUOUS_PUBLISHING = frozenset({
@@ -44,6 +50,14 @@ def validate_continuous_publishing(mode: str) -> str:
     if value not in VALID_CONTINUOUS_PUBLISHING:
         allowed = ", ".join(sorted(VALID_CONTINUOUS_PUBLISHING))
         raise ValueError(f"continuous_publishing must be one of: {allowed}")
+    return value
+
+
+def validate_paper_effort_mode(mode: str) -> str:
+    value = str(mode).strip().lower()
+    if value not in VALID_PAPER_EFFORT_MODES:
+        allowed = ", ".join(sorted(VALID_PAPER_EFFORT_MODES))
+        raise ValueError(f"paper_effort_mode must be one of: {allowed}")
     return value
 
 
@@ -88,10 +102,15 @@ class Agent(ABC):
             SIM.continuous_publishing
         )
         self.continuous_paper_timesteps = float(SIM.continuous_paper_timesteps)
+        self.discrete_paper_timesteps = float(SIM.discrete_paper_timesteps)
+        self.paper_effort_mode = validate_paper_effort_mode(SIM.paper_effort_mode)
+        self.paper_effort_min = float(SIM.paper_effort_min)
+        self.paper_effort_max = float(SIM.paper_effort_max)
 
         # Quality of the paper currently being written (known before/while
         # working on it). Sampled lazily the first time the agent writes.
         self.next_paper_quality: float | None = None
+        self.next_paper_required_effort: float | None = None
 
         # Public peer-review reputation: mean AC earned per completed review.
         self.peer_review_history: float = 0.0
@@ -162,6 +181,37 @@ class Agent(ABC):
         self.continuous_publishing = validate_continuous_publishing(mode)
         if timesteps is not None:
             self.continuous_paper_timesteps = max(0.0, float(timesteps))
+
+    def configure_paper_effort(
+        self,
+        mode: str | None = None,
+        min_effort: float | None = None,
+        max_effort: float | None = None,
+        *,
+        discrete_timesteps: float | None = None,
+    ) -> None:
+        """Configure manuscript effort targets for this run.
+
+        ``fixed`` preserves the existing thresholds. ``uniform`` and
+        ``quality_scaled`` sample one target per paper, which matches the
+        50-150 timestep range discussed in sync without changing agent APIs.
+        """
+        if mode is not None:
+            self.paper_effort_mode = validate_paper_effort_mode(mode)
+        if min_effort is not None:
+            self.paper_effort_min = max(0.0, float(min_effort))
+        if max_effort is not None:
+            self.paper_effort_max = max(0.0, float(max_effort))
+        if self.paper_effort_max < self.paper_effort_min:
+            self.paper_effort_min, self.paper_effort_max = (
+                self.paper_effort_max,
+                self.paper_effort_min,
+            )
+        if discrete_timesteps is not None:
+            self.discrete_paper_timesteps = max(0.0, float(discrete_timesteps))
+        # Force a clean draw for the next manuscript under the new run config.
+        if self.paper_progress == 0.0:
+            self.next_paper_required_effort = None
 
     def continuous_publish_by_threshold(self) -> bool:
         """True when continuous mode auto-publishes at a fixed writing effort."""
@@ -414,25 +464,25 @@ class Agent(ABC):
     # ---- writing ---------------------------------------------------------
     def write_paper(self) -> float:
         """Progress the current paper; publish (and resample quality) at threshold."""
-        if self.next_paper_quality is None:
-            self.next_paper_quality = self._sample_quality()
+        self._ensure_next_paper_state()
         effort = self.writing_effort_delta()
         self.paper_progress += effort
         if self.paper_progress >= self.paper_completion_threshold():
-            self.paper_progress = 0.0
             self.publish_paper()
-            self.next_paper_quality = None
         return effort
 
-    def publish_paper(self):
+    def publish_paper(self) -> Paper:
         """Create a new Paper (off-market; the env lists it next timestep)."""
-        quality = (
-            self.next_paper_quality
-            if self.next_paper_quality is not None
-            else self._sample_quality()
+        self._ensure_next_paper_state()
+        paper = Paper(
+            author=self,
+            quality=self.next_paper_quality or self._sample_quality(),
+            writing_effort=self.paper_progress,
+            required_writing_effort=self.next_paper_required_effort,
         )
-        paper = Paper(author=self, quality=quality)
         Agent.all_papers.append(paper)
+        self._reset_next_paper_state()
+        return paper
 
     # ---- continuous writing (agent-chosen finish, asymptotic accrual) ----
     def add_research_effort(self) -> float:
@@ -440,8 +490,7 @@ class Agent(ABC):
 
         Quality is sampled lazily the first time the agent researches a paper.
         """
-        if self.next_paper_quality is None:
-            self.next_paper_quality = self._sample_quality()
+        self._ensure_next_paper_state()
         effort = self.writing_effort_delta()
         self.paper_progress += effort
         return effort
@@ -462,16 +511,50 @@ class Agent(ABC):
         in (asymptotically approaching its quality ceiling). Resets progress and
         resamples a fresh quality for the agent's next paper.
         """
-        quality = (
-            self.next_paper_quality
-            if self.next_paper_quality is not None
-            else self._sample_quality()
+        self._ensure_next_paper_state()
+        paper = Paper(
+            author=self,
+            quality=self.next_paper_quality or self._sample_quality(),
+            writing_effort=self.paper_progress,
+            required_writing_effort=self.next_paper_required_effort,
         )
-        paper = Paper(author=self, quality=quality, writing_effort=self.paper_progress)
         Agent.all_papers.append(paper)
+        self._reset_next_paper_state()
+        return paper
+
+    def _ensure_next_paper_state(self) -> None:
+        if self.next_paper_quality is None:
+            self.next_paper_quality = self._sample_quality()
+        if self.next_paper_required_effort is None:
+            self.next_paper_required_effort = self._sample_required_writing_effort(
+                self.next_paper_quality
+            )
+
+    def _reset_next_paper_state(self) -> None:
         self.paper_progress = 0.0
         self.next_paper_quality = None
-        return paper
+        self.next_paper_required_effort = None
+
+    def _sample_required_writing_effort(self, quality: float) -> float:
+        if self.paper_effort_mode == PAPER_EFFORT_MODE_FIXED:
+            if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
+                return self.discrete_paper_timesteps
+            if self.continuous_publish_by_threshold():
+                return self.continuous_paper_timesteps
+            return PAPER_THRESHOLD
+
+        lo = min(self.paper_effort_min, self.paper_effort_max)
+        hi = max(self.paper_effort_min, self.paper_effort_max)
+        if hi <= lo:
+            return lo
+        if self.paper_effort_mode == PAPER_EFFORT_MODE_UNIFORM:
+            return random.uniform(lo, hi)
+
+        # Quality-scaled mode: higher sampled paper quality requires a longer
+        # manuscript target inside the configured range. The logistic map avoids
+        # making low/high-quality papers collapse exactly to the endpoints.
+        scaled = 1.0 / (1.0 + math.exp(-3.0 * (quality_multiplier(quality) - 1.0)))
+        return lo + (hi - lo) * scaled
 
     def _sample_quality(self) -> float:
         return quality_multiplier(random.gauss(self.intrinsic_talent, QUALITY_SIGMA))
@@ -487,8 +570,11 @@ class Agent(ABC):
         return WRITING_EFFORT_PER_TIMESTEP
 
     def paper_completion_threshold(self) -> float:
+        self._ensure_next_paper_state()
+        if self.next_paper_required_effort is not None:
+            return self.next_paper_required_effort
         if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
-            return DISCRETE_PAPER_TIMESTEPS
+            return self.discrete_paper_timesteps
         if self.continuous_publish_by_threshold():
             return self.continuous_paper_timesteps
         return PAPER_THRESHOLD
