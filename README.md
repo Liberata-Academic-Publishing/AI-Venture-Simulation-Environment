@@ -36,11 +36,17 @@ sigmoid-like `E = F(T)` curve inspired by the team discussion of review length
 and citation impact: very short reviews have limited effect, the bump rises
 around the good-faith region, and long reviews saturate. The previous
 logarithmic curve remains available by setting `review_effort_curve = "log"` in
-`config.py`.
+`config.py`; `review_effort_curve = "jump"` enables the optional high-effort
+threshold experiment discussed in sync.
 
 ## Writing Effort Model
 
-Paper writing effort is continuous. Each `write_paper` action contributes a `writing_effort_delta` to the agent's current paper progress. Once cumulative progress reaches `PAPER_THRESHOLD`, the agent publishes a paper and progress resets.
+Paper writing effort is tracked per manuscript. Each `write_paper` action
+contributes a `writing_effort_delta` to the agent's current paper progress. By
+default, the existing fixed thresholds are preserved (`continuous_paper_timesteps`
+or `discrete_paper_timesteps`), but `paper_effort_mode` can be set to `uniform`
+or `quality_scaled` to sample a stable per-paper target from the 50-150 timestep
+range requested during sync.
 
 ## Features
 Our environment stresses a few main features:
@@ -51,6 +57,7 @@ Run a discrete CLI simulation with random controls:
 
 ```
 python run_simulation.py --review-paradigm discrete --random-agents 5 --no-archive
+python run_simulation.py --seeds 1,2,3,4,5 --timesteps 10000 --heuristic-agents 50 --rl-agents 50 --name "discrete sweep"
 ```
 
 ## Logging runs

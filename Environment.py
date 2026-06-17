@@ -42,6 +42,10 @@ class Environment:
         review_paradigm: str = "continuous",
         continuous_publishing: str = SIM.continuous_publishing,
         continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
+        paper_effort_mode: str = SIM.paper_effort_mode,
+        paper_effort_min: float = SIM.paper_effort_min,
+        paper_effort_max: float = SIM.paper_effort_max,
+        discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
         history: "History | None" = None,
     ):
         if agents is not None and num_agents is not None:
@@ -53,6 +57,10 @@ class Environment:
             continuous_publishing
         )
         self.continuous_paper_timesteps = float(continuous_paper_timesteps)
+        self.paper_effort_mode = paper_effort_mode
+        self.paper_effort_min = float(paper_effort_min)
+        self.paper_effort_max = float(paper_effort_max)
+        self.discrete_paper_timesteps = float(discrete_paper_timesteps)
         self.history = history
         self.timestep = 0
         self.fair_market_price = fair_market_price_from_epsilons(
@@ -247,6 +255,13 @@ class Environment:
                 agent.configure_continuous_publishing(
                     self.continuous_publishing,
                     self.continuous_paper_timesteps,
+                )
+            if hasattr(agent, "configure_paper_effort"):
+                agent.configure_paper_effort(
+                    self.paper_effort_mode,
+                    self.paper_effort_min,
+                    self.paper_effort_max,
+                    discrete_timesteps=self.discrete_paper_timesteps,
                 )
             if hasattr(agent, "forecast_horizon_timesteps"):
                 agent.forecast_horizon_timesteps = self.forecast_horizon_timesteps

@@ -100,7 +100,7 @@ class MarketplaceLifecycleTest(unittest.TestCase):
     def test_published_paper_lists_one_timestep_later(self):
         # Continuous mode: the author finishes a paper by choice, not a threshold.
         author = ScriptAgent("author", continuous=[("research_finish", None)])
-        env = Environment(agents=[author])
+        env = Environment(agents=[author], continuous_publishing="choice")
 
         env.run_timestep()  # timestep 1: author researches and finishes a paper
         self.assertEqual(len(Agent.all_papers), 1)
@@ -177,8 +177,8 @@ class EconomicsTest(unittest.TestCase):
             at_threshold = MIN_REVIEW_EFFORT_THRESHOLD
             b1 = review_accrual_bump(at_threshold)
             b2 = review_accrual_bump(at_threshold + 1.0)
-            b5 = review_accrual_bump(at_threshold + 3.0)
-            b20 = review_accrual_bump(at_threshold + 18.0)
+            b5 = review_accrual_bump(GOOD_REVIEW_TIMESTEPS)
+            b20 = review_accrual_bump(GOOD_REVIEW_TIMESTEPS + 18.0)
         self.assertGreater(b1, 0.0)
         self.assertGreater(b2, b1)
         self.assertGreater(b5, b2)
@@ -267,6 +267,7 @@ class ReviewerStateTest(unittest.TestCase):
             "reviewer",
             work=[("peer_review", None), ("finish_review_write_paper", None)],
         )
+        reviewer.configure_review_paradigm("continuous")
         paper = _listed_paper(author, quality=1.0, current_ac=100.0, accrual_rate=1.0)
         paper.update_price_table([reviewer], 1.0, 0.0)
         Agent.all_papers = [paper]
@@ -369,6 +370,8 @@ class ReviewParadigmTest(unittest.TestCase):
         self.assertEqual(history.action_counts["bad_faith_review"], 1)
         self.assertEqual(history.scalars["bad_faith_reviews"][-1], 1.0)
         self.assertEqual(history.scalars["good_faith_reviews"][-1], 0.0)
+        self.assertGreater(paper.review_records[-1]["epsilon"], 0.0)
+        self.assertIn(reviewer, paper.share_distribution)
 
     def test_discrete_good_faith_review_uses_fixed_five_timesteps(self):
         author = ScriptAgent("author")
@@ -424,11 +427,23 @@ class ReviewParadigmTest(unittest.TestCase):
             num_agents=0,
             rl_agents=0,
             random_agents=2,
+            probabilistic_agents=0,
             seed=3,
         )
 
         self.assertEqual(len(env.agents), 2)
         self.assertTrue(all(isinstance(agent, RandomAgent) for agent in env.agents))
+
+    def test_quality_scaled_paper_effort_samples_stable_target(self):
+        agent = ScriptAgent("author")
+        agent.configure_paper_effort("quality_scaled", 50.0, 150.0)
+
+        first = agent.paper_completion_threshold()
+        second = agent.paper_completion_threshold()
+
+        self.assertGreaterEqual(first, 50.0)
+        self.assertLessEqual(first, 150.0)
+        self.assertEqual(first, second)
 
 
 class HeuristicPolicyTest(unittest.TestCase):
@@ -559,6 +574,13 @@ class EnvironmentTest(unittest.TestCase):
             "ReviewKindScriptAgent",
         )
         self.assertIn("agent_review_epsilon_history", data)
+        self.assertIn("agent_talent", data)
+        self.assertIn("paper_quality", data)
+        self.assertIn("paper_required_writing_effort", data)
+        self.assertIn("action_counts_by_timestep", data)
+        outcome = data["agent_outcome_summary"][0]
+        self.assertIn("talent", outcome)
+        self.assertIn("average_paper_quality", outcome)
         self.assertGreaterEqual(
             summary["ReviewKindScriptAgent"]["completed_reviews"],
             1,
@@ -569,7 +591,7 @@ class EnvironmentTest(unittest.TestCase):
 
         history = History()
         env = build_simulation(history, num_agents=12, rl_agents=0, seed=3)
-        env.run(120)
+        env.run(220)
 
         completed = sum(
             getattr(p, "completed_peer_reviews", 0) for p in env.papers
@@ -638,6 +660,7 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
         author = ScriptAgent("author")
         paper = self._listed(author, quality=1.0, current_ac=10.0)
         reviewer = ScriptAgent("reviewer", continuous=[("claim", paper)])
+        reviewer.configure_review_paradigm("continuous")
         paper.update_price_table([reviewer], 1.0, 0.0)
 
         records = reviewer.act_continuous()
@@ -648,6 +671,7 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
 
     def test_nonreviewer_research_adds_progress_without_publishing(self):
         agent = ScriptAgent("a", continuous=[("research", None)])
+        agent.configure_review_paradigm("continuous")
 
         records = agent.act_continuous()
 
@@ -658,6 +682,8 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
 
     def test_nonreviewer_research_finish_publishes_and_resets(self):
         agent = ScriptAgent("a", continuous=[("research_finish", None)])
+        agent.configure_review_paradigm("continuous")
+        agent.configure_continuous_publishing("choice")
 
         records = agent.act_continuous()
 
@@ -671,6 +697,7 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
         author = ScriptAgent("author")
         paper = self._listed(author, quality=1.0, current_ac=10.0)
         reviewer = ScriptAgent("reviewer")
+        reviewer.configure_review_paradigm("continuous")
         paper.update_price_table([reviewer], 1.0, 0.0)
         reviewer.claim_review(paper)
         reviewer.apply_initial_review_effort()
@@ -688,6 +715,7 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
         first = self._listed(author, quality=1.0, current_ac=50.0)
         second = self._listed(author, quality=1.0, current_ac=100.0)
         reviewer = ScriptAgent("reviewer")
+        reviewer.configure_review_paradigm("continuous")
         for paper in (first, second):
             paper.update_price_table([reviewer], 1.0, 0.0)
         reviewer.claim_review(first)
@@ -708,6 +736,7 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
         author = ScriptAgent("author")
         paper = self._listed(author, quality=1.0, current_ac=50.0)
         reviewer = ScriptAgent("reviewer")
+        reviewer.configure_review_paradigm("continuous")
         paper.update_price_table([reviewer], 1.0, 0.0)
         reviewer.claim_review(paper)
         reviewer.apply_initial_review_effort()
@@ -728,6 +757,7 @@ class ContinuousThresholdPublishingTest(unittest.TestCase):
 
     def test_auto_publishes_when_writing_effort_reaches_threshold(self):
         agent = ScriptAgent("author")
+        agent.configure_review_paradigm("continuous")
         agent.configure_continuous_publishing("threshold", 5.0)
         for _ in range(9):
             records = agent.act_continuous()
@@ -743,6 +773,7 @@ class ContinuousThresholdPublishingTest(unittest.TestCase):
 
     def test_research_finish_is_ignored_in_threshold_mode(self):
         agent = ScriptAgent("author", continuous=[("research_finish", None)])
+        agent.configure_review_paradigm("continuous")
         agent.configure_continuous_publishing("threshold", 50.0)
 
         records = agent.act_continuous()
