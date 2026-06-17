@@ -75,6 +75,59 @@ def _finish(fig, path: str | None, show: bool) -> str | None:
     return path
 
 
+def _mean_completed_review_effort_series(history: "History") -> list[float]:
+    """Cumulative mean effort of finished reviews at each timestep."""
+    stored = history.scalars.get("mean_completed_review_effort")
+    if stored is not None and len(stored) == len(history.days):
+        return list(stored)
+
+    by_day: dict[int, list[float]] = {}
+    for ts, _, _, effort, _ in history.completed_reviews:
+        by_day.setdefault(ts, []).append(float(effort))
+
+    running_sum = 0.0
+    running_count = 0
+    series: list[float] = []
+    for day in history.days:
+        for effort in by_day.get(day, []):
+            running_sum += effort
+            running_count += 1
+        series.append(running_sum / running_count if running_count else 0.0)
+    return series
+
+
+def _draw_mean_review_effort(ax, history: "History") -> None:
+    """Running average effort invested in completed peer reviews over time."""
+    series = _mean_completed_review_effort_series(history)
+    if not any(series):
+        ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    ax.plot(history.days, series, linewidth=2.0, color="#7c3aed", label="mean effort")
+    ax.axhline(
+        MIN_REVIEW_EFFORT_THRESHOLD,
+        color="#dc2626",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"good-faith threshold ({MIN_REVIEW_EFFORT_THRESHOLD:g})",
+    )
+    ax.set_xlabel("Timestep")
+    ax.set_ylabel("Mean review effort (timesteps)")
+    ax.legend(fontsize=8, loc="best")
+
+
+def plot_mean_review_effort(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Running mean effort of completed peer reviews over time."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_mean_review_effort(ax, history)
+    ax.set_title("Average peer review effort over time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _draw_agent_capital(ax, history: "History", legend: bool = True) -> None:
     if not history.agent_capital:
         ax.text(0.5, 0.5, "No agent capital recorded", ha="center", va="center")
@@ -755,10 +808,9 @@ def plot_choice_breakdown(
 def plot_run_summary(history: "History", path: str | None = None, show: bool = False):
     """Single-page dashboard encapsulating the single-review marketplace run.
 
-    Top row tells the outcome story (who accumulates capital, how unequal the
-    system becomes, and how the review market behaves); the bottom row explains
-    the mechanics (quality payoff, reviewer reputation, and how agents spend
-    their timesteps).
+    Top row tells the outcome story (review effort, inequality, and how the review
+    market behaves); the bottom row explains the mechanics (quality payoff,
+    reviewer reputation, and how agents spend their timesteps).
     """
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     n_papers = len(history.paper_ac)
@@ -770,8 +822,8 @@ def plot_run_summary(history: "History", path: str | None = None, show: bool = F
     )
 
     ax = axes[0, 0]
-    _draw_agent_capital(ax, history, legend=len(history.agent_capital) <= 12)
-    ax.set_title("Academic capital per agent")
+    _draw_mean_review_effort(ax, history)
+    ax.set_title("Average peer review effort over time")
 
     ax = axes[0, 1]
     _draw_system_aggregates(ax, history)
@@ -1054,6 +1106,9 @@ def plot_all(
         ),
         "agent_capital": plot_agent_capital(
             history, os.path.join(outdir, "agent_capital.png"), show=show
+        ),
+        "mean_review_effort": plot_mean_review_effort(
+            history, os.path.join(outdir, "mean_review_effort.png"), show=show
         ),
         "agent_group_comparison": plot_agent_group_comparison(
             history, os.path.join(outdir, "agent_group_comparison.png"), show=show

@@ -25,12 +25,26 @@ from Paper import (
 PAPER_THRESHOLD = SIM.paper_threshold
 EXPECTED_REVIEW_EFFORT_PER_TURN = REVIEW_EFFORT_PER_TIMESTEP
 WRITING_EFFORT_PER_TIMESTEP = SIM.writing_effort_per_timestep
+CONTINUOUS_PUBLISHING_CHOICE = "choice"
+CONTINUOUS_PUBLISHING_THRESHOLD = "threshold"
+VALID_CONTINUOUS_PUBLISHING = frozenset({
+    CONTINUOUS_PUBLISHING_CHOICE,
+    CONTINUOUS_PUBLISHING_THRESHOLD,
+})
 
 # Continuous-mode merged decision: one of these per agent per timestep.
 CONTINUOUS_CLAIM = "claim"
 CONTINUOUS_REVIEW = "review"
 CONTINUOUS_RESEARCH = "research"
 CONTINUOUS_RESEARCH_FINISH = "research_finish"
+
+
+def validate_continuous_publishing(mode: str) -> str:
+    value = str(mode).strip().lower()
+    if value not in VALID_CONTINUOUS_PUBLISHING:
+        allowed = ", ".join(sorted(VALID_CONTINUOUS_PUBLISHING))
+        raise ValueError(f"continuous_publishing must be one of: {allowed}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -70,6 +84,10 @@ class Agent(ABC):
         self.last_review_effort: float | None = None
         self.last_review_kind: str | None = None
         self.review_paradigm = validate_review_paradigm(SIM.review_paradigm)
+        self.continuous_publishing = validate_continuous_publishing(
+            SIM.continuous_publishing
+        )
+        self.continuous_paper_timesteps = float(SIM.continuous_paper_timesteps)
 
         # Quality of the paper currently being written (known before/while
         # working on it). Sampled lazily the first time the agent writes.
@@ -137,6 +155,20 @@ class Agent(ABC):
 
     def configure_review_paradigm(self, review_paradigm: str) -> None:
         self.review_paradigm = validate_review_paradigm(review_paradigm)
+
+    def configure_continuous_publishing(
+        self, mode: str, timesteps: float | None = None
+    ) -> None:
+        self.continuous_publishing = validate_continuous_publishing(mode)
+        if timesteps is not None:
+            self.continuous_paper_timesteps = max(0.0, float(timesteps))
+
+    def continuous_publish_by_threshold(self) -> bool:
+        """True when continuous mode auto-publishes at a fixed writing effort."""
+        return (
+            self.review_paradigm == REVIEW_PARADIGM_CONTINUOUS
+            and self.continuous_publishing == CONTINUOUS_PUBLISHING_THRESHOLD
+        )
 
     def should_offer_review_choice(self) -> bool:
         """True when the agent holds an in-progress review (continue / finish)."""
@@ -210,7 +242,11 @@ class Agent(ABC):
         if kind == CONTINUOUS_REVIEW and self.active_review_paper is not None:
             return [self._advance_active_review("review_continued")]
 
-        finish = kind == CONTINUOUS_RESEARCH_FINISH and self.active_review_paper is None
+        finish = (
+            kind == CONTINUOUS_RESEARCH_FINISH
+            and self.active_review_paper is None
+            and not self.continuous_publish_by_threshold()
+        )
         return [self._research_turn(finish=finish)]
 
     # ---- phase 2: effort application (one timestep of work) --------------
@@ -253,6 +289,8 @@ class Agent(ABC):
         published = False
         if finish:
             self.finish_research_paper()
+            published = True
+        elif self._auto_publish_if_threshold_reached():
             published = True
 
         if finished is not None:
@@ -408,6 +446,15 @@ class Agent(ABC):
         self.paper_progress += effort
         return effort
 
+    def _auto_publish_if_threshold_reached(self) -> bool:
+        if (
+            self.continuous_publish_by_threshold()
+            and self.paper_progress >= self.paper_completion_threshold()
+        ):
+            self.finish_research_paper()
+            return True
+        return False
+
     def finish_research_paper(self) -> Paper:
         """Publish the in-progress paper using its accumulated writing effort.
 
@@ -442,6 +489,8 @@ class Agent(ABC):
     def paper_completion_threshold(self) -> float:
         if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
             return DISCRETE_PAPER_TIMESTEPS
+        if self.continuous_publish_by_threshold():
+            return self.continuous_paper_timesteps
         return PAPER_THRESHOLD
 
     def _clear_last_review_result(self):

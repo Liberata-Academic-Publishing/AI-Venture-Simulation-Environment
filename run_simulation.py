@@ -69,6 +69,13 @@ def print_summary(env: Environment, history: History):
     print(f"Agents: {len(env.agents)}")
     print(f"Papers: {len(env.papers)}")
     print(f"Review paradigm: {env.review_paradigm}")
+    if env.review_paradigm == "continuous":
+        print(f"Continuous publishing: {env.continuous_publishing}")
+        if env.continuous_publishing == "threshold":
+            print(
+                f"- auto-publish after {env.continuous_paper_timesteps:g} "
+                "writing-effort timesteps"
+            )
 
     reviewed = sum(1 for p in env.papers if p.reviewed)
     on_market = sum(1 for p in env.papers if getattr(p, "review_available", False))
@@ -265,8 +272,9 @@ def print_choice_breakdown(history: History):
 
 
 CHART_DESCRIPTIONS = {
-    "summary": "Overview dashboard (capital, inequality, market, quality, reputation)",
+    "summary": "Overview dashboard (review effort, inequality, market, quality, reputation)",
     "agent_capital": "Academic capital per agent over time",
+    "mean_review_effort": "Running mean effort of completed peer reviews over time",
     "agent_group_comparison": "Mean capital and review outcomes by agent type",
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
     "marketplace_activity": "Papers on market vs cumulative reviews completed",
@@ -470,6 +478,8 @@ def build_simulation(
     dqn_policy_path: str | None = None,
     dqn_freeze: bool = False,
     review_paradigm: str = SIM.review_paradigm,
+    continuous_publishing: str = SIM.continuous_publishing,
+    continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
 ) -> Environment:
     """Construct a simulation of heuristics plus independent RL agents."""
     random.seed(seed)
@@ -506,6 +516,8 @@ def build_simulation(
         papers=Agent.all_papers,
         forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
         review_paradigm=review_paradigm,
+        continuous_publishing=continuous_publishing,
+        continuous_paper_timesteps=continuous_paper_timesteps,
         history=history,
     )
 
@@ -559,6 +571,17 @@ def parse_args(argv=None):
         help="Review action paradigm for the whole simulation run.",
     )
     parser.add_argument(
+        "--continuous-publishing", dest="continuous_publishing",
+        choices=["choice", "threshold"], default=SIM.continuous_publishing,
+        help="Continuous writing: agent-chosen finish (choice) or fixed effort "
+        "before auto-publish (threshold).",
+    )
+    parser.add_argument(
+        "--continuous-paper-timesteps", dest="continuous_paper_timesteps",
+        type=float, default=SIM.continuous_paper_timesteps, metavar="N",
+        help="Writing effort required to auto-publish in continuous threshold mode.",
+    )
+    parser.add_argument(
         "--rl-backend", dest="rl_backend", choices=["tabular", "linear"],
         default=SIM.rl_backend, help="Q backend for the RL agents.",
     )
@@ -597,6 +620,8 @@ def build_run_config(
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
     review_paradigm: str = SIM.review_paradigm,
+    continuous_publishing: str = SIM.continuous_publishing,
+    continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
 ) -> dict:
     """Full SimConfig snapshot for this run, with runtime overrides applied.
 
@@ -612,6 +637,8 @@ def build_run_config(
     config["num_probabilistic_agents"] = probabilistic_agents
     config["rl_backend"] = rl_backend
     config["review_paradigm"] = review_paradigm
+    config["continuous_publishing"] = continuous_publishing
+    config["continuous_paper_timesteps"] = continuous_paper_timesteps
     config["num_agents"] = config["num_heuristic_agents"]
     # Aliases so the static gallery (which also reads pre-overhaul runs) keeps
     # rendering the time-unit config fields under their old names.
@@ -645,6 +672,8 @@ def archive_run(
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
     review_paradigm: str = SIM.review_paradigm,
+    continuous_publishing: str = SIM.continuous_publishing,
+    continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
 ) -> None:
     from export_run import export_run
 
@@ -657,6 +686,8 @@ def archive_run(
             probabilistic_agents=probabilistic_agents,
             rl_backend=rl_backend,
             review_paradigm=review_paradigm,
+            continuous_publishing=continuous_publishing,
+            continuous_paper_timesteps=continuous_paper_timesteps,
         ),
         title=title,
     )
@@ -674,6 +705,8 @@ def prompt_and_archive(
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
     rl_backend: str = SIM.rl_backend,
     review_paradigm: str = SIM.review_paradigm,
+    continuous_publishing: str = SIM.continuous_publishing,
+    continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
 ) -> None:
     """Ask whether to save this run and, if so, what to title it."""
     try:
@@ -699,6 +732,8 @@ def prompt_and_archive(
         probabilistic_agents=probabilistic_agents,
         rl_backend=rl_backend,
         review_paradigm=review_paradigm,
+        continuous_publishing=continuous_publishing,
+        continuous_paper_timesteps=continuous_paper_timesteps,
     )
 
 
@@ -728,6 +763,8 @@ def main(argv=None):
         dqn_policy_path=dqn_policy_path,
         dqn_freeze=args.dqn_freeze,
         review_paradigm=args.review_paradigm,
+        continuous_publishing=args.continuous_publishing,
+        continuous_paper_timesteps=args.continuous_paper_timesteps,
     )
     for _ in range(NUM_TIMESTEPS):
         env.run_timestep()
@@ -748,6 +785,8 @@ def main(argv=None):
             probabilistic_agents=args.probabilistic_agents,
             rl_backend=args.rl_backend,
             review_paradigm=args.review_paradigm,
+            continuous_publishing=args.continuous_publishing,
+            continuous_paper_timesteps=args.continuous_paper_timesteps,
         )
     else:
         prompt_and_archive(
@@ -758,6 +797,8 @@ def main(argv=None):
             probabilistic_agents=args.probabilistic_agents,
             rl_backend=args.rl_backend,
             review_paradigm=args.review_paradigm,
+            continuous_publishing=args.continuous_publishing,
+            continuous_paper_timesteps=args.continuous_paper_timesteps,
         )
 
 

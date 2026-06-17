@@ -101,6 +101,12 @@ def default_metrics() -> dict[str, MetricFn]:
     }
 
 
+def mean_completed_review_effort(completed_reviews: list[tuple]) -> float:
+    """Running mean effort across all finished reviews logged so far."""
+    efforts = [float(row[3]) for row in completed_reviews if row[3] is not None]
+    return sum(efforts) / len(efforts) if efforts else 0.0
+
+
 class History:
     """Time-series + action log for a run.
 
@@ -160,6 +166,9 @@ class History:
         self.timesteps.append(env.timestep)
         for name, fn in self.metrics.items():
             self.scalars[name].append(float(fn(env)))
+        self.scalars.setdefault("mean_completed_review_effort", []).append(
+            mean_completed_review_effort(self.completed_reviews)
+        )
         if self.track_agents:
             self._record_series(
                 env.agents,
@@ -629,6 +638,12 @@ class History:
             history.action_counts = Counter(kind for _, _, kind, _ in history.actions)
 
         return history
+
+    @classmethod
+    def from_json(cls, path: str) -> "History":
+        """Load a History saved by :meth:`to_json`."""
+        with open(path, encoding="utf-8") as fh:
+            return cls.from_dict(json.load(fh))
 
     def to_json(self, path: str, *, max_paper_series: int | None = None) -> str:
         with open(path, "w", encoding="utf-8") as fh:

@@ -280,7 +280,9 @@ class QLearningAgent(HeuristicAgent):
             if has_reviewable:
                 actions.append(QAction.CLAIM_NEW)
             return actions
-        actions = [QAction.WRITE, QAction.RESEARCH_FINISH]
+        actions = [QAction.WRITE]
+        if not self.continuous_publish_by_threshold():
+            actions.append(QAction.RESEARCH_FINISH)
         if has_reviewable:
             actions.append(QAction.CLAIM)
         return actions

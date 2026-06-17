@@ -81,10 +81,10 @@ class RandomAgent(Agent):
                 (CONTINUOUS_REVIEW, None),
                 (CONTINUOUS_RESEARCH, None),
             ])
-        return random.choice([
-            (CONTINUOUS_RESEARCH, None),
-            (CONTINUOUS_RESEARCH_FINISH, None),
-        ])
+        options = [(CONTINUOUS_RESEARCH, None)]
+        if not self.continuous_publish_by_threshold():
+            options.append((CONTINUOUS_RESEARCH_FINISH, None))
+        return random.choice(options)
 
     def _can_review(self, paper: Paper) -> bool:
         helper = getattr(paper, "can_start_review", None)

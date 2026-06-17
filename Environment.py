@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from statistics import median
 from typing import TYPE_CHECKING
 
-from Agent import Agent
+from Agent import Agent, validate_continuous_publishing
 from config import SIM
 from Paper import (
     REVIEW_PARADIGM_DISCRETE,
@@ -40,6 +40,8 @@ class Environment:
         agent_cls: type[Agent] | AgentFactory | None = None,
         forecast_horizon_timesteps: int = 30,
         review_paradigm: str = "continuous",
+        continuous_publishing: str = SIM.continuous_publishing,
+        continuous_paper_timesteps: float = SIM.continuous_paper_timesteps,
         history: "History | None" = None,
     ):
         if agents is not None and num_agents is not None:
@@ -47,6 +49,10 @@ class Environment:
 
         self.forecast_horizon_timesteps = forecast_horizon_timesteps
         self.review_paradigm = validate_review_paradigm(review_paradigm)
+        self.continuous_publishing = validate_continuous_publishing(
+            continuous_publishing
+        )
+        self.continuous_paper_timesteps = float(continuous_paper_timesteps)
         self.history = history
         self.timestep = 0
         self.fair_market_price = fair_market_price_from_epsilons(
@@ -237,6 +243,11 @@ class Environment:
                 )
             if hasattr(agent, "configure_review_paradigm"):
                 agent.configure_review_paradigm(self.review_paradigm)
+            if hasattr(agent, "configure_continuous_publishing"):
+                agent.configure_continuous_publishing(
+                    self.continuous_publishing,
+                    self.continuous_paper_timesteps,
+                )
             if hasattr(agent, "forecast_horizon_timesteps"):
                 agent.forecast_horizon_timesteps = self.forecast_horizon_timesteps
 

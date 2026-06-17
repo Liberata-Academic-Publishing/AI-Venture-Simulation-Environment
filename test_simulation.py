@@ -5,6 +5,7 @@ import os
 import statistics
 import tempfile
 import unittest
+from unittest import mock
 
 from Agent import Agent, PAPER_THRESHOLD
 from Environment import Environment
@@ -169,11 +170,15 @@ class EconomicsTest(unittest.TestCase):
         Agent.all_papers = []
 
     def test_review_bump_rises_and_saturates_with_sigmoid(self):
+        import Paper as paper_mod
+
         self.assertEqual(review_accrual_bump(MIN_REVIEW_EFFORT_THRESHOLD - 0.5), 0.0)
-        b1 = review_accrual_bump(1.0)
-        b2 = review_accrual_bump(2.0)
-        b5 = review_accrual_bump(5.0)
-        b20 = review_accrual_bump(20.0)
+        with mock.patch.object(paper_mod, "REVIEW_EFFORT_CURVE", "sigmoid"):
+            at_threshold = MIN_REVIEW_EFFORT_THRESHOLD
+            b1 = review_accrual_bump(at_threshold)
+            b2 = review_accrual_bump(at_threshold + 1.0)
+            b5 = review_accrual_bump(at_threshold + 3.0)
+            b20 = review_accrual_bump(at_threshold + 18.0)
         self.assertGreater(b1, 0.0)
         self.assertGreater(b2, b1)
         self.assertGreater(b5, b2)
@@ -186,9 +191,10 @@ class EconomicsTest(unittest.TestCase):
         self.assertAlmostEqual(fair_market_price_from_epsilons(epsilons), expected)
 
     def test_higher_quality_raises_bump(self):
+        effort = MIN_REVIEW_EFFORT_THRESHOLD + 1.0
         self.assertGreater(
-            review_accrual_bump(1.0, quality=1.5),
-            review_accrual_bump(1.0, quality=0.8),
+            review_accrual_bump(effort, quality=1.5),
+            review_accrual_bump(effort, quality=0.8),
         )
 
     def test_higher_effort_yields_higher_accrual_rate(self):
@@ -257,7 +263,10 @@ class ReviewerStateTest(unittest.TestCase):
 
     def test_peer_review_history_updates_on_completion(self):
         author = ScriptAgent("author")
-        reviewer = ScriptAgent("reviewer", work=[("finish_review_write_paper", None)])
+        reviewer = ScriptAgent(
+            "reviewer",
+            work=[("peer_review", None), ("finish_review_write_paper", None)],
+        )
         paper = _listed_paper(author, quality=1.0, current_ac=100.0, accrual_rate=1.0)
         paper.update_price_table([reviewer], 1.0, 0.0)
         Agent.all_papers = [paper]
@@ -270,6 +279,10 @@ class ReviewerStateTest(unittest.TestCase):
         self.assertEqual(started.kind, "review_started")
         self.assertEqual(reviewer.active_review_effort, REVIEW_EFFORT_PER_TIMESTEP)
 
+        continued = reviewer.work_turn()
+        self.assertEqual(continued.kind, "review_continued")
+        self.assertEqual(reviewer.active_review_effort, 2 * REVIEW_EFFORT_PER_TIMESTEP)
+
         finished = reviewer.work_turn()
         self.assertEqual(finished.kind, "review_finished_write")
         self.assertEqual(reviewer.completed_review_count, 1)
@@ -279,7 +292,7 @@ class ReviewerStateTest(unittest.TestCase):
 
     def test_grabbing_new_paper_finalizes_active_review(self):
         author = ScriptAgent("author")
-        reviewer = ScriptAgent("reviewer")
+        reviewer = ScriptAgent("reviewer", work=[("peer_review", None)])
         first = _listed_paper(author, quality=1.0, current_ac=50.0)
         second = _listed_paper(author, quality=1.0, current_ac=100.0)
         first.update_price_table([reviewer], 1.0, 0.0)
@@ -287,6 +300,7 @@ class ReviewerStateTest(unittest.TestCase):
 
         reviewer.claim_review(first)
         reviewer.apply_initial_review_effort()  # phase 2 effort on the first review
+        reviewer.work_turn()  # reach the good-faith effort threshold
         record = reviewer.claim_review(second)
 
         self.assertEqual(record.kind, "review_finished_peer_review")
@@ -706,6 +720,36 @@ class ContinuousMergedPhaseTest(unittest.TestCase):
         self.assertIsNone(reviewer.active_review_paper)
         self.assertFalse(records[0].published)
         self.assertGreater(reviewer.paper_progress, 0.0)
+
+
+class ContinuousThresholdPublishingTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+
+    def test_auto_publishes_when_writing_effort_reaches_threshold(self):
+        agent = ScriptAgent("author")
+        agent.configure_continuous_publishing("threshold", 5.0)
+        for _ in range(9):
+            records = agent.act_continuous()
+            self.assertFalse(records[0].published)
+        self.assertEqual(len(Agent.all_papers), 0)
+        self.assertAlmostEqual(agent.paper_progress, 4.5)
+
+        records = agent.act_continuous()
+        self.assertTrue(records[0].published)
+        self.assertEqual(len(Agent.all_papers), 1)
+        self.assertEqual(agent.paper_progress, 0.0)
+        self.assertAlmostEqual(Agent.all_papers[0].writing_effort, 5.0)
+
+    def test_research_finish_is_ignored_in_threshold_mode(self):
+        agent = ScriptAgent("author", continuous=[("research_finish", None)])
+        agent.configure_continuous_publishing("threshold", 50.0)
+
+        records = agent.act_continuous()
+
+        self.assertFalse(records[0].published)
+        self.assertEqual(len(Agent.all_papers), 0)
+        self.assertGreater(agent.paper_progress, 0.0)
 
 
 class QLearningRewardTest(unittest.TestCase):

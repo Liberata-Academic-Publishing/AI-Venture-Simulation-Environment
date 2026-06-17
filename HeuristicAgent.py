@@ -144,6 +144,9 @@ class HeuristicAgent(Agent):
         build_length)`` where ``total_value`` is the AC the paper is forecast to
         earn over the horizon (the author owns ~all of it) and ``build_length``
         is the number of writing timesteps the plan implies (for amortization).
+
+        In threshold publishing mode the agent only researches until the fixed
+        effort target is reached, so there is no finish-vs-continue choice.
         """
         quality = (
             self.next_paper_quality
@@ -152,6 +155,13 @@ class HeuristicAgent(Agent):
         )
         effort = self.paper_progress
         span = max(1.0, float(horizon))
+
+        if self.continuous_publish_by_threshold():
+            threshold = self.paper_completion_threshold()
+            build_len = max(1.0, threshold - effort)
+            earning = max(0.0, span - build_len)
+            value = accrual_rate_from_effort(quality, threshold) * earning
+            return (CONTINUOUS_RESEARCH, value, build_len)
 
         # Invest this timestep, then finish (paper earns over the remaining span).
         finish_value = accrual_rate_from_effort(quality, effort + 1.0) * max(

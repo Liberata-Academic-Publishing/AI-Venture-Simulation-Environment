@@ -26,12 +26,12 @@ class SimConfig:
     """Every parameter that defines a single simulation run."""
 
     # --- World -----------------------------------------------------------
-    num_heuristic_agents: int = 0
-    num_rl_agents: int = 20
+    num_heuristic_agents: int = 10
+    num_rl_agents: int = 10
     num_dqn_agents: int = 0
     num_random_agents: int = 0
     num_probabilistic_agents: int = 0
-    num_timesteps: int = 1000
+    num_timesteps: int = 10000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
     output_dir: str = "runs"
@@ -72,7 +72,7 @@ class SimConfig:
     good_faith_review_threshold: float = 2.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
     good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
-    review_effort_curve: str = "log"        # "sigmoid" | "log"
+    review_effort_curve: str = "sigmoid"        # "sigmoid" | "log"
     min_review_accrual_bump: float = 0.05       # sigmoid bump at one timestep
     max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
     review_sigmoid_midpoint: float = 2.5        # review length where impact accelerates
@@ -81,7 +81,11 @@ class SimConfig:
     first_extra_day_bump: float = 0.10          # log-mode first extra timestep bump
 
     # --- Publishing ------------------------------------------------------
-    paper_threshold: float = 10.0   # writing effort needed to publish a paper
+    paper_threshold: float = 10.0   # legacy forecast normalizer (choice-mode continuous)
+    # Continuous writing: "choice" = agent picks when to finish/list; "threshold"
+    # = auto-publish after a fixed amount of writing effort (no early finish).
+    continuous_publishing: str = "choice"       # "choice" | "threshold"
+    continuous_paper_timesteps: float = 50.0    # writing effort to auto-publish
     discrete_paper_timesteps: float = 200.0      # discrete manuscript duration (T_M)
     discrete_writing_effort_per_timestep: float = 1.0
     # Continuous-mode asymptotic writing model: a paper's accrual rate approaches
@@ -105,8 +109,8 @@ class SimConfig:
     rl_backend: str = "tabular"     # "tabular" | "linear"
     rl_epsilon: float = 0.1         # exploration when learning online
     rl_gamma: float = 0.95          # TD discount
-    rl_reward_ac_weight: float = 0       # weight on Δ academic capital
-    rl_reward_rank_weight: float = 0   # weight on Δ AC percentile rank (0..1)
+    rl_reward_ac_weight: float = 0.0       # weight on Δ academic capital
+    rl_reward_rank_weight: float = 0.0   # weight on Δ AC percentile rank (0..1)
     rl_reward_accrual_weight: float = 1.0  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
     talent_min: float = 0.8         # talent spread (inert until the sim uses it)
@@ -130,10 +134,10 @@ class TrainConfig:
     """Defaults for the training harness (train_rl.py) — kept separate from the
     simulation parameters above."""
 
-    episodes: int = 20
+    episodes: int = 200
     timesteps: int = 1000
-    num_rl: int = 0
-    num_heuristic: int = 10
+    num_rl: int = 10
+    num_heuristic: int = 0
     eps_start: float = 1.0
     eps_end: float = 0.05
 
@@ -142,7 +146,7 @@ class TrainConfig:
 class TrainDQNConfig:
     """Defaults for the DQN training harness (train_dqn.py)."""
 
-    episodes: int = 4
+    episodes: int = 200
     timesteps: int = 1000
     num_dqn: int = 10
     num_heuristic: int = 0
