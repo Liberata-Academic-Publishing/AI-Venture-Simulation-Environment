@@ -20,6 +20,7 @@ from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 # Defaults come from config.py; CLI flags override them at runtime.
 NUM_AGENTS = SIM.num_heuristic_agents
 NUM_TIMESTEPS = SIM.num_timesteps
+PROGRESS_INTERVAL = 100
 NUM_RL_AGENTS = SIM.num_rl_agents
 NUM_DQN_AGENTS = SIM.num_dqn_agents
 NUM_RANDOM_AGENTS = SIM.num_random_agents
@@ -272,7 +273,7 @@ def print_choice_breakdown(history: History):
 
 
 CHART_DESCRIPTIONS = {
-    "summary": "Overview dashboard (review effort, inequality, market, quality, reputation)",
+    "summary": "Overview dashboard (review effort, effort histogram, market, quality, reputation)",
     "agent_capital": "Academic capital per agent over time",
     "mean_review_effort": "Running mean effort of completed peer reviews over time",
     "agent_group_comparison": "Mean capital and review outcomes by agent type",
@@ -538,6 +539,11 @@ def parse_args(argv=None):
         help="Skip the prompt and do not save the run.",
     )
     parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Skip the end-of-run text summary (charts and CSV/JSON are still saved).",
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="Pop up matplotlib chart windows after the run (in addition to saving PNGs).",
@@ -768,9 +774,16 @@ def main(argv=None):
     )
     for _ in range(NUM_TIMESTEPS):
         env.run_timestep()
+        if env.timestep % PROGRESS_INTERVAL == 0:
+            print(
+                f"Timestep {env.timestep}/{NUM_TIMESTEPS} "
+                f"({len(env.papers)} papers)",
+                flush=True,
+            )
 
-    print_summary(env, history)
-    print_choice_breakdown(history)
+    if not args.quiet:
+        print_summary(env, history)
+        print_choice_breakdown(history)
     save_outputs(history, show=args.show, open_charts=args.open)
 
     if args.no_archive:

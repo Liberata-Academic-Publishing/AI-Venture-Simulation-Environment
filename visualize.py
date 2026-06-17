@@ -808,9 +808,10 @@ def plot_choice_breakdown(
 def plot_run_summary(history: "History", path: str | None = None, show: bool = False):
     """Single-page dashboard encapsulating the single-review marketplace run.
 
-    Top row tells the outcome story (review effort, inequality, and how the review
-    market behaves); the bottom row explains the mechanics (quality payoff,
-    reviewer reputation, and how agents spend their timesteps).
+    Top row tells the outcome story (mean review effort over time, effort
+    distribution, and how the review market behaves); the bottom row explains
+    the mechanics (quality payoff, reviewer reputation, and how agents spend
+    their timesteps).
     """
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     n_papers = len(history.paper_ac)
@@ -826,8 +827,8 @@ def plot_run_summary(history: "History", path: str | None = None, show: bool = F
     ax.set_title("Average peer review effort over time")
 
     ax = axes[0, 1]
-    _draw_system_aggregates(ax, history)
-    ax.set_title("System capital & inequality (Gini)")
+    _draw_effort_histogram(ax, history)
+    ax.set_title("Completed peer reviews by effort")
 
     ax = axes[0, 2]
     _draw_marketplace(ax, history)

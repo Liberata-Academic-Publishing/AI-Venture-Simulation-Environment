@@ -31,7 +31,7 @@ class SimConfig:
     num_dqn_agents: int = 0
     num_random_agents: int = 0
     num_probabilistic_agents: int = 0
-    num_timesteps: int = 10000
+    num_timesteps: int = 2000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
     output_dir: str = "runs"
@@ -84,7 +84,7 @@ class SimConfig:
     paper_threshold: float = 10.0   # legacy forecast normalizer (choice-mode continuous)
     # Continuous writing: "choice" = agent picks when to finish/list; "threshold"
     # = auto-publish after a fixed amount of writing effort (no early finish).
-    continuous_publishing: str = "choice"       # "choice" | "threshold"
+    continuous_publishing: str = "threshold"       # "choice" | "threshold"
     continuous_paper_timesteps: float = 50.0    # writing effort to auto-publish
     discrete_paper_timesteps: float = 200.0      # discrete manuscript duration (T_M)
     discrete_writing_effort_per_timestep: float = 1.0
