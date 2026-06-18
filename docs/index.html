@@ -160,7 +160,7 @@
         </table>
       </div>
       <div class="panel" id="panel-review"><h2>Review behavior</h2><img class="chart-img" id="img-review_behavior" alt="Review behavior"><canvas id="reviewChart"></canvas></div>
-      <div class="panel" id="panel-marketplace"><h2>Review marketplace: supply vs reviews completed</h2><img class="chart-img" id="img-marketplace_activity" alt="Review marketplace"><canvas id="marketplaceChart"></canvas></div>
+      <div class="panel" id="panel-marketplace"><h2>Review marketplace: supply, claims, and reviews completed</h2><img class="chart-img" id="img-marketplace_activity" alt="Review marketplace"><canvas id="marketplaceChart"></canvas></div>
       <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
       <div class="panel" id="panel-quality"><h2>Paper quality vs accrued capital</h2><img class="chart-img" id="img-paper_quality_vs_ac" alt="Paper quality vs accrued capital"><canvas id="qualityChart"></canvas></div>
       <div class="panel" id="panel-effort-rate"><h2>Writing effort vs accrual rate</h2><img class="chart-img" id="img-writing_effort_vs_rate" alt="Writing effort vs accrual rate"><canvas id="effortRateChart"></canvas></div>
@@ -297,6 +297,11 @@
         ["min_offer_share", "Min offer share"],
         ["use_fair_market_pricing", "Fair-market pricing"],
         ["prior_review_epsilon", "Prior review epsilon"],
+        ["pricing_policy", "Pricing policy"],
+        ["target_market_wait_timesteps", "Target market wait"],
+        ["adaptive_pricing_learning_rate", "Adaptive pricing LR"],
+        ["min_author_price_multiplier", "Min price multiplier"],
+        ["max_author_price_multiplier", "Max price multiplier"],
       ]],
       ["Paper quality", [
         ["quality_sigma", "Quality sigma"],
@@ -851,13 +856,16 @@
       });
     }
 
-    // Market supply (papers listed) vs cumulative reviews completed, dual y-axes.
+    // Market supply/listing/claim diagnostics vs cumulative reviews completed.
     function setupMarketplaceChart() {
       if (marketplaceChart) marketplaceChart.destroy();
       marketplaceChart = new Chart(document.getElementById("marketplaceChart"), {
         type: "line",
         data: { labels: [], datasets: [
           { label: "papers on market", data: [], borderColor: "#f59e0b", borderWidth: 1.5, pointRadius: 0, yAxisID: "y" },
+          { label: "papers listed this timestep", data: [], borderColor: "#22c55e", borderWidth: 1.2, pointRadius: 0, yAxisID: "y" },
+          { label: "papers claimed this timestep", data: [], borderColor: "#ef4444", borderWidth: 1.2, pointRadius: 0, yAxisID: "y" },
+          { label: "cumulative instant claims", data: [], borderColor: "#fb7185", borderWidth: 1.4, borderDash: [2,3], pointRadius: 0, yAxisID: "y" },
           { label: "cumulative reviews", data: [], borderColor: "#a855f7", borderWidth: 1.6, borderDash: [5,4], pointRadius: 0, yAxisID: "y1" },
         ]},
         options: { ...baseOpts, plugins: { legend: legendOpts },
@@ -1001,14 +1009,21 @@
         reviewChart.update();
       }
 
-      // Review marketplace: papers on market vs cumulative reviews completed
-      const hasMarket = (s.papers_on_market || []).length || (s.completed_peer_reviews || []).length;
+      // Review marketplace: papers on market/listed/claimed vs completed reviews.
+      const hasMarket = (s.papers_on_market || []).length
+        || (s.papers_listed_this_timestep || []).length
+        || (s.papers_claimed_this_timestep || []).length
+        || (s.papers_claimed_same_timestep || []).length
+        || (s.completed_peer_reviews || []).length;
       setPanel("panel-marketplace", !!hasMarket);
       if (hasMarket) {
         setupMarketplaceChart();
         marketplaceChart.data.labels = days;
         marketplaceChart.data.datasets[0].data = s.papers_on_market || [];
-        marketplaceChart.data.datasets[1].data = s.completed_peer_reviews || [];
+        marketplaceChart.data.datasets[1].data = s.papers_listed_this_timestep || [];
+        marketplaceChart.data.datasets[2].data = s.papers_claimed_this_timestep || [];
+        marketplaceChart.data.datasets[3].data = s.papers_claimed_same_timestep || [];
+        marketplaceChart.data.datasets[4].data = s.completed_peer_reviews || [];
         marketplaceChart.update();
       }
 
