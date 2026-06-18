@@ -95,7 +95,7 @@ class SimConfig:
     # thresholds above; ``uniform`` samples once per paper from the 50-150 band
     # discussed in sync; ``quality_scaled`` maps higher sampled paper quality to
     # a larger target inside that same band.
-    paper_effort_mode: str = "fixed"             # "fixed" | "uniform" | "quality_scaled"
+    paper_effort_mode: str = "uniform"             # "fixed" | "uniform" | "quality_scaled"
     paper_effort_min: float = 130.0
     paper_effort_max: float = 170.0
     # Continuous-mode asymptotic writing model: a paper's accrual rate approaches
