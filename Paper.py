@@ -38,6 +38,7 @@ MIN_PAPER_QUALITY = SIM.min_paper_quality
 QUALITY_PRICE_SCALE = SIM.quality_price_scale
 HISTORY_PRICE_SCALE = SIM.history_price_scale
 WRITING_SATURATION = SIM.writing_saturation
+PRICING_POLICY = SIM.pricing_policy
 
 REVIEW_PARADIGM_CONTINUOUS = "continuous"
 REVIEW_PARADIGM_DISCRETE = "discrete"
@@ -50,12 +51,27 @@ BAD_FAITH_REVIEW = "bad_faith"
 GOOD_FAITH_REVIEW = "good_faith"
 VALID_REVIEW_KINDS = frozenset({BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW})
 
+PRICING_POLICY_STATIC = "static_fair_market"
+PRICING_POLICY_ADAPTIVE = "adaptive_multiplier"
+VALID_PRICING_POLICIES = frozenset({
+    PRICING_POLICY_STATIC,
+    PRICING_POLICY_ADAPTIVE,
+})
+
 
 def validate_review_paradigm(paradigm: str) -> str:
     value = str(paradigm).strip().lower()
     if value not in VALID_REVIEW_PARADIGMS:
         allowed = ", ".join(sorted(VALID_REVIEW_PARADIGMS))
         raise ValueError(f"review_paradigm must be one of: {allowed}")
+    return value
+
+
+def validate_pricing_policy(policy: str) -> str:
+    value = str(policy).strip().lower()
+    if value not in VALID_PRICING_POLICIES:
+        allowed = ", ".join(sorted(VALID_PRICING_POLICIES))
+        raise ValueError(f"pricing_policy must be one of: {allowed}")
     return value
 
 
@@ -265,6 +281,9 @@ class Paper:
         self.agreed_review_share = 0.0
         self.price_table: dict[Agent, float] = {}
         self.review_records: list[dict[str, object]] = []
+        self.listed_timestep: int | None = None
+        self.claimed_timestep: int | None = None
+        self.time_on_market_timesteps: int | None = None
 
     # ---- compatibility aliases ------------------------------------------
     @property
@@ -296,6 +315,7 @@ class Paper:
         market_median_quality: float,
         mean_peer_review_epsilon: float,
         fair_market_price: float | None = None,
+        pricing_policy: str = PRICING_POLICY,
     ) -> None:
         """Recompute the per-reviewer share offer for this listed paper.
 
@@ -310,6 +330,17 @@ class Paper:
         if fair_market_price is None:
             fair_market_price = fair_market_price_from_epsilons([PRIOR_REVIEW_EPSILON])
         base_offer = fair_market_price if USE_FAIR_MARKET_PRICING else DEFAULT_REVIEW_SHARE
+        policy = validate_pricing_policy(pricing_policy)
+        author_multiplier = 1.0
+        if policy == PRICING_POLICY_ADAPTIVE:
+            author_multiplier = getattr(self.author, "review_offer_multiplier", 1.0)
+            try:
+                author_multiplier = float(author_multiplier)
+            except (TypeError, ValueError):
+                author_multiplier = 1.0
+            if math.isnan(author_multiplier) or math.isinf(author_multiplier):
+                author_multiplier = 1.0
+            author_multiplier = max(0.0, author_multiplier)
         table: dict[Agent, float] = {}
         for agent in reviewers:
             if agent is self.author:
@@ -322,7 +353,7 @@ class Paper:
                 0.0,
                 1.0 + HISTORY_PRICE_SCALE * (history - mean_peer_review_epsilon),
             )
-            offer = base_offer * quality_factor * history_factor
+            offer = base_offer * author_multiplier * quality_factor * history_factor
             offer = min(max(offer, MIN_OFFER_SHARE), ceiling)
             table[agent] = offer
         self.price_table = table
@@ -339,7 +370,17 @@ class Paper:
             return False
         return self.market_listed
 
-    def start_review(self, agent: Agent) -> bool:
+    def list_on_market(self, timestep: int | None = None) -> None:
+        """Put the paper on the review market and record when it became available."""
+        self.market_listed = True
+        if timestep is not None and self.listed_timestep is None:
+            self.listed_timestep = int(timestep)
+
+    def start_review(
+        self,
+        agent: Agent,
+        current_timestep: int | None = None,
+    ) -> bool:
         """Claim the paper for review: permanently delist it and lock the price."""
         if not self.can_start_review(agent):
             return False
@@ -347,6 +388,16 @@ class Paper:
         self.review_claimed = True
         self.market_listed = False
         self.agreed_review_share = self.offered_share(agent)
+        if current_timestep is not None:
+            self.claimed_timestep = int(current_timestep)
+            if self.listed_timestep is not None:
+                self.time_on_market_timesteps = max(
+                    0,
+                    self.claimed_timestep - int(self.listed_timestep),
+                )
+            feedback = getattr(self.author, "record_review_claim_feedback", None)
+            if feedback is not None:
+                feedback(self.time_on_market_timesteps)
         return True
 
     def finish_review(

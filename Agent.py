@@ -12,11 +12,13 @@ from Paper import (
     REVIEW_EFFORT_PER_TIMESTEP,
     REVIEW_PARADIGM_CONTINUOUS,
     REVIEW_PARADIGM_DISCRETE,
+    PRICING_POLICY_ADAPTIVE,
     Paper,
     fixed_review_effort,
     quality_multiplier,
     review_action_kind,
     review_kind_from_effort,
+    validate_pricing_policy,
     validate_review_paradigm,
 )
 
@@ -106,6 +108,20 @@ class Agent(ABC):
         self.paper_effort_mode = validate_paper_effort_mode(SIM.paper_effort_mode)
         self.paper_effort_min = float(SIM.paper_effort_min)
         self.paper_effort_max = float(SIM.paper_effort_max)
+        self.current_timestep: int | None = None
+
+        # Author-side pricing state. The static policy leaves this multiplier at
+        # 1.0; the adaptive policy nudges it when an author's papers are claimed
+        # faster/slower than the target wait.
+        self.pricing_policy = validate_pricing_policy(SIM.pricing_policy)
+        self.review_offer_multiplier = 1.0
+        self.target_market_wait_timesteps = float(SIM.target_market_wait_timesteps)
+        self.adaptive_pricing_learning_rate = float(
+            SIM.adaptive_pricing_learning_rate
+        )
+        self.min_author_price_multiplier = float(SIM.min_author_price_multiplier)
+        self.max_author_price_multiplier = float(SIM.max_author_price_multiplier)
+        self.review_offer_multiplier_updates = 0
 
         # Quality of the paper currently being written (known before/while
         # working on it). Sampled lazily the first time the agent writes.
@@ -213,6 +229,87 @@ class Agent(ABC):
         if self.paper_progress == 0.0:
             self.next_paper_required_effort = None
 
+    def configure_pricing_policy(
+        self,
+        pricing_policy: str | None = None,
+        *,
+        target_market_wait_timesteps: float | None = None,
+        learning_rate: float | None = None,
+        min_multiplier: float | None = None,
+        max_multiplier: float | None = None,
+    ) -> None:
+        """Configure optional author-side adaptive offer behavior.
+
+        The default policy is static, so this method is deliberately inert
+        unless the environment enables ``adaptive_multiplier``.
+        """
+        if pricing_policy is not None:
+            self.pricing_policy = validate_pricing_policy(pricing_policy)
+        if target_market_wait_timesteps is not None:
+            self.target_market_wait_timesteps = max(
+                0.0,
+                float(target_market_wait_timesteps),
+            )
+        if learning_rate is not None:
+            self.adaptive_pricing_learning_rate = max(0.0, float(learning_rate))
+        if min_multiplier is not None:
+            self.min_author_price_multiplier = max(0.0, float(min_multiplier))
+        if max_multiplier is not None:
+            self.max_author_price_multiplier = max(0.0, float(max_multiplier))
+        if self.max_author_price_multiplier < self.min_author_price_multiplier:
+            self.min_author_price_multiplier, self.max_author_price_multiplier = (
+                self.max_author_price_multiplier,
+                self.min_author_price_multiplier,
+            )
+        self.review_offer_multiplier = self._clamp_offer_multiplier(
+            self.review_offer_multiplier
+        )
+
+    def record_review_claim_feedback(self, time_on_market: int | None) -> None:
+        """Update future author offers from observed claim speed.
+
+        Immediate claims imply reviewer demand is high at the current price, so
+        the author can lower future reviewer shares. Slow claims imply the
+        offer may be too low, so the author raises future shares. This is a
+        lightweight adaptive pricing experiment, not the default behavior.
+        """
+        if self.pricing_policy != PRICING_POLICY_ADAPTIVE:
+            return
+        if time_on_market is None:
+            return
+
+        wait = max(0.0, float(time_on_market))
+        target = max(0.0, self.target_market_wait_timesteps)
+        lr = max(0.0, self.adaptive_pricing_learning_rate)
+        if lr == 0.0:
+            return
+
+        if wait <= target:
+            denom = target if target > 0.0 else 1.0
+            pressure = 1.0 if target == 0.0 else (target - wait) / denom
+            factor = 1.0 - lr * max(0.0, min(1.0, pressure))
+        else:
+            denom = target if target > 0.0 else 1.0
+            pressure = min(2.0, (wait - target) / denom)
+            factor = 1.0 + lr * max(0.0, pressure)
+
+        self.review_offer_multiplier = self._clamp_offer_multiplier(
+            self.review_offer_multiplier * factor
+        )
+        self.review_offer_multiplier_updates += 1
+
+    def _clamp_offer_multiplier(self, value: float) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = 1.0
+        if math.isnan(number) or math.isinf(number):
+            number = 1.0
+        return min(
+            max(number, self.min_author_price_multiplier),
+            self.max_author_price_multiplier,
+        )
+
     def continuous_publish_by_threshold(self) -> bool:
         """True when continuous mode auto-publishes at a fixed writing effort."""
         return (
@@ -249,7 +346,7 @@ class Agent(ABC):
         if self.active_review_paper is not None:
             finished = self._finalize_active_review()
 
-        paper.start_review(self)
+        paper.start_review(self, current_timestep=self.current_timestep)
         self.active_review_paper = paper
         self.active_review_effort = 0.0
         self.review_progress = 0.0

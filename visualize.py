@@ -292,7 +292,7 @@ def plot_paper_ac(history: "History", path: str | None = None, show: bool = Fals
 
 
 def _draw_marketplace(ax, history: "History") -> None:
-    """Supply (papers waiting on the market) vs demand (reviews completed)."""
+    """Supply (papers waiting/listed/claimed) vs demand (reviews completed)."""
     scalars = history.scalars
     handles = []
     if "papers_on_market" in scalars:
@@ -301,6 +301,37 @@ def _draw_marketplace(ax, history: "History") -> None:
             scalars["papers_on_market"],
             color="#f59e0b",
             label="papers on market",
+        )
+        handles.append(line)
+    if "papers_listed_this_timestep" in scalars:
+        (line,) = ax.plot(
+            history.days,
+            scalars["papers_listed_this_timestep"],
+            color="#22c55e",
+            linewidth=1.2,
+            alpha=0.85,
+            label="papers listed this timestep",
+        )
+        handles.append(line)
+    if "papers_claimed_this_timestep" in scalars:
+        (line,) = ax.plot(
+            history.days,
+            scalars["papers_claimed_this_timestep"],
+            color="#ef4444",
+            linewidth=1.2,
+            alpha=0.85,
+            label="papers claimed this timestep",
+        )
+        handles.append(line)
+    if "papers_claimed_same_timestep" in scalars:
+        (line,) = ax.plot(
+            history.days,
+            scalars["papers_claimed_same_timestep"],
+            color="#fb7185",
+            linestyle=":",
+            linewidth=1.4,
+            alpha=0.85,
+            label="cumulative instant claims",
         )
         handles.append(line)
     ax.set_xlabel("Timestep")
@@ -330,10 +361,10 @@ def _draw_marketplace(ax, history: "History") -> None:
 def plot_marketplace_activity(
     history: "History", path: str | None = None, show: bool = False
 ):
-    """Market supply (papers listed) against cumulative reviews completed."""
+    """Market supply/listing/claim diagnostics against completed reviews."""
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_marketplace(ax, history)
-    ax.set_title("Review marketplace: supply vs reviews completed")
+    ax.set_title("Review marketplace: supply, claims, and reviews completed")
     fig.tight_layout()
     return _finish(fig, path, show)
 

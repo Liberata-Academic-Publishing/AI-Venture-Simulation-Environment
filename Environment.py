@@ -12,6 +12,7 @@ from Paper import (
     REVIEW_PARADIGM_DISCRETE,
     Paper,
     fair_market_price_from_epsilons,
+    validate_pricing_policy,
     validate_review_paradigm,
 )
 
@@ -46,6 +47,11 @@ class Environment:
         paper_effort_min: float = SIM.paper_effort_min,
         paper_effort_max: float = SIM.paper_effort_max,
         discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
+        pricing_policy: str = SIM.pricing_policy,
+        target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
+        adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
+        min_author_price_multiplier: float = SIM.min_author_price_multiplier,
+        max_author_price_multiplier: float = SIM.max_author_price_multiplier,
         history: "History | None" = None,
     ):
         if agents is not None and num_agents is not None:
@@ -61,6 +67,11 @@ class Environment:
         self.paper_effort_min = float(paper_effort_min)
         self.paper_effort_max = float(paper_effort_max)
         self.discrete_paper_timesteps = float(discrete_paper_timesteps)
+        self.pricing_policy = validate_pricing_policy(pricing_policy)
+        self.target_market_wait_timesteps = float(target_market_wait_timesteps)
+        self.adaptive_pricing_learning_rate = float(adaptive_pricing_learning_rate)
+        self.min_author_price_multiplier = float(min_author_price_multiplier)
+        self.max_author_price_multiplier = float(max_author_price_multiplier)
         self.history = history
         self.timestep = 0
         self.fair_market_price = fair_market_price_from_epsilons(
@@ -121,6 +132,7 @@ class Environment:
         finish research). Agents act in the freshly shuffled order so claims
         race for whatever papers are still listed."""
         for agent in order:
+            agent.current_timestep = self.timestep
             act = getattr(agent, "act_continuous", None)
             if act is None:
                 continue
@@ -140,6 +152,7 @@ class Environment:
         """
         claimers: set[Agent] = set()
         for agent in order:
+            agent.current_timestep = self.timestep
             if (
                 self.review_paradigm == REVIEW_PARADIGM_DISCRETE
                 and agent.active_review_paper is not None
@@ -168,6 +181,7 @@ class Environment:
         review.
         """
         for agent in order:
+            agent.current_timestep = self.timestep
             if agent in claimers:
                 record = agent.apply_initial_review_effort()
             else:
@@ -201,6 +215,7 @@ class Environment:
                 median_quality,
                 mean_epsilon,
                 fair_market_price=self.fair_market_price,
+                pricing_policy=self.pricing_policy,
             )
 
     def _list_scheduled_papers(self) -> None:
@@ -212,7 +227,7 @@ class Environment:
                 and not paper.review_claimed
                 and not paper.reviewed
             ):
-                paper.market_listed = True
+                paper.list_on_market(self.timestep)
                 paper.scheduled_listing_timestep = None
 
     def _schedule_new_papers(self) -> None:
@@ -262,6 +277,14 @@ class Environment:
                     self.paper_effort_min,
                     self.paper_effort_max,
                     discrete_timesteps=self.discrete_paper_timesteps,
+                )
+            if hasattr(agent, "configure_pricing_policy"):
+                agent.configure_pricing_policy(
+                    self.pricing_policy,
+                    target_market_wait_timesteps=self.target_market_wait_timesteps,
+                    learning_rate=self.adaptive_pricing_learning_rate,
+                    min_multiplier=self.min_author_price_multiplier,
+                    max_multiplier=self.max_author_price_multiplier,
                 )
             if hasattr(agent, "forecast_horizon_timesteps"):
                 agent.forecast_horizon_timesteps = self.forecast_horizon_timesteps
