@@ -47,6 +47,73 @@ def gini(values: Iterable[float]) -> float:
     return (2.0 * weighted) / (n * total) - (n + 1.0) / n
 
 
+def _papers_listed_this_timestep(env: "Environment") -> float:
+    return float(
+        sum(
+            1
+            for paper in env.papers
+            if getattr(paper, "listed_timestep", None) == env.timestep
+        )
+    )
+
+
+def _papers_claimed_this_timestep(env: "Environment") -> float:
+    return float(
+        sum(
+            1
+            for paper in env.papers
+            if getattr(paper, "claimed_timestep", None) == env.timestep
+        )
+    )
+
+
+def _papers_claimed_same_timestep(env: "Environment") -> float:
+    return float(
+        sum(
+            1
+            for paper in env.papers
+            if getattr(paper, "claimed_timestep", None) is not None
+            and getattr(paper, "claimed_timestep", None)
+            == getattr(paper, "listed_timestep", None)
+        )
+    )
+
+
+def _mean_time_on_market_claimed(env: "Environment") -> float:
+    waits = [
+        float(wait)
+        for paper in env.papers
+        for wait in [getattr(paper, "time_on_market_timesteps", None)]
+        if wait is not None
+    ]
+    return sum(waits) / len(waits) if waits else 0.0
+
+
+def _instant_claim_rate(env: "Environment") -> float:
+    claimed = [
+        paper
+        for paper in env.papers
+        if getattr(paper, "claimed_timestep", None) is not None
+    ]
+    if not claimed:
+        return 0.0
+    instant = sum(
+        1
+        for paper in claimed
+        if getattr(paper, "claimed_timestep", None)
+        == getattr(paper, "listed_timestep", None)
+    )
+    return instant / len(claimed)
+
+
+def _mean_author_price_multiplier(env: "Environment") -> float:
+    values = [
+        float(getattr(agent, "review_offer_multiplier", 1.0))
+        for agent in env.agents
+    ]
+    return sum(values) / len(values) if values else 1.0
+
+
 def default_metrics() -> dict[str, MetricFn]:
     """Scalar, per-timestep metrics recorded by default (aggregates + review behavior)."""
     return {
@@ -64,6 +131,11 @@ def default_metrics() -> dict[str, MetricFn]:
         "papers_on_market": lambda env: float(
             sum(1 for p in env.papers if getattr(p, "review_available", False))
         ),
+        "papers_listed_this_timestep": _papers_listed_this_timestep,
+        "papers_claimed_this_timestep": _papers_claimed_this_timestep,
+        "papers_claimed_same_timestep": _papers_claimed_same_timestep,
+        "mean_time_on_market_claimed": _mean_time_on_market_claimed,
+        "instant_claim_rate": _instant_claim_rate,
         "completed_peer_reviews": lambda env: float(
             sum(getattr(p, "completed_peer_reviews", 0) for p in env.papers)
         ),
@@ -98,6 +170,7 @@ def default_metrics() -> dict[str, MetricFn]:
         "fair_market_price": lambda env: float(
             getattr(env, "fair_market_price", 0.0)
         ),
+        "mean_author_price_multiplier": _mean_author_price_multiplier,
     }
 
 
@@ -142,6 +215,9 @@ class History:
         self.paper_required_writing_effort: dict[str, float] = {}
         self.paper_accrual_rate: dict[str, float] = {}
         self.paper_first_seen_timestep: dict[str, int] = {}
+        self.paper_listed_timestep: dict[str, int] = {}
+        self.paper_claimed_timestep: dict[str, int] = {}
+        self.paper_time_on_market: dict[str, int] = {}
 
         # Action log: one entry per agent turn.
         self.actions: list[tuple[int, str, str, str | None]] = []
@@ -215,6 +291,15 @@ class History:
                 self.paper_accrual_rate[label] = float(
                     getattr(paper, "accrual_rate", 0.0)
                 )
+                listed = getattr(paper, "listed_timestep", None)
+                if listed is not None:
+                    self.paper_listed_timestep[label] = int(listed)
+                claimed = getattr(paper, "claimed_timestep", None)
+                if claimed is not None:
+                    self.paper_claimed_timestep[label] = int(claimed)
+                wait = getattr(paper, "time_on_market_timesteps", None)
+                if wait is not None:
+                    self.paper_time_on_market[label] = int(wait)
 
     def record_action(self, env: "Environment", agent: Any, record: "ActionRecord") -> None:
         """Log one agent turn. Called during a timestep's marketplace/work phases,
@@ -343,6 +428,9 @@ class History:
             "paper_required_writing_effort": dict(self.paper_required_writing_effort),
             "paper_accrual_rate": dict(self.paper_accrual_rate),
             "paper_first_seen_timestep": dict(self.paper_first_seen_timestep),
+            "paper_listed_timestep": dict(self.paper_listed_timestep),
+            "paper_claimed_timestep": dict(self.paper_claimed_timestep),
+            "paper_time_on_market": dict(self.paper_time_on_market),
             "actions": [
                 {"timestep": d, "day": d, "agent": a, "kind": k, "paper": p}
                 for (d, a, k, p) in self.actions
@@ -600,6 +688,9 @@ class History:
             "paper_required_writing_effort": dict(self.paper_required_writing_effort),
             "paper_accrual_rate": dict(self.paper_accrual_rate),
             "paper_first_seen_timestep": dict(self.paper_first_seen_timestep),
+            "paper_listed_timestep": dict(self.paper_listed_timestep),
+            "paper_claimed_timestep": dict(self.paper_claimed_timestep),
+            "paper_time_on_market": dict(self.paper_time_on_market),
             "action_counts_by_timestep": self.action_counts_by_timestep(),
             # One value per agent: the final peer-review reputation, so the
             # ranking table keeps its "reliability" column without shipping the
@@ -678,6 +769,18 @@ class History:
         history.paper_first_seen_timestep = {
             k: int(v)
             for k, v in (data.get("paper_first_seen_timestep") or {}).items()
+        }
+        history.paper_listed_timestep = {
+            k: int(v)
+            for k, v in (data.get("paper_listed_timestep") or {}).items()
+        }
+        history.paper_claimed_timestep = {
+            k: int(v)
+            for k, v in (data.get("paper_claimed_timestep") or {}).items()
+        }
+        history.paper_time_on_market = {
+            k: int(v)
+            for k, v in (data.get("paper_time_on_market") or {}).items()
         }
 
         def _ts(row: dict[str, Any]) -> int:

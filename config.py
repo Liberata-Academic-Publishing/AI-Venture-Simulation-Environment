@@ -53,6 +53,15 @@ class SimConfig:
     min_offer_share: float = 0.005          # floor on a non-zero review offer
     use_fair_market_pricing: bool = True
     prior_review_epsilon: float = 0.05      # prior reviewer effect before review history exists
+    # Author-side pricing policy. ``static_fair_market`` preserves the current
+    # fair-market formula. ``adaptive_multiplier`` keeps that formula as the
+    # base, then lets authors raise/lower future offers based on how quickly
+    # their papers are claimed from the marketplace.
+    pricing_policy: str = "static_fair_market"  # "static_fair_market" | "adaptive_multiplier"
+    target_market_wait_timesteps: float = 1.0
+    adaptive_pricing_learning_rate: float = 0.10
+    min_author_price_multiplier: float = 0.25
+    max_author_price_multiplier: float = 2.0
 
     # --- Paper quality ---------------------------------------------------
     # Each paper's quality is drawn from N(author talent, quality_sigma) and is
@@ -123,8 +132,8 @@ class SimConfig:
     rl_reward_rank_weight: float = 0.0   # weight on Δ AC percentile rank (0..1)
     rl_reward_accrual_weight: float = 1.0  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
-    talent_min: float = 0.8         # talent spread (inert until the sim uses it)
-    talent_max: float = 1.2
+    talent_min: float = 0.6         # default talent spread; CLI can widen/narrow it
+    talent_max: float = 1.4
     policies_dir: str = "policies"
 
     # --- Export / gallery limits -----------------------------------------

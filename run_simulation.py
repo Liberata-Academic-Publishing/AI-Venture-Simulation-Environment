@@ -49,12 +49,18 @@ def _parse_seed_list(value: str | None) -> list[int]:
     return seeds
 
 
-def _talent_for(index: int, count: int) -> float:
-    """Spread talents across RL agents (inert until the sim uses talent)."""
+def _talent_for(
+    index: int,
+    count: int,
+    *,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+) -> float:
+    """Spread talents across a group of agents for differentiation experiments."""
     if count <= 1:
-        return SIM.talent_min
+        return talent_min
     frac = index / (count - 1)
-    return SIM.talent_min + frac * (SIM.talent_max - SIM.talent_min)
+    return talent_min + frac * (talent_max - talent_min)
 
 
 # Map raw action kinds to the decision an agent actively made on its turn.
@@ -83,6 +89,7 @@ def seed_initial_papers(agents: list[Agent]):
                 market_listed=True,
             )
             paper.title = f"Paper {index}"
+            paper.list_on_market(0)
             Agent.all_papers.append(paper)
 
 
@@ -121,8 +128,22 @@ def print_summary(env: Environment, history: History):
     if history.timesteps:
         fair_market = history.scalars.get("fair_market_price", [0.0])[-1]
         mean_epsilon = history.scalars.get("mean_peer_review_epsilon", [0.0])[-1]
+        listed_now = history.scalars.get("papers_listed_this_timestep", [0.0])[-1]
+        claimed_now = history.scalars.get("papers_claimed_this_timestep", [0.0])[-1]
+        instant_rate = history.scalars.get("instant_claim_rate", [0.0])[-1]
+        mean_wait = history.scalars.get("mean_time_on_market_claimed", [0.0])[-1]
+        price_multiplier = history.scalars.get(
+            "mean_author_price_multiplier",
+            [1.0],
+        )[-1]
         print(f"- fair-market review price: {fair_market:.2%}")
         print(f"- mean reviewer epsilon: {mean_epsilon:.3f}")
+        print(
+            f"- market diagnostics: listed this step={listed_now:.0f}, "
+            f"claimed this step={claimed_now:.0f}, instant-claim rate="
+            f"{instant_rate:.1%}, mean time on market={mean_wait:.2f} ts"
+        )
+        print(f"- mean author offer multiplier: {price_multiplier:.3f}")
     if qualities:
         print(
             f"- paper quality: mean={sum(qualities) / len(qualities):.2f}, "
@@ -299,7 +320,7 @@ CHART_DESCRIPTIONS = {
     "mean_review_effort": "Running mean effort of completed peer reviews over time",
     "agent_group_comparison": "Mean capital and review outcomes by agent type",
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
-    "marketplace_activity": "Papers on market vs cumulative reviews completed",
+    "marketplace_activity": "Papers on market, listings/claims, and cumulative reviews completed",
     "paper_quality_vs_ac": "Paper quality vs accrued capital (reviewed or not)",
     "writing_effort_vs_rate": "Writing effort invested vs base accrual rate (asymptote)",
     "paper_writing_effort_over_time": "Paper-writing effort at publication over time",
@@ -375,6 +396,8 @@ def build_discrete_rl_agents(
     backend_kind: str,
     policy_path: str | None,
     freeze: bool,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
 ) -> list[DiscreteQLearningAgent]:
     """Create independent discrete RL agents (3-action marketplace policy)."""
     if count <= 0:
@@ -400,7 +423,12 @@ def build_discrete_rl_agents(
                 backend = make_discrete_backend(backend_kind)
         agents.append(
             DiscreteQLearningAgent(
-                intrinsic_talent=_talent_for(i, count),
+                intrinsic_talent=_talent_for(
+                    i,
+                    count,
+                    talent_min=talent_min,
+                    talent_max=talent_max,
+                ),
                 forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
                 name=f"RL Agent {i + 1}",
                 backend=backend,
@@ -426,6 +454,8 @@ def build_rl_agents(
     backend_kind: str,
     policy_path: str | None,
     freeze: bool,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
 ) -> list[QLearningAgent]:
     """Create independent RL agents (one private backend each).
 
@@ -454,7 +484,12 @@ def build_rl_agents(
                 backend = make_backend(backend_kind)
         agents.append(
             QLearningAgent(
-                intrinsic_talent=_talent_for(i, count),
+                intrinsic_talent=_talent_for(
+                    i,
+                    count,
+                    talent_min=talent_min,
+                    talent_max=talent_max,
+                ),
                 forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
                 name=f"RL Agent {i + 1}",
                 backend=backend,
@@ -476,6 +511,8 @@ def build_dqn_agents(
     *,
     policy_path: str | None,
     freeze: bool,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
 ) -> list[DQNAgent]:
     """Create independent DQN agents (one private backend each)."""
     if count <= 0:
@@ -498,7 +535,12 @@ def build_dqn_agents(
                 backend = make_dqn_backend()
         agents.append(
             DQNAgent(
-                intrinsic_talent=_talent_for(i, count),
+                intrinsic_talent=_talent_for(
+                    i,
+                    count,
+                    talent_min=talent_min,
+                    talent_max=talent_max,
+                ),
                 forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
                 name=f"DQN Agent {i + 1}",
                 backend=backend,
@@ -515,21 +557,44 @@ def build_dqn_agents(
     return agents
 
 
-def build_random_agents(count: int) -> list[RandomAgent]:
+def build_random_agents(
+    count: int,
+    *,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+) -> list[RandomAgent]:
     if count <= 0:
         return []
     return [
-        RandomAgent(intrinsic_talent=1.0, name=f"Random Agent {i + 1}")
+        RandomAgent(
+            intrinsic_talent=_talent_for(
+                i,
+                count,
+                talent_min=talent_min,
+                talent_max=talent_max,
+            ),
+            name=f"Random Agent {i + 1}",
+        )
         for i in range(count)
     ]
 
 
-def build_probabilistic_agents(count: int) -> list[ProbabilisticDiscreteAgent]:
+def build_probabilistic_agents(
+    count: int,
+    *,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+) -> list[ProbabilisticDiscreteAgent]:
     if count <= 0:
         return []
     return [
         ProbabilisticDiscreteAgent(
-            intrinsic_talent=1.0,
+            intrinsic_talent=_talent_for(
+                i,
+                count,
+                talent_min=talent_min,
+                talent_max=talent_max,
+            ),
             name=f"Probabilistic Agent {i + 1}",
         )
         for i in range(count)
@@ -557,19 +622,45 @@ def build_simulation(
     paper_effort_mode: str = SIM.paper_effort_mode,
     paper_effort_min: float = SIM.paper_effort_min,
     paper_effort_max: float = SIM.paper_effort_max,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+    pricing_policy: str = SIM.pricing_policy,
+    target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
+    adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
+    min_author_price_multiplier: float = SIM.min_author_price_multiplier,
+    max_author_price_multiplier: float = SIM.max_author_price_multiplier,
 ) -> Environment:
     """Construct a simulation of heuristics plus independent RL agents."""
     random.seed(seed)
     Agent.all_papers = []
 
     agents: list[Agent] = [
-        HeuristicAgent(intrinsic_talent=1.0,
-                       forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
-                       name=f"Agent {i}")
+        HeuristicAgent(
+            intrinsic_talent=_talent_for(
+                i - 1,
+                num_agents,
+                talent_min=talent_min,
+                talent_max=talent_max,
+            ),
+            forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
+            name=f"Agent {i}",
+        )
         for i in range(1, num_agents + 1)
     ]
-    agents.extend(build_random_agents(random_agents))
-    agents.extend(build_probabilistic_agents(probabilistic_agents))
+    agents.extend(
+        build_random_agents(
+            random_agents,
+            talent_min=talent_min,
+            talent_max=talent_max,
+        )
+    )
+    agents.extend(
+        build_probabilistic_agents(
+            probabilistic_agents,
+            talent_min=talent_min,
+            talent_max=talent_max,
+        )
+    )
     if review_paradigm == "discrete":
         agents.extend(
             build_discrete_rl_agents(
@@ -577,6 +668,8 @@ def build_simulation(
                 backend_kind=rl_backend,
                 policy_path=rl_policy_path,
                 freeze=rl_freeze,
+                talent_min=talent_min,
+                talent_max=talent_max,
             )
         )
     else:
@@ -586,6 +679,8 @@ def build_simulation(
                 backend_kind=rl_backend,
                 policy_path=rl_policy_path,
                 freeze=rl_freeze,
+                talent_min=talent_min,
+                talent_max=talent_max,
             )
         )
     agents.extend(
@@ -593,6 +688,8 @@ def build_simulation(
             dqn_agents,
             policy_path=dqn_policy_path,
             freeze=dqn_freeze,
+            talent_min=talent_min,
+            talent_max=talent_max,
         )
     )
 
@@ -609,6 +706,11 @@ def build_simulation(
         paper_effort_mode=paper_effort_mode,
         paper_effort_min=paper_effort_min,
         paper_effort_max=paper_effort_max,
+        pricing_policy=pricing_policy,
+        target_market_wait_timesteps=target_market_wait_timesteps,
+        adaptive_pricing_learning_rate=adaptive_pricing_learning_rate,
+        min_author_price_multiplier=min_author_price_multiplier,
+        max_author_price_multiplier=max_author_price_multiplier,
         history=history,
     )
 
@@ -720,6 +822,43 @@ def parse_args(argv=None):
         help="Maximum sampled paper effort for uniform/quality_scaled modes.",
     )
     parser.add_argument(
+        "--talent-min", dest="talent_min",
+        type=float, default=SIM.talent_min, metavar="X",
+        help="Minimum intrinsic talent assigned within each agent type.",
+    )
+    parser.add_argument(
+        "--talent-max", dest="talent_max",
+        type=float, default=SIM.talent_max, metavar="X",
+        help="Maximum intrinsic talent assigned within each agent type.",
+    )
+    parser.add_argument(
+        "--pricing-policy", dest="pricing_policy",
+        choices=["static_fair_market", "adaptive_multiplier"],
+        default=SIM.pricing_policy,
+        help="Author pricing policy: current static fair-market formula or an "
+        "optional adaptive multiplier experiment.",
+    )
+    parser.add_argument(
+        "--target-market-wait", dest="target_market_wait_timesteps",
+        type=float, default=SIM.target_market_wait_timesteps, metavar="N",
+        help="Adaptive pricing target wait before a paper is claimed.",
+    )
+    parser.add_argument(
+        "--adaptive-pricing-learning-rate", dest="adaptive_pricing_learning_rate",
+        type=float, default=SIM.adaptive_pricing_learning_rate, metavar="X",
+        help="Adaptive pricing multiplier update rate.",
+    )
+    parser.add_argument(
+        "--min-author-price-multiplier", dest="min_author_price_multiplier",
+        type=float, default=SIM.min_author_price_multiplier, metavar="X",
+        help="Lower bound for adaptive author offer multiplier.",
+    )
+    parser.add_argument(
+        "--max-author-price-multiplier", dest="max_author_price_multiplier",
+        type=float, default=SIM.max_author_price_multiplier, metavar="X",
+        help="Upper bound for adaptive author offer multiplier.",
+    )
+    parser.add_argument(
         "--gallery-action-limit", dest="gallery_action_limit",
         type=int, default=SIM.gallery_action_limit, metavar="N",
         help="Max action rows committed to docs/data history.json; full data stays local.",
@@ -772,6 +911,13 @@ def build_run_config(
     paper_effort_mode: str = SIM.paper_effort_mode,
     paper_effort_min: float = SIM.paper_effort_min,
     paper_effort_max: float = SIM.paper_effort_max,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+    pricing_policy: str = SIM.pricing_policy,
+    target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
+    adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
+    min_author_price_multiplier: float = SIM.min_author_price_multiplier,
+    max_author_price_multiplier: float = SIM.max_author_price_multiplier,
     gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> dict:
     """Full SimConfig snapshot for this run, with runtime overrides applied.
@@ -797,6 +943,13 @@ def build_run_config(
     config["paper_effort_mode"] = paper_effort_mode
     config["paper_effort_min"] = paper_effort_min
     config["paper_effort_max"] = paper_effort_max
+    config["talent_min"] = talent_min
+    config["talent_max"] = talent_max
+    config["pricing_policy"] = pricing_policy
+    config["target_market_wait_timesteps"] = target_market_wait_timesteps
+    config["adaptive_pricing_learning_rate"] = adaptive_pricing_learning_rate
+    config["min_author_price_multiplier"] = min_author_price_multiplier
+    config["max_author_price_multiplier"] = max_author_price_multiplier
     config["gallery_action_limit"] = gallery_action_limit
     config["num_agents"] = heuristic_agents
     # Aliases so the static gallery (which also reads pre-overhaul runs) keeps
@@ -840,6 +993,13 @@ def archive_run(
     paper_effort_mode: str = SIM.paper_effort_mode,
     paper_effort_min: float = SIM.paper_effort_min,
     paper_effort_max: float = SIM.paper_effort_max,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+    pricing_policy: str = SIM.pricing_policy,
+    target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
+    adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
+    min_author_price_multiplier: float = SIM.min_author_price_multiplier,
+    max_author_price_multiplier: float = SIM.max_author_price_multiplier,
     gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> None:
     from export_run import export_run
@@ -862,6 +1022,13 @@ def archive_run(
             paper_effort_mode=paper_effort_mode,
             paper_effort_min=paper_effort_min,
             paper_effort_max=paper_effort_max,
+            talent_min=talent_min,
+            talent_max=talent_max,
+            pricing_policy=pricing_policy,
+            target_market_wait_timesteps=target_market_wait_timesteps,
+            adaptive_pricing_learning_rate=adaptive_pricing_learning_rate,
+            min_author_price_multiplier=min_author_price_multiplier,
+            max_author_price_multiplier=max_author_price_multiplier,
             gallery_action_limit=gallery_action_limit,
         ),
         title=title,
@@ -889,6 +1056,13 @@ def prompt_and_archive(
     paper_effort_mode: str = SIM.paper_effort_mode,
     paper_effort_min: float = SIM.paper_effort_min,
     paper_effort_max: float = SIM.paper_effort_max,
+    talent_min: float = SIM.talent_min,
+    talent_max: float = SIM.talent_max,
+    pricing_policy: str = SIM.pricing_policy,
+    target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
+    adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
+    min_author_price_multiplier: float = SIM.min_author_price_multiplier,
+    max_author_price_multiplier: float = SIM.max_author_price_multiplier,
     gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> None:
     """Ask whether to save this run and, if so, what to title it."""
@@ -924,6 +1098,13 @@ def prompt_and_archive(
         paper_effort_mode=paper_effort_mode,
         paper_effort_min=paper_effort_min,
         paper_effort_max=paper_effort_max,
+        talent_min=talent_min,
+        talent_max=talent_max,
+        pricing_policy=pricing_policy,
+        target_market_wait_timesteps=target_market_wait_timesteps,
+        adaptive_pricing_learning_rate=adaptive_pricing_learning_rate,
+        min_author_price_multiplier=min_author_price_multiplier,
+        max_author_price_multiplier=max_author_price_multiplier,
         gallery_action_limit=gallery_action_limit,
     )
 
@@ -967,6 +1148,13 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
         paper_effort_mode=args.paper_effort_mode,
         paper_effort_min=args.paper_effort_min,
         paper_effort_max=args.paper_effort_max,
+        talent_min=args.talent_min,
+        talent_max=args.talent_max,
+        pricing_policy=args.pricing_policy,
+        target_market_wait_timesteps=args.target_market_wait_timesteps,
+        adaptive_pricing_learning_rate=args.adaptive_pricing_learning_rate,
+        min_author_price_multiplier=args.min_author_price_multiplier,
+        max_author_price_multiplier=args.max_author_price_multiplier,
     )
     for _ in range(args.timesteps):
         env.run_timestep()
@@ -1003,6 +1191,13 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             paper_effort_mode=args.paper_effort_mode,
             paper_effort_min=args.paper_effort_min,
             paper_effort_max=args.paper_effort_max,
+            talent_min=args.talent_min,
+            talent_max=args.talent_max,
+            pricing_policy=args.pricing_policy,
+            target_market_wait_timesteps=args.target_market_wait_timesteps,
+            adaptive_pricing_learning_rate=args.adaptive_pricing_learning_rate,
+            min_author_price_multiplier=args.min_author_price_multiplier,
+            max_author_price_multiplier=args.max_author_price_multiplier,
             gallery_action_limit=args.gallery_action_limit,
         )
     else:
@@ -1023,6 +1218,13 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             paper_effort_mode=args.paper_effort_mode,
             paper_effort_min=args.paper_effort_min,
             paper_effort_max=args.paper_effort_max,
+            talent_min=args.talent_min,
+            talent_max=args.talent_max,
+            pricing_policy=args.pricing_policy,
+            target_market_wait_timesteps=args.target_market_wait_timesteps,
+            adaptive_pricing_learning_rate=args.adaptive_pricing_learning_rate,
+            min_author_price_multiplier=args.min_author_price_multiplier,
+            max_author_price_multiplier=args.max_author_price_multiplier,
             gallery_action_limit=args.gallery_action_limit,
         )
     return _summary_row(history, seed=seed, title=title or args.name or "")
@@ -1047,6 +1249,9 @@ def _summary_row(history: History, *, seed: int, title: str) -> dict:
         "good_faith_reviews": last_scalar("good_faith_reviews"),
         "bad_faith_reviews": last_scalar("bad_faith_reviews"),
         "mean_completed_review_effort": last_scalar("mean_completed_review_effort"),
+        "instant_claim_rate": last_scalar("instant_claim_rate"),
+        "mean_time_on_market_claimed": last_scalar("mean_time_on_market_claimed"),
+        "mean_author_price_multiplier": last_scalar("mean_author_price_multiplier"),
     }
     for group, stats in sorted(group_summary.items()):
         prefix = group.replace("Agent", "").replace("QLearning", "RL").lower() or "agent"
@@ -1077,7 +1282,9 @@ def _print_batch_summary(rows: list[dict]) -> None:
             f"- seed={row['seed']}: mean AC={row['mean_capital']:.2f}, "
             f"papers={row['num_papers']:.0f}, reviews={row['completed_peer_reviews']:.0f}, "
             f"good={row['good_faith_reviews']:.0f}, bad={row['bad_faith_reviews']:.0f}, "
-            f"mean effort={row['mean_completed_review_effort']:.2f}"
+            f"mean effort={row['mean_completed_review_effort']:.2f}, "
+            f"instant claim={row['instant_claim_rate']:.1%}, "
+            f"market wait={row['mean_time_on_market_claimed']:.2f}"
         )
 
 
