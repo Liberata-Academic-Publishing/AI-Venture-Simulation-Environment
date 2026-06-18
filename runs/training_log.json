@@ -1,1201 +1,1201 @@
 [
   {
     "episode": 0,
-    "mean_return": 2346.7183341366394,
-    "mean_review_effort": 3.0,
+    "mean_return": 2580.7740300271134,
+    "mean_review_effort": 4.9,
     "epsilon": 1.0
   },
   {
     "episode": 1,
-    "mean_return": 2420.9709302198835,
-    "mean_review_effort": 3.1,
+    "mean_return": 2742.439668682247,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9952261306532664
   },
   {
     "episode": 2,
-    "mean_return": 2457.457805568793,
-    "mean_review_effort": 3.1,
+    "mean_return": 2748.4429533868743,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9904522613065326
   },
   {
     "episode": 3,
-    "mean_return": 2332.794185212383,
-    "mean_review_effort": 3.0,
+    "mean_return": 2563.7309438940924,
+    "mean_review_effort": 5.0,
     "epsilon": 0.985678391959799
   },
   {
     "episode": 4,
-    "mean_return": 2333.249622746439,
-    "mean_review_effort": 2.9,
+    "mean_return": 2875.652302138488,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9809045226130654
   },
   {
     "episode": 5,
-    "mean_return": 2180.899128025187,
-    "mean_review_effort": 2.8,
+    "mean_return": 2657.0961664113315,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9761306532663316
   },
   {
     "episode": 6,
-    "mean_return": 2503.0169781297277,
-    "mean_review_effort": 3.1,
+    "mean_return": 2717.824277091558,
+    "mean_review_effort": 5.0,
     "epsilon": 0.971356783919598
   },
   {
     "episode": 7,
-    "mean_return": 2290.6504554202484,
-    "mean_review_effort": 3.2,
+    "mean_return": 2766.298511262242,
+    "mean_review_effort": 4.9,
     "epsilon": 0.9665829145728644
   },
   {
     "episode": 8,
-    "mean_return": 2282.204797837172,
-    "mean_review_effort": 3.0,
+    "mean_return": 2725.5989614579894,
+    "mean_review_effort": 4.9,
     "epsilon": 0.9618090452261306
   },
   {
     "episode": 9,
-    "mean_return": 2603.9092379363397,
-    "mean_review_effort": 3.5,
+    "mean_return": 2779.7740857581025,
+    "mean_review_effort": 4.9,
     "epsilon": 0.957035175879397
   },
   {
     "episode": 10,
-    "mean_return": 2343.8498100990228,
-    "mean_review_effort": 3.2,
+    "mean_return": 2742.7188106692674,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9522613065326633
   },
   {
     "episode": 11,
-    "mean_return": 2612.454560021066,
-    "mean_review_effort": 4.0,
+    "mean_return": 2509.58662725908,
+    "mean_review_effort": 4.9,
     "epsilon": 0.9474874371859296
   },
   {
     "episode": 12,
-    "mean_return": 2192.6616136774564,
-    "mean_review_effort": 3.0,
+    "mean_return": 2632.708371094388,
+    "mean_review_effort": 4.9,
     "epsilon": 0.942713567839196
   },
   {
     "episode": 13,
-    "mean_return": 2413.451927827845,
-    "mean_review_effort": 3.0,
+    "mean_return": 2655.526453857859,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9379396984924623
   },
   {
     "episode": 14,
-    "mean_return": 2414.401710700112,
-    "mean_review_effort": 3.2,
+    "mean_return": 2768.2958911706482,
+    "mean_review_effort": 4.9,
     "epsilon": 0.9331658291457287
   },
   {
     "episode": 15,
-    "mean_return": 2614.0862409055285,
-    "mean_review_effort": 3.2,
+    "mean_return": 2571.125256922375,
+    "mean_review_effort": 4.9,
     "epsilon": 0.928391959798995
   },
   {
     "episode": 16,
-    "mean_return": 2431.0040950891735,
-    "mean_review_effort": 3.3,
+    "mean_return": 2701.6528452277257,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9236180904522613
   },
   {
     "episode": 17,
-    "mean_return": 2562.299168340194,
-    "mean_review_effort": 3.5,
+    "mean_return": 2612.044101276305,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9188442211055277
   },
   {
     "episode": 18,
-    "mean_return": 2237.030112819158,
-    "mean_review_effort": 3.4,
+    "mean_return": 2595.482012693995,
+    "mean_review_effort": 5.0,
     "epsilon": 0.914070351758794
   },
   {
     "episode": 19,
-    "mean_return": 2166.626044049805,
-    "mean_review_effort": 3.2,
+    "mean_return": 2676.618564121418,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9092964824120603
   },
   {
     "episode": 20,
-    "mean_return": 2291.595006087954,
-    "mean_review_effort": 3.4,
+    "mean_return": 2780.8565225097536,
+    "mean_review_effort": 5.0,
     "epsilon": 0.9045226130653267
   },
   {
     "episode": 21,
-    "mean_return": 2574.265513677775,
-    "mean_review_effort": 3.7,
+    "mean_return": 2718.2643411843956,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8997487437185929
   },
   {
     "episode": 22,
-    "mean_return": 2160.5689711444516,
-    "mean_review_effort": 2.3,
+    "mean_return": 2710.811450450151,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8949748743718593
   },
   {
     "episode": 23,
-    "mean_return": 2404.613433236004,
-    "mean_review_effort": 3.7,
+    "mean_return": 2626.894296055644,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8902010050251257
   },
   {
     "episode": 24,
-    "mean_return": 2377.982462630801,
-    "mean_review_effort": 3.5,
+    "mean_return": 2640.459572943494,
+    "mean_review_effort": 4.8,
     "epsilon": 0.8854271356783919
   },
   {
     "episode": 25,
-    "mean_return": 2344.8905264110476,
-    "mean_review_effort": 3.9,
+    "mean_return": 2513.2897164451856,
+    "mean_review_effort": 4.8,
     "epsilon": 0.8806532663316583
   },
   {
     "episode": 26,
-    "mean_return": 2618.3534153236196,
-    "mean_review_effort": 3.5,
+    "mean_return": 2574.2187347220524,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8758793969849246
   },
   {
     "episode": 27,
-    "mean_return": 2425.534687740155,
-    "mean_review_effort": 3.2,
+    "mean_return": 2809.1464239874576,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8711055276381909
   },
   {
     "episode": 28,
-    "mean_return": 2479.43272273472,
-    "mean_review_effort": 3.5,
+    "mean_return": 2750.187399865583,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8663316582914573
   },
   {
     "episode": 29,
-    "mean_return": 2546.3547962639045,
-    "mean_review_effort": 3.4,
+    "mean_return": 2637.574421640881,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8615577889447237
   },
   {
     "episode": 30,
-    "mean_return": 2412.5521640755264,
-    "mean_review_effort": 3.8,
+    "mean_return": 2624.9497251200255,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8567839195979899
   },
   {
     "episode": 31,
-    "mean_return": 2368.8864651839817,
-    "mean_review_effort": 3.2,
+    "mean_return": 2734.4626606642114,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8520100502512563
   },
   {
     "episode": 32,
-    "mean_return": 2222.3061811212333,
-    "mean_review_effort": 3.0,
+    "mean_return": 2715.37233625705,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8472361809045226
   },
   {
     "episode": 33,
-    "mean_return": 2496.7141277023593,
-    "mean_review_effort": 3.3,
+    "mean_return": 2597.7277863130466,
+    "mean_review_effort": 4.9,
     "epsilon": 0.842462311557789
   },
   {
     "episode": 34,
-    "mean_return": 2386.587840716792,
-    "mean_review_effort": 3.5,
+    "mean_return": 2640.2776253327465,
+    "mean_review_effort": 4.8,
     "epsilon": 0.8376884422110553
   },
   {
     "episode": 35,
-    "mean_return": 2412.9078153481564,
-    "mean_review_effort": 3.8,
+    "mean_return": 2682.7538481335537,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8329145728643216
   },
   {
     "episode": 36,
-    "mean_return": 2314.486395829209,
-    "mean_review_effort": 3.5,
+    "mean_return": 2870.370962617223,
+    "mean_review_effort": 5.0,
     "epsilon": 0.828140703517588
   },
   {
     "episode": 37,
-    "mean_return": 2171.103561321275,
-    "mean_review_effort": 3.1,
+    "mean_return": 2762.759180997814,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8233668341708542
   },
   {
     "episode": 38,
-    "mean_return": 2515.4885206225167,
-    "mean_review_effort": 3.1,
+    "mean_return": 2548.0470130792046,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8185929648241206
   },
   {
     "episode": 39,
-    "mean_return": 2459.1427582970937,
-    "mean_review_effort": 3.6,
+    "mean_return": 2684.920467974756,
+    "mean_review_effort": 4.9,
     "epsilon": 0.813819095477387
   },
   {
     "episode": 40,
-    "mean_return": 2376.1929321960893,
-    "mean_review_effort": 4.1,
+    "mean_return": 2695.6746355311348,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8090452261306533
   },
   {
     "episode": 41,
-    "mean_return": 2290.1323362586445,
-    "mean_review_effort": 3.7,
+    "mean_return": 2646.494541263134,
+    "mean_review_effort": 5.0,
     "epsilon": 0.8042713567839196
   },
   {
     "episode": 42,
-    "mean_return": 2717.608028135298,
-    "mean_review_effort": 4.2,
+    "mean_return": 2700.539881474181,
+    "mean_review_effort": 5.0,
     "epsilon": 0.799497487437186
   },
   {
     "episode": 43,
-    "mean_return": 2544.936414166118,
-    "mean_review_effort": 4.1,
+    "mean_return": 2657.7053317226264,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7947236180904522
   },
   {
     "episode": 44,
-    "mean_return": 2458.6817429337025,
-    "mean_review_effort": 3.5,
+    "mean_return": 2622.526679327561,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7899497487437186
   },
   {
     "episode": 45,
-    "mean_return": 2548.5970537059998,
-    "mean_review_effort": 3.8,
+    "mean_return": 2736.543715283154,
+    "mean_review_effort": 5.0,
     "epsilon": 0.785175879396985
   },
   {
     "episode": 46,
-    "mean_return": 2544.3827905952585,
-    "mean_review_effort": 3.6,
+    "mean_return": 2510.1250975744233,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7804020100502512
   },
   {
     "episode": 47,
-    "mean_return": 2322.697888176549,
-    "mean_review_effort": 3.6,
+    "mean_return": 2473.738794772133,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7756281407035176
   },
   {
     "episode": 48,
-    "mean_return": 2657.6883434569536,
-    "mean_review_effort": 3.9,
+    "mean_return": 2643.086380532811,
+    "mean_review_effort": 5.0,
     "epsilon": 0.770854271356784
   },
   {
     "episode": 49,
-    "mean_return": 2661.164120623541,
-    "mean_review_effort": 4.1,
+    "mean_return": 2791.6827333278347,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7660804020100502
   },
   {
     "episode": 50,
-    "mean_return": 2444.8519962429696,
-    "mean_review_effort": 3.9,
+    "mean_return": 2637.747323157758,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7613065326633166
   },
   {
     "episode": 51,
-    "mean_return": 2635.714607194567,
-    "mean_review_effort": 4.2,
+    "mean_return": 2771.8157635017765,
+    "mean_review_effort": 4.9,
     "epsilon": 0.756532663316583
   },
   {
     "episode": 52,
-    "mean_return": 2560.4977208623213,
-    "mean_review_effort": 4.3,
+    "mean_return": 2748.6170878051576,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7517587939698492
   },
   {
     "episode": 53,
-    "mean_return": 2454.4262810396367,
-    "mean_review_effort": 3.8,
+    "mean_return": 2663.4434214470352,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7469849246231156
   },
   {
     "episode": 54,
-    "mean_return": 2311.176043010403,
-    "mean_review_effort": 3.8,
+    "mean_return": 2496.8374590982157,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7422110552763819
   },
   {
     "episode": 55,
-    "mean_return": 2468.76954758798,
-    "mean_review_effort": 3.8,
+    "mean_return": 2715.9957386996225,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7374371859296482
   },
   {
     "episode": 56,
-    "mean_return": 2420.427177983853,
-    "mean_review_effort": 3.8,
+    "mean_return": 2570.78539948297,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7326633165829146
   },
   {
     "episode": 57,
-    "mean_return": 2501.290549706873,
-    "mean_review_effort": 3.7,
+    "mean_return": 2739.191387657851,
+    "mean_review_effort": 4.9,
     "epsilon": 0.7278894472361809
   },
   {
     "episode": 58,
-    "mean_return": 2510.8363833989697,
-    "mean_review_effort": 4.4,
+    "mean_return": 2631.394787258961,
+    "mean_review_effort": 4.9,
     "epsilon": 0.7231155778894472
   },
   {
     "episode": 59,
-    "mean_return": 2503.3998913938867,
-    "mean_review_effort": 3.8,
+    "mean_return": 2542.218988687869,
+    "mean_review_effort": 4.9,
     "epsilon": 0.7183417085427135
   },
   {
     "episode": 60,
-    "mean_return": 2504.3884655054235,
-    "mean_review_effort": 3.9,
+    "mean_return": 2664.181927378351,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7135678391959799
   },
   {
     "episode": 61,
-    "mean_return": 2453.831124344622,
-    "mean_review_effort": 3.8,
+    "mean_return": 2737.507885212931,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7087939698492463
   },
   {
     "episode": 62,
-    "mean_return": 2399.60134417308,
-    "mean_review_effort": 3.7,
+    "mean_return": 2526.807553697815,
+    "mean_review_effort": 5.0,
     "epsilon": 0.7040201005025126
   },
   {
     "episode": 63,
-    "mean_return": 2355.039628375371,
-    "mean_review_effort": 3.8,
+    "mean_return": 2491.172340252467,
+    "mean_review_effort": 4.9,
     "epsilon": 0.699246231155779
   },
   {
     "episode": 64,
-    "mean_return": 2465.330019459087,
-    "mean_review_effort": 3.8,
+    "mean_return": 2713.001125890781,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6944723618090453
   },
   {
     "episode": 65,
-    "mean_return": 2527.815143801823,
-    "mean_review_effort": 4.0,
+    "mean_return": 2620.6903131402896,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6896984924623115
   },
   {
     "episode": 66,
-    "mean_return": 2352.9654109544986,
-    "mean_review_effort": 3.7,
+    "mean_return": 2775.3287445606393,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6849246231155779
   },
   {
     "episode": 67,
-    "mean_return": 2350.129033463877,
-    "mean_review_effort": 3.7,
+    "mean_return": 2592.87299136698,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6801507537688443
   },
   {
     "episode": 68,
-    "mean_return": 2390.2263497873932,
-    "mean_review_effort": 4.1,
+    "mean_return": 2806.321209048173,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6753768844221106
   },
   {
     "episode": 69,
-    "mean_return": 2555.2674994420045,
-    "mean_review_effort": 3.8,
+    "mean_return": 2819.3834635508415,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6706030150753769
   },
   {
     "episode": 70,
-    "mean_return": 2465.736452394094,
-    "mean_review_effort": 3.7,
+    "mean_return": 2731.201005746735,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6658291457286432
   },
   {
     "episode": 71,
-    "mean_return": 2650.726594589599,
-    "mean_review_effort": 4.0,
+    "mean_return": 2538.7122871899187,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6610552763819095
   },
   {
     "episode": 72,
-    "mean_return": 2594.9177948815877,
-    "mean_review_effort": 4.1,
+    "mean_return": 2944.5697991046245,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6562814070351759
   },
   {
     "episode": 73,
-    "mean_return": 2746.88521895609,
-    "mean_review_effort": 3.7,
+    "mean_return": 2408.150877222232,
+    "mean_review_effort": 4.8,
     "epsilon": 0.6515075376884423
   },
   {
     "episode": 74,
-    "mean_return": 2517.6979010672244,
-    "mean_review_effort": 3.8,
+    "mean_return": 2677.9134403423614,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6467336683417085
   },
   {
     "episode": 75,
-    "mean_return": 2519.0856155341485,
-    "mean_review_effort": 3.9,
+    "mean_return": 2910.6687072775526,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6419597989949748
   },
   {
     "episode": 76,
-    "mean_return": 2361.993585969555,
-    "mean_review_effort": 3.9,
+    "mean_return": 2608.7394756065146,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6371859296482412
   },
   {
     "episode": 77,
-    "mean_return": 2275.290492011227,
-    "mean_review_effort": 4.2,
+    "mean_return": 2618.454799029644,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6324120603015075
   },
   {
     "episode": 78,
-    "mean_return": 2545.5575450098268,
-    "mean_review_effort": 4.2,
+    "mean_return": 2683.2662466687166,
+    "mean_review_effort": 4.9,
     "epsilon": 0.6276381909547739
   },
   {
     "episode": 79,
-    "mean_return": 2384.854781465679,
-    "mean_review_effort": 3.6,
+    "mean_return": 2647.4756575111433,
+    "mean_review_effort": 4.9,
     "epsilon": 0.6228643216080403
   },
   {
     "episode": 80,
-    "mean_return": 2568.805298825166,
-    "mean_review_effort": 4.0,
+    "mean_return": 2702.712315274376,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6180904522613065
   },
   {
     "episode": 81,
-    "mean_return": 2512.617115077348,
-    "mean_review_effort": 4.0,
+    "mean_return": 2828.0193150220903,
+    "mean_review_effort": 4.9,
     "epsilon": 0.6133165829145729
   },
   {
     "episode": 82,
-    "mean_return": 2385.566187415136,
-    "mean_review_effort": 4.2,
+    "mean_return": 2484.204085245614,
+    "mean_review_effort": 4.8,
     "epsilon": 0.6085427135678392
   },
   {
     "episode": 83,
-    "mean_return": 2469.1492739467394,
-    "mean_review_effort": 3.3,
+    "mean_return": 2732.6063850361966,
+    "mean_review_effort": 5.0,
     "epsilon": 0.6037688442211055
   },
   {
     "episode": 84,
-    "mean_return": 2690.986658659919,
-    "mean_review_effort": 4.2,
+    "mean_return": 2847.8347934569883,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5989949748743719
   },
   {
     "episode": 85,
-    "mean_return": 2645.028473535251,
-    "mean_review_effort": 4.1,
+    "mean_return": 2782.3095744337797,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5942211055276382
   },
   {
     "episode": 86,
-    "mean_return": 2616.1509969170356,
-    "mean_review_effort": 4.0,
+    "mean_return": 2395.7557197164306,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5894472361809046
   },
   {
     "episode": 87,
-    "mean_return": 2595.0705958863355,
-    "mean_review_effort": 4.2,
+    "mean_return": 2493.109745489473,
+    "mean_review_effort": 4.9,
     "epsilon": 0.5846733668341708
   },
   {
     "episode": 88,
-    "mean_return": 2320.5434054180437,
-    "mean_review_effort": 3.9,
+    "mean_return": 2462.3027766567525,
+    "mean_review_effort": 4.9,
     "epsilon": 0.5798994974874372
   },
   {
     "episode": 89,
-    "mean_return": 2537.860530829327,
-    "mean_review_effort": 4.2,
+    "mean_return": 2566.4710240697336,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5751256281407036
   },
   {
     "episode": 90,
-    "mean_return": 2538.8183739685796,
-    "mean_review_effort": 4.2,
+    "mean_return": 2837.287829167273,
+    "mean_review_effort": 4.9,
     "epsilon": 0.5703517587939699
   },
   {
     "episode": 91,
-    "mean_return": 2349.50460419142,
-    "mean_review_effort": 3.9,
+    "mean_return": 2764.797563673842,
+    "mean_review_effort": 4.9,
     "epsilon": 0.5655778894472362
   },
   {
     "episode": 92,
-    "mean_return": 2429.5229448600944,
-    "mean_review_effort": 3.9,
+    "mean_return": 2801.3723632377314,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5608040201005025
   },
   {
     "episode": 93,
-    "mean_return": 2521.194435349139,
-    "mean_review_effort": 4.1,
+    "mean_return": 2798.27023674443,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5560301507537688
   },
   {
     "episode": 94,
-    "mean_return": 2539.566019413239,
-    "mean_review_effort": 4.5,
+    "mean_return": 2770.945322914293,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5512562814070352
   },
   {
     "episode": 95,
-    "mean_return": 2766.0218342356848,
-    "mean_review_effort": 4.2,
+    "mean_return": 2618.051523288078,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5464824120603016
   },
   {
     "episode": 96,
-    "mean_return": 2650.4123323126905,
-    "mean_review_effort": 4.3,
+    "mean_return": 2926.268139850889,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5417085427135679
   },
   {
     "episode": 97,
-    "mean_return": 2375.5752450274044,
-    "mean_review_effort": 4.2,
+    "mean_return": 2740.913880794217,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5369346733668342
   },
   {
     "episode": 98,
-    "mean_return": 2685.476722966759,
-    "mean_review_effort": 4.3,
+    "mean_return": 2533.696453778537,
+    "mean_review_effort": 4.9,
     "epsilon": 0.5321608040201005
   },
   {
     "episode": 99,
-    "mean_return": 2481.232660160462,
-    "mean_review_effort": 4.1,
+    "mean_return": 2737.766641254032,
+    "mean_review_effort": 4.9,
     "epsilon": 0.5273869346733668
   },
   {
     "episode": 100,
-    "mean_return": 2616.952397820857,
-    "mean_review_effort": 4.4,
+    "mean_return": 2746.6942549739456,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5226130653266332
   },
   {
     "episode": 101,
-    "mean_return": 2423.0936209947477,
-    "mean_review_effort": 4.1,
+    "mean_return": 2792.1138384484875,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5178391959798996
   },
   {
     "episode": 102,
-    "mean_return": 2743.9165431229385,
-    "mean_review_effort": 4.5,
+    "mean_return": 2904.2317167659944,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5130653266331658
   },
   {
     "episode": 103,
-    "mean_return": 2320.687363209675,
-    "mean_review_effort": 4.2,
+    "mean_return": 2528.8058852549498,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5082914572864321
   },
   {
     "episode": 104,
-    "mean_return": 2309.692387979799,
-    "mean_review_effort": 4.2,
+    "mean_return": 2805.200624484122,
+    "mean_review_effort": 5.0,
     "epsilon": 0.5035175879396985
   },
   {
     "episode": 105,
-    "mean_return": 2391.6263064225523,
-    "mean_review_effort": 4.0,
+    "mean_return": 2584.7107669759966,
+    "mean_review_effort": 5.0,
     "epsilon": 0.49874371859296485
   },
   {
     "episode": 106,
-    "mean_return": 2429.4135714495164,
-    "mean_review_effort": 4.1,
+    "mean_return": 2819.952476854103,
+    "mean_review_effort": 5.0,
     "epsilon": 0.4939698492462312
   },
   {
     "episode": 107,
-    "mean_return": 2507.7647899330887,
-    "mean_review_effort": 3.9,
+    "mean_return": 2612.657073915941,
+    "mean_review_effort": 4.9,
     "epsilon": 0.4891959798994975
   },
   {
     "episode": 108,
-    "mean_return": 2620.238447890622,
-    "mean_review_effort": 4.5,
+    "mean_return": 2732.8734479299214,
+    "mean_review_effort": 4.9,
     "epsilon": 0.48442211055276385
   },
   {
     "episode": 109,
-    "mean_return": 2281.9584400644935,
-    "mean_review_effort": 3.5,
+    "mean_return": 2567.7531050838584,
+    "mean_review_effort": 5.0,
     "epsilon": 0.4796482412060301
   },
   {
     "episode": 110,
-    "mean_return": 2487.4747892421406,
-    "mean_review_effort": 4.1,
+    "mean_return": 2716.9201977948783,
+    "mean_review_effort": 4.9,
     "epsilon": 0.4748743718592966
   },
   {
     "episode": 111,
-    "mean_return": 2480.2206107248485,
-    "mean_review_effort": 4.2,
+    "mean_return": 2409.481407351975,
+    "mean_review_effort": 4.9,
     "epsilon": 0.47010050251256286
   },
   {
     "episode": 112,
-    "mean_return": 2517.5407385283393,
-    "mean_review_effort": 4.3,
+    "mean_return": 2782.6314037480934,
+    "mean_review_effort": 5.0,
     "epsilon": 0.46532663316582923
   },
   {
     "episode": 113,
-    "mean_return": 2835.5851862552768,
-    "mean_review_effort": 4.6,
+    "mean_return": 2699.705911369544,
+    "mean_review_effort": 4.9,
     "epsilon": 0.4605527638190955
   },
   {
     "episode": 114,
-    "mean_return": 2641.3869911179027,
-    "mean_review_effort": 4.5,
+    "mean_return": 2669.180670996162,
+    "mean_review_effort": 5.0,
     "epsilon": 0.45577889447236175
   },
   {
     "episode": 115,
-    "mean_return": 2663.4950843651704,
-    "mean_review_effort": 4.3,
+    "mean_return": 2516.5936754956147,
+    "mean_review_effort": 4.9,
     "epsilon": 0.45100502512562823
   },
   {
     "episode": 116,
-    "mean_return": 2523.7513366717767,
-    "mean_review_effort": 4.2,
+    "mean_return": 2505.063805429028,
+    "mean_review_effort": 5.0,
     "epsilon": 0.4462311557788945
   },
   {
     "episode": 117,
-    "mean_return": 2716.6144541192252,
-    "mean_review_effort": 4.3,
+    "mean_return": 2743.95639766532,
+    "mean_review_effort": 5.0,
     "epsilon": 0.44145728643216087
   },
   {
     "episode": 118,
-    "mean_return": 2546.0057090446057,
-    "mean_review_effort": 3.9,
+    "mean_return": 2622.8791858936283,
+    "mean_review_effort": 5.0,
     "epsilon": 0.43668341708542713
   },
   {
     "episode": 119,
-    "mean_return": 2584.124869488055,
-    "mean_review_effort": 4.3,
+    "mean_return": 2368.991964644474,
+    "mean_review_effort": 5.0,
     "epsilon": 0.4319095477386935
   },
   {
     "episode": 120,
-    "mean_return": 2445.1143483907053,
-    "mean_review_effort": 4.1,
+    "mean_return": 2580.324434210552,
+    "mean_review_effort": 5.0,
     "epsilon": 0.42713567839195987
   },
   {
     "episode": 121,
-    "mean_return": 2526.1057326585023,
-    "mean_review_effort": 4.1,
+    "mean_return": 2559.204147435717,
+    "mean_review_effort": 5.0,
     "epsilon": 0.42236180904522613
   },
   {
     "episode": 122,
-    "mean_return": 2560.6171091250817,
-    "mean_review_effort": 4.2,
+    "mean_return": 2718.730491691492,
+    "mean_review_effort": 5.0,
     "epsilon": 0.4175879396984925
   },
   {
     "episode": 123,
-    "mean_return": 2570.5329305270793,
-    "mean_review_effort": 4.6,
+    "mean_return": 2830.252164321064,
+    "mean_review_effort": 4.9,
     "epsilon": 0.41281407035175877
   },
   {
     "episode": 124,
-    "mean_return": 2664.8699285979715,
-    "mean_review_effort": 4.8,
+    "mean_return": 2666.6632056927265,
+    "mean_review_effort": 5.0,
     "epsilon": 0.40804020100502514
   },
   {
     "episode": 125,
-    "mean_return": 2564.444334578272,
-    "mean_review_effort": 4.2,
+    "mean_return": 2315.25658352574,
+    "mean_review_effort": 4.9,
     "epsilon": 0.4032663316582914
   },
   {
     "episode": 126,
-    "mean_return": 2598.2247177460586,
-    "mean_review_effort": 4.7,
+    "mean_return": 2638.6407707549906,
+    "mean_review_effort": 4.9,
     "epsilon": 0.3984924623115579
   },
   {
     "episode": 127,
-    "mean_return": 2691.6491976338248,
-    "mean_review_effort": 4.4,
+    "mean_return": 2707.430952769836,
+    "mean_review_effort": 5.0,
     "epsilon": 0.39371859296482414
   },
   {
     "episode": 128,
-    "mean_return": 2456.0765958991024,
-    "mean_review_effort": 4.6,
+    "mean_return": 2480.7353920696733,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3889447236180905
   },
   {
     "episode": 129,
-    "mean_return": 2616.5458020519127,
-    "mean_review_effort": 4.3,
+    "mean_return": 2553.7346338271827,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3841708542713568
   },
   {
     "episode": 130,
-    "mean_return": 2381.1970474564578,
-    "mean_review_effort": 4.3,
+    "mean_return": 2567.430767285615,
+    "mean_review_effort": 5.0,
     "epsilon": 0.37939698492462315
   },
   {
     "episode": 131,
-    "mean_return": 2443.6175389414248,
-    "mean_review_effort": 4.3,
+    "mean_return": 2461.2926452481206,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3746231155778895
   },
   {
     "episode": 132,
-    "mean_return": 2438.8011869522215,
-    "mean_review_effort": 4.3,
+    "mean_return": 2736.234039303652,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3698492462311558
   },
   {
     "episode": 133,
-    "mean_return": 2576.464565495956,
-    "mean_review_effort": 4.2,
+    "mean_return": 2755.782646082429,
+    "mean_review_effort": 4.9,
     "epsilon": 0.36507537688442215
   },
   {
     "episode": 134,
-    "mean_return": 2687.11844665764,
-    "mean_review_effort": 4.5,
+    "mean_return": 2522.839786153875,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3603015075376884
   },
   {
     "episode": 135,
-    "mean_return": 2704.4021652033207,
-    "mean_review_effort": 4.6,
+    "mean_return": 2767.308549301645,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3555276381909548
   },
   {
     "episode": 136,
-    "mean_return": 2460.589036404106,
-    "mean_review_effort": 4.3,
+    "mean_return": 2639.581535463331,
+    "mean_review_effort": 5.0,
     "epsilon": 0.35075376884422116
   },
   {
     "episode": 137,
-    "mean_return": 2477.6879215538556,
-    "mean_review_effort": 4.2,
+    "mean_return": 2687.1707409394285,
+    "mean_review_effort": 4.9,
     "epsilon": 0.34597989949748753
   },
   {
     "episode": 138,
-    "mean_return": 2465.277847542832,
-    "mean_review_effort": 4.9,
+    "mean_return": 2719.7930671510303,
+    "mean_review_effort": 5.0,
     "epsilon": 0.3412060301507538
   },
   {
     "episode": 139,
-    "mean_return": 2759.5755312561873,
-    "mean_review_effort": 4.5,
+    "mean_return": 2475.682268998624,
+    "mean_review_effort": 4.8,
     "epsilon": 0.33643216080402005
   },
   {
     "episode": 140,
-    "mean_return": 2570.994241667072,
-    "mean_review_effort": 4.5,
+    "mean_return": 2425.879156116491,
+    "mean_review_effort": 4.7,
     "epsilon": 0.3316582914572864
   },
   {
     "episode": 141,
-    "mean_return": 2465.715284254119,
-    "mean_review_effort": 4.4,
+    "mean_return": 2634.11594939073,
+    "mean_review_effort": 4.8,
     "epsilon": 0.3268844221105528
   },
   {
     "episode": 142,
-    "mean_return": 2650.31157990484,
-    "mean_review_effort": 4.8,
+    "mean_return": 2576.5256117459235,
+    "mean_review_effort": 4.9,
     "epsilon": 0.32211055276381917
   },
   {
     "episode": 143,
-    "mean_return": 2636.389268744894,
-    "mean_review_effort": 4.4,
+    "mean_return": 2774.759448302103,
+    "mean_review_effort": 4.9,
     "epsilon": 0.31733668341708543
   },
   {
     "episode": 144,
-    "mean_return": 2524.515418582899,
+    "mean_return": 2502.4408246532,
     "mean_review_effort": 4.9,
     "epsilon": 0.3125628140703518
   },
   {
     "episode": 145,
-    "mean_return": 2465.203511900318,
-    "mean_review_effort": 4.7,
+    "mean_return": 2617.731693585258,
+    "mean_review_effort": 4.9,
     "epsilon": 0.30778894472361806
   },
   {
     "episode": 146,
-    "mean_return": 2891.0041812428744,
-    "mean_review_effort": 4.7,
+    "mean_return": 2757.726824244692,
+    "mean_review_effort": 5.0,
     "epsilon": 0.30301507537688455
   },
   {
     "episode": 147,
-    "mean_return": 2595.890422499415,
-    "mean_review_effort": 4.6,
+    "mean_return": 2607.597214106057,
+    "mean_review_effort": 5.0,
     "epsilon": 0.2982412060301508
   },
   {
     "episode": 148,
-    "mean_return": 2652.3160907494107,
-    "mean_review_effort": 4.5,
+    "mean_return": 2568.0433371764216,
+    "mean_review_effort": 5.0,
     "epsilon": 0.29346733668341707
   },
   {
     "episode": 149,
-    "mean_return": 2718.869019855471,
-    "mean_review_effort": 4.6,
+    "mean_return": 2744.766736676365,
+    "mean_review_effort": 4.9,
     "epsilon": 0.28869346733668344
   },
   {
     "episode": 150,
-    "mean_return": 2578.6064127191726,
-    "mean_review_effort": 4.4,
+    "mean_return": 2540.602162653314,
+    "mean_review_effort": 4.8,
     "epsilon": 0.2839195979899497
   },
   {
     "episode": 151,
-    "mean_return": 2592.0845676160043,
-    "mean_review_effort": 4.6,
+    "mean_return": 2653.414510839947,
+    "mean_review_effort": 5.0,
     "epsilon": 0.2791457286432162
   },
   {
     "episode": 152,
-    "mean_return": 2721.2553691154726,
-    "mean_review_effort": 4.7,
+    "mean_return": 2700.0384296073853,
+    "mean_review_effort": 5.0,
     "epsilon": 0.27437185929648245
   },
   {
     "episode": 153,
-    "mean_return": 2510.1761084724776,
-    "mean_review_effort": 4.6,
+    "mean_return": 2536.3292307007814,
+    "mean_review_effort": 4.9,
     "epsilon": 0.2695979899497488
   },
   {
     "episode": 154,
-    "mean_return": 2419.697439008862,
-    "mean_review_effort": 4.6,
+    "mean_return": 2557.138758229653,
+    "mean_review_effort": 4.9,
     "epsilon": 0.2648241206030151
   },
   {
     "episode": 155,
-    "mean_return": 2451.489114649723,
-    "mean_review_effort": 4.8,
+    "mean_return": 2598.752632709263,
+    "mean_review_effort": 5.0,
     "epsilon": 0.26005025125628145
   },
   {
     "episode": 156,
-    "mean_return": 2845.130454492384,
-    "mean_review_effort": 4.3,
+    "mean_return": 2812.164173992147,
+    "mean_review_effort": 4.9,
     "epsilon": 0.2552763819095478
   },
   {
     "episode": 157,
-    "mean_return": 2663.628261517854,
-    "mean_review_effort": 4.9,
+    "mean_return": 2772.640324065056,
+    "mean_review_effort": 5.0,
     "epsilon": 0.2505025125628141
   },
   {
     "episode": 158,
-    "mean_return": 2659.482353210186,
-    "mean_review_effort": 4.6,
+    "mean_return": 2571.096118976616,
+    "mean_review_effort": 4.9,
     "epsilon": 0.24572864321608046
   },
   {
     "episode": 159,
-    "mean_return": 2477.698013147911,
-    "mean_review_effort": 4.7,
+    "mean_return": 2841.6826756648543,
+    "mean_review_effort": 4.9,
     "epsilon": 0.24095477386934672
   },
   {
     "episode": 160,
-    "mean_return": 2762.0692866504714,
-    "mean_review_effort": 4.6,
+    "mean_return": 2614.657998316321,
+    "mean_review_effort": 5.0,
     "epsilon": 0.2361809045226131
   },
   {
     "episode": 161,
-    "mean_return": 2578.0511025702685,
-    "mean_review_effort": 4.7,
+    "mean_return": 2683.443010962958,
+    "mean_review_effort": 5.0,
     "epsilon": 0.23140703517587946
   },
   {
     "episode": 162,
-    "mean_return": 2537.95784904451,
-    "mean_review_effort": 4.8,
+    "mean_return": 2765.092237821563,
+    "mean_review_effort": 5.0,
     "epsilon": 0.22663316582914583
   },
   {
     "episode": 163,
-    "mean_return": 2417.708244937551,
-    "mean_review_effort": 4.8,
+    "mean_return": 2612.554245330307,
+    "mean_review_effort": 4.9,
     "epsilon": 0.2218592964824121
   },
   {
     "episode": 164,
-    "mean_return": 2715.7644510195114,
-    "mean_review_effort": 4.7,
+    "mean_return": 2840.251649684136,
+    "mean_review_effort": 5.0,
     "epsilon": 0.21708542713567847
   },
   {
     "episode": 165,
-    "mean_return": 2659.131367817825,
-    "mean_review_effort": 4.6,
+    "mean_return": 2688.937329442194,
+    "mean_review_effort": 5.0,
     "epsilon": 0.21231155778894473
   },
   {
     "episode": 166,
-    "mean_return": 2830.9387144216666,
-    "mean_review_effort": 4.7,
+    "mean_return": 2510.8237678208075,
+    "mean_review_effort": 5.0,
     "epsilon": 0.2075376884422111
   },
   {
     "episode": 167,
-    "mean_return": 2672.4990658268134,
-    "mean_review_effort": 4.7,
+    "mean_return": 2562.596366971381,
+    "mean_review_effort": 5.0,
     "epsilon": 0.20276381909547747
   },
   {
     "episode": 168,
-    "mean_return": 2654.7986128520397,
-    "mean_review_effort": 4.3,
+    "mean_return": 2581.1282702944277,
+    "mean_review_effort": 5.0,
     "epsilon": 0.19798994974874373
   },
   {
     "episode": 169,
-    "mean_return": 2641.068662824103,
-    "mean_review_effort": 4.7,
+    "mean_return": 2761.8162769307323,
+    "mean_review_effort": 4.9,
     "epsilon": 0.1932160804020101
   },
   {
     "episode": 170,
-    "mean_return": 2668.869667988317,
+    "mean_return": 2508.7928075816835,
     "mean_review_effort": 4.9,
     "epsilon": 0.18844221105527637
   },
   {
     "episode": 171,
-    "mean_return": 2600.0599365064345,
-    "mean_review_effort": 5.0,
+    "mean_return": 2697.105293709827,
+    "mean_review_effort": 4.9,
     "epsilon": 0.18366834170854285
   },
   {
     "episode": 172,
-    "mean_return": 2645.796642489657,
-    "mean_review_effort": 4.7,
+    "mean_return": 2701.965952700508,
+    "mean_review_effort": 4.9,
     "epsilon": 0.1788944723618091
   },
   {
     "episode": 173,
-    "mean_return": 2720.466928501469,
-    "mean_review_effort": 4.7,
+    "mean_return": 2554.725613447489,
+    "mean_review_effort": 4.9,
     "epsilon": 0.17412060301507537
   },
   {
     "episode": 174,
-    "mean_return": 2613.71619559261,
-    "mean_review_effort": 4.7,
+    "mean_return": 2571.6903218528782,
+    "mean_review_effort": 4.8,
     "epsilon": 0.16934673366834174
   },
   {
     "episode": 175,
-    "mean_return": 2384.062406798624,
-    "mean_review_effort": 4.6,
+    "mean_return": 2784.908918125594,
+    "mean_review_effort": 5.0,
     "epsilon": 0.164572864321608
   },
   {
     "episode": 176,
-    "mean_return": 2745.4459605185966,
-    "mean_review_effort": 4.9,
+    "mean_return": 2672.931322230306,
+    "mean_review_effort": 5.0,
     "epsilon": 0.15979899497487438
   },
   {
     "episode": 177,
-    "mean_return": 2429.399610819774,
-    "mean_review_effort": 4.7,
+    "mean_return": 2811.0867511595247,
+    "mean_review_effort": 4.9,
     "epsilon": 0.15502512562814075
   },
   {
     "episode": 178,
-    "mean_return": 2560.5191377736783,
-    "mean_review_effort": 4.7,
+    "mean_return": 2822.4925439363005,
+    "mean_review_effort": 5.0,
     "epsilon": 0.15025125628140712
   },
   {
     "episode": 179,
-    "mean_return": 2570.416070106526,
-    "mean_review_effort": 4.5,
+    "mean_return": 2565.16255984571,
+    "mean_review_effort": 4.8,
     "epsilon": 0.14547738693467338
   },
   {
     "episode": 180,
-    "mean_return": 2789.475430757162,
-    "mean_review_effort": 4.8,
+    "mean_return": 2820.5179148265256,
+    "mean_review_effort": 5.0,
     "epsilon": 0.14070351758793975
   },
   {
     "episode": 181,
-    "mean_return": 2739.048802845845,
-    "mean_review_effort": 4.9,
+    "mean_return": 2516.3550753964037,
+    "mean_review_effort": 4.8,
     "epsilon": 0.135929648241206
   },
   {
     "episode": 182,
-    "mean_return": 2505.9952466352865,
-    "mean_review_effort": 4.7,
+    "mean_return": 2595.9768525038844,
+    "mean_review_effort": 4.9,
     "epsilon": 0.13115577889447239
   },
   {
     "episode": 183,
-    "mean_return": 2684.9498589307664,
+    "mean_return": 2577.6038866222343,
     "mean_review_effort": 5.0,
     "epsilon": 0.12638190954773876
   },
   {
     "episode": 184,
-    "mean_return": 2573.8160081123983,
-    "mean_review_effort": 4.8,
+    "mean_return": 2837.1354660976094,
+    "mean_review_effort": 5.0,
     "epsilon": 0.12160804020100502
   },
   {
     "episode": 185,
-    "mean_return": 2660.499665391191,
+    "mean_return": 2563.433339418588,
     "mean_review_effort": 4.9,
     "epsilon": 0.11683417085427139
   },
   {
     "episode": 186,
-    "mean_return": 2689.478638592848,
-    "mean_review_effort": 4.8,
+    "mean_return": 2436.140890543713,
+    "mean_review_effort": 5.0,
     "epsilon": 0.11206030150753765
   },
   {
     "episode": 187,
-    "mean_return": 2654.7312141447005,
+    "mean_return": 2625.8610806894494,
     "mean_review_effort": 4.9,
     "epsilon": 0.10728643216080413
   },
   {
     "episode": 188,
-    "mean_return": 2630.36527256355,
-    "mean_review_effort": 5.0,
+    "mean_return": 2464.0384914024166,
+    "mean_review_effort": 4.9,
     "epsilon": 0.1025125628140704
   },
   {
     "episode": 189,
-    "mean_return": 2661.34884202308,
+    "mean_return": 2553.5763906726297,
     "mean_review_effort": 5.0,
     "epsilon": 0.09773869346733677
   },
   {
     "episode": 190,
-    "mean_return": 2705.5082549150998,
+    "mean_return": 2664.968079535302,
     "mean_review_effort": 5.0,
     "epsilon": 0.09296482412060303
   },
   {
     "episode": 191,
-    "mean_return": 2770.508186706324,
-    "mean_review_effort": 5.0,
+    "mean_return": 2565.6375952048475,
+    "mean_review_effort": 4.9,
     "epsilon": 0.08819095477386929
   },
   {
     "episode": 192,
-    "mean_return": 2499.3506873976576,
-    "mean_review_effort": 4.8,
+    "mean_return": 2454.581893851175,
+    "mean_review_effort": 5.0,
     "epsilon": 0.08341708542713577
   },
   {
     "episode": 193,
-    "mean_return": 2724.670160341463,
-    "mean_review_effort": 4.8,
+    "mean_return": 2640.7925487876373,
+    "mean_review_effort": 4.9,
     "epsilon": 0.07864321608040203
   },
   {
     "episode": 194,
-    "mean_return": 2692.147949024855,
-    "mean_review_effort": 4.9,
+    "mean_return": 2672.9980433912447,
+    "mean_review_effort": 5.0,
     "epsilon": 0.0738693467336684
   },
   {
     "episode": 195,
-    "mean_return": 2603.787451286088,
-    "mean_review_effort": 4.9,
+    "mean_return": 2664.54147976047,
+    "mean_review_effort": 5.0,
     "epsilon": 0.06909547738693467
   },
   {
     "episode": 196,
-    "mean_return": 2652.2318442817163,
-    "mean_review_effort": 4.8,
+    "mean_return": 2712.6913615709514,
+    "mean_review_effort": 5.0,
     "epsilon": 0.06432160804020104
   },
   {
     "episode": 197,
-    "mean_return": 2633.6558674571015,
-    "mean_review_effort": 4.9,
+    "mean_return": 2879.6494042617996,
+    "mean_review_effort": 5.0,
     "epsilon": 0.05954773869346741
   },
   {
     "episode": 198,
-    "mean_return": 2620.694970816271,
-    "mean_review_effort": 4.9,
+    "mean_return": 2750.7837386617193,
+    "mean_review_effort": 5.0,
     "epsilon": 0.05477386934673378
   },
   {
     "episode": 199,
-    "mean_return": 2734.6931263718557,
+    "mean_return": 2569.9651222499874,
     "mean_review_effort": 5.0,
     "epsilon": 0.050000000000000044
   }

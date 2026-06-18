@@ -27,10 +27,10 @@ class SimConfig:
 
     # --- World -----------------------------------------------------------
     num_heuristic_agents: int = 10
-    num_rl_agents: int = 10
+    num_rl_agents: int = 100
     num_dqn_agents: int = 0
-    num_random_agents: int = 0
-    num_probabilistic_agents: int = 10
+    num_random_agents: int = 10
+    num_probabilistic_agents: int = 0
     num_timesteps: int = 2000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
@@ -49,7 +49,7 @@ class SimConfig:
     # --- Paper economics -------------------------------------------------
     default_accrual_rate: float = 1.0       # base AC gained per timestep, before bumps
     default_review_share: float = 0.05      # legacy fallback when fair-market pricing is off
-    default_max_reviewer_share: float = 0.25       # cap on a single review's share
+    default_max_reviewer_share: float = 0.1       # cap on a single review's share
     min_offer_share: float = 0.005          # floor on a non-zero review offer
     use_fair_market_pricing: bool = True
     prior_review_epsilon: float = 0.05      # prior reviewer effect before review history exists
@@ -65,7 +65,7 @@ class SimConfig:
     history_price_scale: float = 0.5    # better reviewer history -> larger offered share
 
     # --- Effort & reward model -------------------------------------------
-    review_paradigm: str = "discrete"       # "continuous" | "discrete"
+    review_paradigm: str = "continuous"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
     writing_effort_per_timestep: float = 1.0    # continuous writing effort per timestep
     min_review_effort_threshold: float = 1.0    # minimum valid review/share effort
@@ -77,7 +77,7 @@ class SimConfig:
     max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
     review_sigmoid_midpoint: float = 2.5        # review length where impact accelerates
     review_sigmoid_steepness: float = 1.4
-    review_jump_threshold: float = 15.0          # optional jump-mode high-effort cutoff
+    review_jump_threshold: float = 15.0          #f optional jump-mode high-effort cutoff
     review_jump_bump: float = 0.50               # optional extra bump after the cutoff
     review_jump_width: float = 0.75              # softness of the jump-mode transition
     base_review_accrual_bump: float = 0.20      # log-mode rate bump at exactly the threshold
@@ -96,8 +96,8 @@ class SimConfig:
     # discussed in sync; ``quality_scaled`` maps higher sampled paper quality to
     # a larger target inside that same band.
     paper_effort_mode: str = "fixed"             # "fixed" | "uniform" | "quality_scaled"
-    paper_effort_min: float = 50.0
-    paper_effort_max: float = 150.0
+    paper_effort_min: float = 130.0
+    paper_effort_max: float = 170.0
     # Continuous-mode asymptotic writing model: a paper's accrual rate approaches
     # its quality-defined ceiling as accumulated writing effort grows. Higher k
     # reaches the ceiling faster (k=0.2 -> ~63% at 5 ts, ~86% at 10 ts).
