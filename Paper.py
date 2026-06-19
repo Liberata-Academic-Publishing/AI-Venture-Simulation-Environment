@@ -303,7 +303,7 @@ class Paper:
         share_distribution: dict[Agent, float] | None = None,
         completion_progress: float = 1.0,
         market_listed: bool = False,
-        max_reviewer_share: float = DEFAULT_MAX_REVIEWER_SHARE,
+        max_reviewer_share: float | None = None,
         writing_effort: float | None = None,
         required_writing_effort: float | None = None,
     ):
@@ -339,7 +339,9 @@ class Paper:
             "completion_progress",
         )
         self.max_reviewer_share = self._validate_share_value(
-            max_reviewer_share,
+            DEFAULT_MAX_REVIEWER_SHARE
+            if max_reviewer_share is None
+            else max_reviewer_share,
             "max_reviewer_share",
         )
 

@@ -198,6 +198,16 @@ If parameters were just changed, confirm `config.py` state before running.
 - `matplotlib` for charts: `python -m pip install matplotlib`
 - Full pipeline (train + 2000-timestep full comparison) may take several minutes.
 
+### Adaptive surplus sweep
+
+Overnight-friendly script that trains RL, runs a simulation, logs author/reviewer
+surplus to a live CSV, and adapts accrual-bump parameters each step:
+
+```bash
+python3 sweep_surplus.py
+python3 sweep_surplus.py 2>&1 | tee runs/sweep_surplus.log
+```
+
 ### Example (decay bump experiment)
 
 After setting in `config.py`:
