@@ -271,7 +271,7 @@ class HeuristicAgent(Agent):
             )
         else:
             future_gain = paper.accrual_rate * (1.0 + epsilon) * horizon_value
-        return share * future_gain
+        return share * (paper.current_ac + future_gain)
 
     def _score_claim(self, paper: Paper) -> float:
         """Value of claiming ``paper`` and completing a minimum-effort review."""

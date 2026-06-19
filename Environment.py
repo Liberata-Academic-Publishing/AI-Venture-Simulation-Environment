@@ -339,7 +339,7 @@ class Environment:
         for paper in self.papers:
             for agent, share in paper.share_distribution.items():
                 if agent in agent_set:
-                    agent.academic_capital += paper.capital_credit_for(agent)
+                    agent.academic_capital += share * paper.current_ac
 
     # ---- helpers ---------------------------------------------------------
     def _sync_papers(self):

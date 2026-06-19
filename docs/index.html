@@ -176,6 +176,7 @@
       <div class="panel" id="panel-review-price"><h2>Accepted review share (10-timestep bins)</h2><img class="chart-img" id="img-accepted_review_price_binned" alt="Accepted review share binned"></div>
       <div class="panel" id="panel-market-pricing"><h2>Dynamic review pricing during the run</h2><img class="chart-img" id="img-market_pricing_dynamics" alt="Dynamic review pricing during the run"></div>
       <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
+      <div class="panel" id="panel-reputation-vs-ac"><h2>Reviewer reputation vs final academic capital</h2><img class="chart-img" id="img-reputation_vs_ac" alt="Reviewer reputation vs final academic capital"></div>
       <div class="panel" id="panel-quality"><h2>Paper quality vs accrued capital</h2><img class="chart-img" id="img-paper_quality_vs_ac" alt="Paper quality vs accrued capital"><canvas id="qualityChart"></canvas></div>
       <div class="panel" id="panel-effort-rate"><h2>Writing effort vs accrual rate</h2><img class="chart-img" id="img-writing_effort_vs_rate" alt="Writing effort vs accrual rate"><canvas id="effortRateChart"></canvas></div>
       <div class="panel" id="panel-paper-effort-time"><h2>Paper-writing effort over time</h2><img class="chart-img" id="img-paper_writing_effort_over_time" alt="Paper-writing effort over time"><canvas id="paperEffortTimeChart"></canvas></div>
@@ -973,6 +974,7 @@
       { panel: "panel-review-benefit", chart: "review_benefit", imgId: "img-review_benefit" },
       { panel: "panel-review-surplus", chart: "review_surplus_aggregate", imgId: "img-review_surplus_aggregate" },
       { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
+      { panel: "panel-reputation-vs-ac", chart: "reputation_vs_ac", imgId: "img-reputation_vs_ac" },
       { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
       { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },
       { panel: "panel-paper-effort-time", chart: "paper_writing_effort_over_time", canvasId: "paperEffortTimeChart", imgId: "img-paper_writing_effort_over_time" },

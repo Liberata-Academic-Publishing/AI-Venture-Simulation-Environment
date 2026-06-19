@@ -120,11 +120,11 @@ def _review_benefit_components(env: "Environment") -> dict[str, float]:
     """Good/bad-faith surplus split of every completed review, in AC units.
 
     For each reviewed paper, a review is a trade: the reviewer takes a ``share``
-    of the paper's *post-review* accrual only (not the author's sunk capital
-    at review time), while the author gains an accrual bump (``epsilon``) on
-    future accrual. Relative to the no-review counterfactual:
+    of the *whole* paper (past and future AC), while the author gains an accrual
+    bump (``epsilon``) on the paper's *future* accrual only. Relative to the
+    no-review counterfactual:
 
-        reviewer_benefit = share * max(0, final_ac - A0)
+        reviewer_benefit = share * final_ac
         value_created    = (final_ac - A0) * epsilon / (1 + epsilon)
         author_net       = value_created - reviewer_benefit   # < 0 => exploited
 
@@ -153,8 +153,7 @@ def _review_benefit_components(env: "Environment") -> dict[str, float]:
                 continue
             epsilon = float(record.get("epsilon", 0.0))
             a0 = float(record.get("current_ac_at_review", final_ac))
-            incremental = max(0.0, final_ac - a0)
-            reviewer_benefit = share * incremental
+            reviewer_benefit = share * final_ac
             bump_duration = str(
                 record.get("bump_duration", SIM.review_bump_duration)
             ).strip().lower()
@@ -203,10 +202,11 @@ def _ac_by_source(env: "Environment") -> dict[str, float]:
     review = 0.0
     for paper in env.papers:
         author = getattr(paper, "author", None)
+        current_ac = float(getattr(paper, "current_ac", 0.0))
         for agent, share in paper.share_distribution.items():
             if agent not in agent_set:
                 continue
-            value = paper.capital_credit_for(agent)
+            value = float(share) * current_ac
             if agent is author:
                 writing += value
             else:
@@ -1013,6 +1013,15 @@ class History:
             )
         else:
             history.action_counts = Counter(kind for _, _, kind, _ in history.actions)
+
+        outcome = data.get("agent_outcome_summary")
+        if outcome:
+            history._agent_outcome_summary = list(outcome)
+        final_rep = data.get("agent_final_reputation")
+        if final_rep:
+            history._agent_final_reputation = {
+                k: float(v) for k, v in final_rep.items()
+            }
 
         return history
 

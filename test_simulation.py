@@ -424,7 +424,7 @@ class MarketEconomicsTest(unittest.TestCase):
         veteran = HeuristicAgent(intrinsic_talent=1.0, name="veteran")
         rookie.peer_review_epsilon_history = 0.02
         veteran.peer_review_epsilon_history = 0.20
-        paper = _listed_paper(author, quality=1.0, current_ac=500.0, accrual_rate=10.0)
+        paper = _listed_paper(author, quality=1.0, current_ac=500.0, accrual_rate=1.0)
         agents = [author, rookie, veteran]
         Agent.all_papers = [paper]
         Agent.all_agents = agents
@@ -452,8 +452,8 @@ class MarketEconomicsTest(unittest.TestCase):
     def test_legacy_heuristic_claim_unchanged_when_flags_off(self):
         agent = HeuristicAgent(intrinsic_talent=1.0)
         author = ScriptAgent("author")
-        low = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=0.5)
-        high = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=5.0)
+        low = _listed_paper(author, quality=1.0, current_ac=10.0)
+        high = _listed_paper(author, quality=1.0, current_ac=200.0)
         Agent.all_papers = [low, high]
         Agent.all_agents = [agent, author]
         for paper in (low, high):
@@ -666,8 +666,8 @@ class HeuristicPolicyTest(unittest.TestCase):
     def test_claims_highest_value_listed_paper(self):
         agent = HeuristicAgent(intrinsic_talent=1.0)
         author = ScriptAgent("author")
-        low = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=0.5)
-        high = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=5.0)
+        low = _listed_paper(author, quality=1.0, current_ac=10.0)
+        high = _listed_paper(author, quality=1.0, current_ac=200.0)
         Agent.all_papers = [low, high]
         for paper in (low, high):
             paper.update_price_table([agent], 1.0, 0.0)

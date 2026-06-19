@@ -1333,6 +1333,121 @@ def plot_review_reputation(
     return _finish(fig, path, show)
 
 
+def _reputation_vs_ac_points(
+    history: "History",
+) -> list[tuple[float, float, str]]:
+    """Return (reputation, final_capital, group) for each agent."""
+    cached = getattr(history, "_agent_outcome_summary", None)
+    if cached:
+        return [
+            (
+                float(row["peer_review_history"]),
+                float(row["final_capital"]),
+                row.get("group", "Agent"),
+            )
+            for row in cached
+        ]
+
+    if history.agent_review_history:
+        return [
+            (
+                float(row["peer_review_history"]),
+                float(row["final_capital"]),
+                row.get("group", "Agent"),
+            )
+            for row in history.agent_outcome_summary()
+        ]
+
+    final_rep = getattr(history, "_agent_final_reputation", None) or {}
+    points: list[tuple[float, float, str]] = []
+    for label, cap_series in history.agent_capital.items():
+        if not cap_series:
+            continue
+        points.append(
+            (
+                float(final_rep.get(label, 0.0)),
+                float(cap_series[-1]),
+                history.agent_groups.get(label, "Agent"),
+            )
+        )
+    return points
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float:
+    n = len(xs)
+    if n < 2:
+        return float("nan")
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs))
+    den_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys))
+    if den_x == 0.0 or den_y == 0.0:
+        return float("nan")
+    return num / (den_x * den_y)
+
+
+def _draw_reputation_vs_ac(ax, history: "History") -> bool:
+    """Scatter final peer-review reputation vs total academic capital by agent."""
+    points = _reputation_vs_ac_points(history)
+    if not points:
+        ax.text(0.5, 0.5, "No reputation data recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return False
+
+    by_group: dict[str, list[tuple[float, float]]] = {}
+    for reputation, capital, group in points:
+        by_group.setdefault(group, []).append((reputation, capital))
+
+    cmap = plt.get_cmap("tab10")
+    ordered_groups = sorted(by_group)
+    color_for = {group: cmap(i % 10) for i, group in enumerate(ordered_groups)}
+    for group in ordered_groups:
+        xs, ys = zip(*by_group[group])
+        ax.scatter(
+            xs,
+            ys,
+            s=28,
+            alpha=0.75,
+            color=color_for[group],
+            edgecolors="#1e293b",
+            linewidths=0.4,
+            label=group,
+        )
+
+    reputations = [p[0] for p in points]
+    capitals = [p[1] for p in points]
+    corr = _pearson(reputations, capitals)
+    if not math.isnan(corr):
+        ax.text(
+            0.03,
+            0.97,
+            f"Pearson r = {corr:.3f}  (n = {len(points)})",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
+        )
+
+    ax.set_xlabel("Peer-review reputation (AC earned per review)")
+    ax.set_ylabel("Final academic capital")
+    if len(ordered_groups) > 1:
+        ax.legend(fontsize=8, loc="lower right")
+    return True
+
+
+def plot_reputation_vs_ac(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Final academic capital vs peer-review reputation, colored by agent type."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_reputation_vs_ac(ax, history)
+    ax.set_title("Reviewer reputation vs final academic capital")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _daily_action_counts(history: "History") -> dict[str, list[int]]:
     """Per-day counts for each raw action kind."""
     kinds = sorted({kind for _, _, kind, _ in history.actions})
@@ -1920,6 +2035,10 @@ def _has_reputation(history: "History") -> bool:
     return bool(history.scalars.get("mean_peer_review_history"))
 
 
+def _has_reputation_vs_ac(history: "History") -> bool:
+    return bool(_reputation_vs_ac_points(history))
+
+
 def _has_groups(history: "History") -> bool:
     return bool(history.agent_group_summary())
 
@@ -1953,6 +2072,7 @@ _GALLERY_CHARTS = (
     ("review_behavior", _has_review_behavior, plot_review_behavior),
     ("marketplace_activity", _has_marketplace, plot_marketplace_activity),
     ("review_reputation", _has_reputation, plot_review_reputation),
+    ("reputation_vs_ac", _has_reputation_vs_ac, plot_reputation_vs_ac),
     ("paper_quality_vs_ac",
      lambda h: bool(_paper_quality_ac_points(h)), plot_paper_quality_vs_ac),
     ("writing_effort_vs_rate",
@@ -2094,6 +2214,9 @@ def plot_all(
         ),
         "review_reputation": plot_review_reputation(
             history, os.path.join(outdir, "review_reputation.png"), show=show
+        ),
+        "reputation_vs_ac": plot_reputation_vs_ac(
+            history, os.path.join(outdir, "reputation_vs_ac.png"), show=show
         ),
         "action_mix": plot_action_mix_over_time(
             history, os.path.join(outdir, "action_mix.png"), show=show

@@ -577,17 +577,7 @@ class Agent(ABC):
     ) -> None:
         """Update public peer-review reputation and epsilon history on completion."""
         self.completed_review_count += 1
-        a0 = paper.ac_at_review_baseline()
-        incremental = max(0.0, paper.current_ac - a0)
-        if incremental <= 0.0 and share > 0.0:
-            epsilon = 0.0
-            if getattr(paper, "review_records", None):
-                try:
-                    epsilon = float(paper.review_records[-1].get("epsilon", 0.0))
-                except (TypeError, ValueError):
-                    epsilon = 0.0
-            incremental = paper.accrual_rate * (1.0 + max(0.0, epsilon))
-        self.total_ac_from_reviews += share * incremental
+        self.total_ac_from_reviews += share * paper.current_ac
         self.peer_review_history = (
             self.total_ac_from_reviews / self.completed_review_count
         )
