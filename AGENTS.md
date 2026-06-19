@@ -106,6 +106,115 @@ python test_simulation.py
 python -m unittest test_simulation
 ```
 
+## Experiment workflow
+
+Standard loop for parameter experiments (continuous paradigm, full agent
+comparison):
+
+1. Edit defaults in `config.py` (`SimConfig` / `TrainConfig`).
+2. Train RL: `python train_rl.py --no-archive`
+3. Run simulation with full comparison and archive: `python run_simulation.py ... --name "<title>"`
+4. Check `runs/` charts and the archived `docs/data/<run_id>/` path.
+
+**What we're looking for:** emergent good-faith vs bad-faith peer review under
+the configured economics. Key outputs: agent-group comparison (heuristic vs
+random vs probabilistic vs RL), choice breakdown, review behavior, and capital
+inequality (Gini). Produced by `run_simulation.py` + `visualize.py`; archived
+via `export_run.py`.
+
+### Step 1 — Change parameters
+
+Edit `config.py` defaults. CLI flags are for one-off overrides only. Common
+experiment knobs:
+
+- `review_bump_duration`, `review_bump_decay_rate`, `review_bump_decay_cap_timesteps`
+- `paper_effort_mode`, `paper_effort_min`, `paper_effort_max`
+- `continuous_publishing`, `continuous_paper_timesteps`
+- Market economics toggles (`use_scarcity_pricing`, etc.)
+
+`review_paradigm` must match the training script. Default workflow uses
+**continuous** → `train_rl.py` (not `train_discrete_rl.py`).
+
+### Step 2 — Train continuous RL
+
+```bash
+python train_rl.py --no-archive
+```
+
+Defaults (`TrainConfig`): 200 episodes, 1000 timesteps/episode, 10 RL agents,
+tabular backend. Policy auto-saves to `policies/policy_tabular.pkl` (or
+`policy_linear.npy` for linear). Training logs/charts go to `runs/`. Use
+`--name "training: <experiment>"` to archive training metrics to the gallery.
+
+`run_simulation.py` auto-loads the saved policy when `rl_autoload_policy=True`
+(default) and `review_paradigm=continuous`.
+
+### Step 3 — Run simulation (full comparison)
+
+```bash
+python run_simulation.py \
+  --heuristic-agents 20 \
+  --rl-agents 20 \
+  --random-agents 20 \
+  --probabilistic-agents 20 \
+  --name "<descriptive experiment name>"
+```
+
+Full-comparison default: **20 agents per group** (80 total). Always pass
+`--name` for non-interactive runs so results archive without a prompt.
+
+**Local outputs** (overwritten each run in `runs/`): `history.csv`,
+`history.json`, and charts (`summary.png`, `agent_group_comparison.png`,
+`choice_breakdown.png`, `review_behavior.png`, etc.).
+
+**Gallery archive** (`--name` provided): `docs/data/<run_id>/` (slim JSON +
+chart PNGs for GitHub Pages); `local_data/<run_id>/history.json` (full lossless
+history, gitignored).
+
+### Step 4 — Verify results
+
+1. Terminal summary: agent-group comparison + good/bad-faith review counts.
+2. `runs/summary.png` and `runs/agent_group_comparison.png`.
+3. Gallery path: `Archived run to docs/data/<run_id>/`.
+
+Optional publish: `git add docs/data && git commit -m 'Add run: <name>' && git push`
+
+### "Run it" shorthand
+
+When the user says **"run it"** or **"run the experiment"**:
+
+1. Read current `config.py` defaults to know active parameters.
+2. Run `python train_rl.py --no-archive`.
+3. Run `python run_simulation.py` with full-comparison agent counts and
+   `--name "<name>"` — ask for the name if not provided.
+4. Report: policy path, `runs/` chart paths, archived `run_id`, and a one-line
+   summary (good/bad-faith ratio, RL vs heuristic mean capital).
+
+If parameters were just changed, confirm `config.py` state before running.
+
+### Prerequisites
+
+- Python 3; stdlib for sim logic.
+- `matplotlib` for charts: `python -m pip install matplotlib`
+- Full pipeline (train + 2000-timestep full comparison) may take several minutes.
+
+### Example (decay bump experiment)
+
+After setting in `config.py`:
+
+```python
+review_bump_duration = "decay"
+review_bump_decay_rate = 0.05
+```
+
+```bash
+python train_rl.py --no-archive
+python run_simulation.py \
+  --heuristic-agents 20 --rl-agents 20 \
+  --random-agents 20 --probabilistic-agents 20 \
+  --name "decay bump k=0.05 full comparison"
+```
+
 ## Conventions
 
 - **Stdlib-only where possible** (`config.py` uses only `dataclasses`); matplotlib

@@ -40,6 +40,13 @@ HISTORY_PRICE_SCALE = SIM.history_price_scale
 WRITING_SATURATION = SIM.writing_saturation
 PRICING_POLICY = SIM.pricing_policy
 
+REVIEW_BUMP_PERMANENT = "permanent"
+REVIEW_BUMP_DECAY = "decay"
+VALID_REVIEW_BUMP_DURATIONS = frozenset({
+    REVIEW_BUMP_PERMANENT,
+    REVIEW_BUMP_DECAY,
+})
+
 REVIEW_PARADIGM_CONTINUOUS = "continuous"
 REVIEW_PARADIGM_DISCRETE = "discrete"
 VALID_REVIEW_PARADIGMS = frozenset({
@@ -72,6 +79,14 @@ def validate_pricing_policy(policy: str) -> str:
     if value not in VALID_PRICING_POLICIES:
         allowed = ", ".join(sorted(VALID_PRICING_POLICIES))
         raise ValueError(f"pricing_policy must be one of: {allowed}")
+    return value
+
+
+def validate_review_bump_duration(duration: str) -> str:
+    value = str(duration).strip().lower()
+    if value not in VALID_REVIEW_BUMP_DURATIONS:
+        allowed = ", ".join(sorted(VALID_REVIEW_BUMP_DURATIONS))
+        raise ValueError(f"review_bump_duration must be one of: {allowed}")
     return value
 
 
@@ -212,6 +227,63 @@ def review_epsilon_from_effort(effort: float, quality: float = 1.0) -> float:
     return review_accrual_bump(effort, quality)
 
 
+def review_bump_factor_at_age(epsilon: float, age: float) -> float:
+    """Remaining bump fraction ``epsilon * exp(-k * age)``, capped to zero."""
+    if epsilon <= 0.0:
+        return 0.0
+    if validate_review_bump_duration(SIM.review_bump_duration) == REVIEW_BUMP_PERMANENT:
+        return float(epsilon)
+    age_value = max(0.0, float(age))
+    cap = SIM.review_bump_decay_cap_timesteps
+    if cap is not None and age_value >= float(cap):
+        return 0.0
+    decay_rate = max(0.0, float(SIM.review_bump_decay_rate))
+    return float(epsilon) * math.exp(-decay_rate * age_value)
+
+
+def decayed_accrual_rate(base_rate: float, epsilon: float, age: float) -> float:
+    """Accrual rate from a frozen base rate and a decaying bump fraction."""
+    bump = review_bump_factor_at_age(epsilon, age)
+    return max(0.0, float(base_rate)) * (1.0 + bump)
+
+
+def forecast_decayed_accrual_gain(
+    base_rate: float,
+    epsilon: float,
+    horizon: float,
+) -> float:
+    """Integrated AC gain over ``horizon`` timesteps from a fresh review bump."""
+    horizon_value = max(0.0, float(horizon))
+    if horizon_value <= 0.0:
+        return 0.0
+    base = max(0.0, float(base_rate))
+    if validate_review_bump_duration(SIM.review_bump_duration) == REVIEW_BUMP_PERMANENT:
+        return base * (1.0 + max(0.0, float(epsilon))) * horizon_value
+
+    epsilon_value = max(0.0, float(epsilon))
+    decay_rate = max(0.0, float(SIM.review_bump_decay_rate))
+    cap = SIM.review_bump_decay_cap_timesteps
+    cap_value = None if cap is None else max(0.0, float(cap))
+
+    def bump_integral(length: float) -> float:
+        if length <= 0.0 or epsilon_value <= 0.0:
+            return 0.0
+        if decay_rate <= 1e-12:
+            return epsilon_value * length
+        return (epsilon_value / decay_rate) * (1.0 - math.exp(-decay_rate * length))
+
+    total = base * horizon_value
+    if epsilon_value <= 0.0:
+        return total
+
+    if cap_value is None:
+        return total + base * bump_integral(horizon_value)
+
+    if horizon_value <= cap_value:
+        return total + base * bump_integral(horizon_value)
+    return total + base * bump_integral(cap_value)
+
+
 class Paper:
     """A paper in the single-review marketplace.
 
@@ -285,6 +357,11 @@ class Paper:
         self.claimed_timestep: int | None = None
         self.time_on_market_timesteps: int | None = None
 
+        # Decaying review bump state (used when ``review_bump_duration == decay``).
+        self.base_accrual_rate: float | None = None
+        self.review_bump_epsilon: float = 0.0
+        self.review_completed_timestep: int | None = None
+
     # ---- compatibility aliases ------------------------------------------
     @property
     def ac_accrual_rate(self) -> float:
@@ -316,6 +393,7 @@ class Paper:
         mean_peer_review_epsilon: float,
         fair_market_price: float | None = None,
         pricing_policy: str = PRICING_POLICY,
+        scarcity_multiplier: float = 1.0,
     ) -> None:
         """Recompute the per-reviewer share offer for this listed paper.
 
@@ -341,6 +419,13 @@ class Paper:
             if math.isnan(author_multiplier) or math.isinf(author_multiplier):
                 author_multiplier = 1.0
             author_multiplier = max(0.0, author_multiplier)
+        try:
+            market_scarcity = float(scarcity_multiplier)
+        except (TypeError, ValueError):
+            market_scarcity = 1.0
+        if math.isnan(market_scarcity) or math.isinf(market_scarcity):
+            market_scarcity = 1.0
+        market_scarcity = max(0.0, market_scarcity)
         table: dict[Agent, float] = {}
         for agent in reviewers:
             if agent is self.author:
@@ -353,7 +438,13 @@ class Paper:
                 0.0,
                 1.0 + HISTORY_PRICE_SCALE * (history - mean_peer_review_epsilon),
             )
-            offer = base_offer * author_multiplier * quality_factor * history_factor
+            offer = (
+                base_offer
+                * author_multiplier
+                * market_scarcity
+                * quality_factor
+                * history_factor
+            )
             offer = min(max(offer, MIN_OFFER_SHARE), ceiling)
             table[agent] = offer
         self.price_table = table
@@ -405,6 +496,7 @@ class Paper:
         agent: Agent,
         effort: float,
         review_kind: str | None = None,
+        current_timestep: int | None = None,
     ) -> float:
         """Finalize the in-progress review, granting the locked share.
 
@@ -438,7 +530,15 @@ class Paper:
                 self.share_distribution[agent] = (
                     self.share_distribution.get(agent, 0.0) + share
                 )
-            self.accrual_rate = self.estimate_accrual_rate_after_review(review_effort)
+            if validate_review_bump_duration(SIM.review_bump_duration) == REVIEW_BUMP_DECAY:
+                self.base_accrual_rate = self.accrual_rate
+                self.review_bump_epsilon = epsilon
+                self.review_completed_timestep = (
+                    int(current_timestep) if current_timestep is not None else None
+                )
+                self.refresh_accrual_rate(current_timestep)
+            else:
+                self.accrual_rate = self.estimate_accrual_rate_after_review(review_effort)
         self.review_records.append(
             {
                 "reviewer": agent,
@@ -451,6 +551,9 @@ class Paper:
                 # accrual at the bumped rate. This is the counterfactual
                 # baseline A0 used by the reviewer-vs-author benefit metric.
                 "current_ac_at_review": self.current_ac,
+                "base_accrual_rate": self.base_accrual_rate,
+                "review_completed_timestep": self.review_completed_timestep,
+                "bump_duration": SIM.review_bump_duration,
             }
         )
         return share
@@ -489,6 +592,22 @@ class Paper:
 
     def estimate_accrual_rate_after_review(self, effort: float) -> float:
         return self.accrual_rate * (1.0 + review_accrual_bump(effort, self.quality))
+
+    def refresh_accrual_rate(self, current_timestep: int | None = None) -> None:
+        """Update ``accrual_rate`` when the review bump decays over time."""
+        if validate_review_bump_duration(SIM.review_bump_duration) != REVIEW_BUMP_DECAY:
+            return
+        if not self.reviewed or self.base_accrual_rate is None:
+            return
+        if self.review_completed_timestep is None or current_timestep is None:
+            bump_factor = review_bump_factor_at_age(self.review_bump_epsilon, 0.0)
+        else:
+            age = max(0, int(current_timestep) - int(self.review_completed_timestep))
+            bump_factor = review_bump_factor_at_age(self.review_bump_epsilon, age)
+        self.accrual_rate = self._nonnegative_float(
+            self.base_accrual_rate * (1.0 + bump_factor),
+            "accrual_rate",
+        )
 
     # ---- shares / accrual ----------------------------------------------
     def set_share(self, agent: Agent, share: float):

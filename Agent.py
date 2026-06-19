@@ -135,6 +135,12 @@ class Agent(ABC):
         self.max_author_price_multiplier = float(SIM.max_author_price_multiplier)
         self.review_offer_multiplier_updates = 0
 
+        # Marketplace economics toggles (configured by Environment each run).
+        self.use_competition_adjusted_forecast = SIM.use_competition_adjusted_forecast
+        self.use_scarcity_pricing = SIM.use_scarcity_pricing
+        self.use_merit_market_clearing = SIM.use_merit_market_clearing
+        self.market_claim_assignment: Paper | None = None
+
         # Quality of the paper currently being written (known before/while
         # working on it). Sampled lazily the first time the agent writes.
         self.next_paper_quality: float | None = None
@@ -276,6 +282,23 @@ class Agent(ABC):
         self.review_offer_multiplier = self._clamp_offer_multiplier(
             self.review_offer_multiplier
         )
+
+    def configure_market_economics(
+        self,
+        *,
+        use_competition_adjusted_forecast: bool | None = None,
+        use_scarcity_pricing: bool | None = None,
+        use_merit_market_clearing: bool | None = None,
+    ) -> None:
+        """Configure optional reviewer-side market behavior for this run."""
+        if use_competition_adjusted_forecast is not None:
+            self.use_competition_adjusted_forecast = bool(
+                use_competition_adjusted_forecast
+            )
+        if use_scarcity_pricing is not None:
+            self.use_scarcity_pricing = bool(use_scarcity_pricing)
+        if use_merit_market_clearing is not None:
+            self.use_merit_market_clearing = bool(use_merit_market_clearing)
 
     def record_review_claim_feedback(self, time_on_market: int | None) -> None:
         """Update future author offers from observed claim speed.
@@ -527,7 +550,9 @@ class Agent(ABC):
         completed_review_kind = review_kind or self.active_review_kind
         if completed_review_kind is None:
             completed_review_kind = review_kind_from_effort(effort)
-        share = paper.finish_review(self, effort, completed_review_kind)
+        share = paper.finish_review(
+            self, effort, completed_review_kind, self.current_timestep
+        )
         self._record_review_outcome(paper, share, effort, completed_review_kind)
 
         self.active_review_paper = None

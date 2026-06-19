@@ -126,6 +126,8 @@
     <span id="status">loading…</span>
     <div class="tiles">
       <div class="tile"><div class="label">Total AC</div><div class="value" id="t-total">—</div></div>
+      <div class="tile"><div class="label">AC from writing</div><div class="value" id="t-writing-ac">—</div></div>
+      <div class="tile"><div class="label">AC from peer review</div><div class="value" id="t-review-ac">—</div></div>
       <div class="tile"><div class="label">Gini</div><div class="value" id="t-gini">—</div></div>
       <div class="tile"><div class="label">Papers</div><div class="value" id="t-papers">—</div></div>
       <div class="tile"><div class="label">Reviews</div><div class="value" id="t-reviews">—</div></div>
@@ -162,6 +164,7 @@
           <tbody id="groupSummary"></tbody>
         </table>
       </div>
+      <div class="panel" id="panel-ac-source"><h2>Academic capital: writing vs peer review</h2><img class="chart-img" id="img-ac_source" alt="Academic capital by source: writing vs peer review"></div>
       <div class="panel" id="panel-review"><h2>Review behavior</h2><img class="chart-img" id="img-review_behavior" alt="Review behavior"><canvas id="reviewChart"></canvas></div>
       <div class="panel" id="panel-marketplace"><h2>Review marketplace: supply, claims, and reviews completed</h2><img class="chart-img" id="img-marketplace_activity" alt="Review marketplace"><canvas id="marketplaceChart"></canvas></div>
       <div class="panel" id="panel-marketplace-0-100"><h2>Marketplace supply (timesteps 0–100)</h2><img class="chart-img" id="img-marketplace_0_100" alt="Marketplace supply timesteps 0-100"></div>
@@ -962,6 +965,7 @@
       { panel: "panel-marketplace-600-700", chart: "marketplace_600_700", imgId: "img-marketplace_600_700" },
       { panel: "panel-marketplace-1800-1900", chart: "marketplace_1800_1900", imgId: "img-marketplace_1800_1900" },
       { panel: "panel-review-price", chart: "accepted_review_price_binned", imgId: "img-accepted_review_price_binned" },
+      { panel: "panel-ac-source", chart: "ac_source", canvasId: null, imgId: "img-ac_source" },
       { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
       { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
       { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },
@@ -1326,6 +1330,21 @@
       document.getElementById("t-papers").textContent = Math.round(v(s.num_papers));
       document.getElementById("t-reviews").textContent =
         Math.round(v(s.completed_peer_reviews));
+      // AC by source (writing vs peer review). Older runs lack these series;
+      // show an em dash rather than 0 so the tiles read as "not recorded".
+      const writingEl = document.getElementById("t-writing-ac");
+      const reviewEl = document.getElementById("t-review-ac");
+      if (s.writing_held_ac || s.review_held_ac) {
+        const w = v(s.writing_held_ac || []);
+        const r = v(s.review_held_ac || []);
+        const total = w + r;
+        const pct = (x) => (total > 0 ? ` (${Math.round((100 * x) / total)}%)` : "");
+        writingEl.textContent = w.toFixed(1) + pct(w);
+        reviewEl.textContent = r.toFixed(1) + pct(r);
+      } else {
+        writingEl.textContent = "—";
+        reviewEl.textContent = "—";
+      }
     }
 
     // Render a run's recorded simulation config as grouped key/value rows.

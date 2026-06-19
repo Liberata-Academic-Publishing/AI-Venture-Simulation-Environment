@@ -15,11 +15,14 @@ from Paper import (
     GOOD_REVIEW_TIMESTEPS,
     MIN_PAPER_QUALITY,
     MIN_REVIEW_EFFORT_THRESHOLD,
+    REVIEW_BUMP_DECAY,
     Paper,
     REVIEW_PARADIGM_DISCRETE,
     accrual_rate_from_effort,
     accrual_rate_from_quality,
+    forecast_decayed_accrual_gain,
     review_accrual_bump,
+    validate_review_bump_duration,
 )
 
 EXPECTED_WRITE_PROGRESS = SIM.expected_write_progress
@@ -56,6 +59,10 @@ class HeuristicAgent(Agent):
 
     # ---- marketplace phase ----------------------------------------------
     def choose_marketplace_action(self) -> Paper | None:
+        assigned = self._assigned_claim_paper()
+        if assigned is not None:
+            return assigned
+
         listed = [
             paper
             for paper in Agent.all_papers
@@ -65,7 +72,7 @@ class HeuristicAgent(Agent):
             return None
 
         best = max(listed, key=self._score_claim)
-        claim_value = self._score_claim(best)
+        claim_value = self._expected_claim_value(best)
         if claim_value <= 0.0:
             return None
 
@@ -103,13 +110,19 @@ class HeuristicAgent(Agent):
         # puts research on equal footing with a (roughly one-timestep) review.
         research_step_value = research_total / max(1.0, build_len)
 
+        assigned = self._assigned_claim_paper()
+        if assigned is not None and self.active_review_paper is None:
+            claim_value = self._expected_claim_value(assigned)
+            if claim_value > research_step_value:
+                return (CONTINUOUS_CLAIM, assigned)
+
         listed = [
             paper
             for paper in Agent.all_papers
             if self._can_review(paper) and paper.offered_share(self) > 0.0
         ]
         best = max(listed, key=self._score_claim) if listed else None
-        claim_value = self._score_claim(best) if best is not None else 0.0
+        claim_value = self._expected_claim_value(best) if best is not None else 0.0
 
         if self.active_review_paper is None:
             if best is not None and claim_value > research_step_value:
@@ -193,16 +206,72 @@ class HeuristicAgent(Agent):
         good = self._score_fixed_review(paper, GOOD_REVIEW_TIMESTEPS)
         return GOOD_FAITH_REVIEW if good > bad else BAD_FAITH_REVIEW
 
+    # ---- market participation (for clearing + forecasts) -----------------
+    def would_claim_paper(self, paper: Paper) -> bool:
+        """True when this agent would try to claim ``paper`` if it could win."""
+        if self.active_review_paper is not None:
+            return False
+        if not self._can_review(paper) or paper.offered_share(self) <= 0.0:
+            return False
+        claim_value = self._expected_claim_value(paper)
+        return claim_value > 0.0 and claim_value > self._write_value()
+
+    def claim_preference_score(self, paper: Paper) -> float:
+        """Ranking score for merit-based marketplace clearing."""
+        return self._expected_claim_value(paper)
+
+    def _assigned_claim_paper(self) -> Paper | None:
+        paper = getattr(self, "market_claim_assignment", None)
+        if paper is None:
+            return None
+        if not paper.review_available or not self._can_review(paper):
+            return None
+        if paper.offered_share(self) <= 0.0:
+            return None
+        return paper
+
+    def _listed_paper_count(self) -> int:
+        return sum(
+            1 for paper in Agent.all_papers if getattr(paper, "review_available", False)
+        )
+
+    def _eligible_reviewer_count(self) -> int:
+        count = sum(
+            1 for agent in Agent.all_agents if agent.active_review_paper is None
+        )
+        return max(1, count)
+
+    def _claim_win_probability(self) -> float:
+        listed = self._listed_paper_count()
+        if listed <= 0:
+            return 0.0
+        return min(1.0, listed / self._eligible_reviewer_count())
+
+    def _expected_claim_value(self, paper: Paper | None) -> float:
+        if paper is None:
+            return 0.0
+        raw = self._score_claim(paper)
+        if not self.use_competition_adjusted_forecast:
+            return raw
+        return self._claim_win_probability() * raw
+
     # ---- scoring ---------------------------------------------------------
     def _review_value(self, paper: Paper, effort: float, horizon: float) -> float:
         """Forecast capital from owning the agreed review share of ``paper``."""
         share = self._prospective_share(paper)
         if share <= 0.0:
             return 0.0
-        future_rate = paper.accrual_rate * (
-            1.0 + review_accrual_bump(effort, paper.quality)
-        )
-        return share * (paper.current_ac + future_rate * max(0.0, horizon))
+        epsilon = review_accrual_bump(effort, paper.quality)
+        horizon_value = max(0.0, horizon)
+        if validate_review_bump_duration(SIM.review_bump_duration) == REVIEW_BUMP_DECAY:
+            future_gain = forecast_decayed_accrual_gain(
+                paper.accrual_rate,
+                epsilon,
+                horizon_value,
+            )
+        else:
+            future_gain = paper.accrual_rate * (1.0 + epsilon) * horizon_value
+        return share * (paper.current_ac + future_gain)
 
     def _score_claim(self, paper: Paper) -> float:
         """Value of claiming ``paper`` and completing a minimum-effort review."""

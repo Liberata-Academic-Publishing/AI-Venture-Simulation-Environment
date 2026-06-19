@@ -16,7 +16,8 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
 from Agent import portfolio_accrual_rate
-from Paper import BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW
+from config import SIM
+from Paper import BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW, REVIEW_BUMP_DECAY, validate_review_bump_duration
 
 if TYPE_CHECKING:
     from Agent import ActionRecord
@@ -153,11 +154,31 @@ def _review_benefit_components(env: "Environment") -> dict[str, float]:
             epsilon = float(record.get("epsilon", 0.0))
             a0 = float(record.get("current_ac_at_review", final_ac))
             reviewer_benefit = share * final_ac
-            value_created = (
-                max(0.0, final_ac - a0) * epsilon / (1.0 + epsilon)
-                if epsilon > 0.0
-                else 0.0
-            )
+            bump_duration = str(
+                record.get("bump_duration", SIM.review_bump_duration)
+            ).strip().lower()
+            if (
+                bump_duration == REVIEW_BUMP_DECAY
+                or validate_review_bump_duration(bump_duration) == REVIEW_BUMP_DECAY
+            ):
+                base_rate = record.get("base_accrual_rate")
+                review_t = record.get("review_completed_timestep")
+                if base_rate is not None and review_t is not None:
+                    elapsed = max(0, int(env.timestep) - int(review_t))
+                    base_only = a0 + float(base_rate) * elapsed
+                    value_created = max(0.0, final_ac - base_only)
+                elif epsilon > 0.0:
+                    value_created = (
+                        max(0.0, final_ac - a0) * epsilon / (1.0 + epsilon)
+                    )
+                else:
+                    value_created = 0.0
+            else:
+                value_created = (
+                    max(0.0, final_ac - a0) * epsilon / (1.0 + epsilon)
+                    if epsilon > 0.0
+                    else 0.0
+                )
             author_net = value_created - reviewer_benefit
             suffix = (
                 "good" if record.get("review_kind") == GOOD_FAITH_REVIEW else "bad"
@@ -248,6 +269,15 @@ def default_metrics() -> dict[str, MetricFn]:
         ),
         "fair_market_price": lambda env: float(
             getattr(env, "fair_market_price", 0.0)
+        ),
+        "reviewer_pressure": lambda env: float(
+            getattr(env, "reviewer_pressure", 0.0)
+        ),
+        "scarcity_multiplier": lambda env: float(
+            getattr(env, "scarcity_multiplier", 1.0)
+        ),
+        "market_assignments": lambda env: float(
+            getattr(env, "market_assignments", 0)
         ),
         "mean_author_price_multiplier": _mean_author_price_multiplier,
         # Reviewer-vs-author benefit split (AC), by good/bad faith. See
@@ -703,6 +733,7 @@ class History:
 
     def agent_outcome_summary(self) -> list[dict[str, Any]]:
         """Per-agent final outcomes for interpreting top/bottom performers."""
+        reviewer_held = self._ac_from_reviewing_by_agent()
         papers_authored = Counter(self.paper_authors.values())
         paper_quality_sum: Counter[str] = Counter()
         paper_effort_sum: Counter[str] = Counter()
@@ -754,11 +785,15 @@ class History:
             epsilon_series = self.agent_review_epsilon_history.get(agent_label, [])
             reviews = int(review_counts[agent_label])
             action_counter = actions_by_agent.get(agent_label, Counter())
+            final_capital = float(capital_series[-1]) if capital_series else 0.0
+            ac_from_reviewing = float(reviewer_held.get(agent_label, 0.0))
             rows.append({
                 "agent": agent_label,
                 "group": self.agent_groups.get(agent_label, "Agent"),
                 "talent": float(self.agent_talent.get(agent_label, 0.0)),
-                "final_capital": float(capital_series[-1]) if capital_series else 0.0,
+                "final_capital": final_capital,
+                "ac_from_writing": max(0.0, final_capital - ac_from_reviewing),
+                "ac_from_reviewing": ac_from_reviewing,
                 "papers_authored": int(papers_authored[agent_label]),
                 "average_paper_quality": (
                     float(paper_quality_sum[agent_label]) / papers_authored[agent_label]

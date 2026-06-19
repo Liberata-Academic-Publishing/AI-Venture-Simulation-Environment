@@ -10,9 +10,11 @@ from Agent import Agent, validate_continuous_publishing
 from config import SIM
 from Paper import (
     REVIEW_PARADIGM_DISCRETE,
+    REVIEW_BUMP_DECAY,
     Paper,
     fair_market_price_from_epsilons,
     validate_pricing_policy,
+    validate_review_bump_duration,
     validate_review_paradigm,
 )
 
@@ -48,6 +50,11 @@ class Environment:
         paper_effort_max: float = SIM.paper_effort_max,
         discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
         pricing_policy: str = SIM.pricing_policy,
+        use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
+        use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
+        use_scarcity_pricing: bool = SIM.use_scarcity_pricing,
+        reviewer_pressure_exponent: float = SIM.reviewer_pressure_exponent,
+        use_merit_market_clearing: bool = SIM.use_merit_market_clearing,
         target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
         adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
         min_author_price_multiplier: float = SIM.min_author_price_multiplier,
@@ -67,7 +74,15 @@ class Environment:
         self.paper_effort_min = float(paper_effort_min)
         self.paper_effort_max = float(paper_effort_max)
         self.discrete_paper_timesteps = float(discrete_paper_timesteps)
-        self.pricing_policy = validate_pricing_policy(pricing_policy)
+        if use_adaptive_author_pricing:
+            self.pricing_policy = validate_pricing_policy("adaptive_multiplier")
+        else:
+            self.pricing_policy = validate_pricing_policy(pricing_policy)
+        self.use_adaptive_author_pricing = bool(use_adaptive_author_pricing)
+        self.use_competition_adjusted_forecast = bool(use_competition_adjusted_forecast)
+        self.use_scarcity_pricing = bool(use_scarcity_pricing)
+        self.reviewer_pressure_exponent = float(reviewer_pressure_exponent)
+        self.use_merit_market_clearing = bool(use_merit_market_clearing)
         self.target_market_wait_timesteps = float(target_market_wait_timesteps)
         self.adaptive_pricing_learning_rate = float(adaptive_pricing_learning_rate)
         self.min_author_price_multiplier = float(min_author_price_multiplier)
@@ -77,6 +92,9 @@ class Environment:
         self.fair_market_price = fair_market_price_from_epsilons(
             [SIM.prior_review_epsilon]
         )
+        self.reviewer_pressure = 0.0
+        self.scarcity_multiplier = 1.0
+        self.market_assignments = 0
 
         if agents is None:
             count = 0 if num_agents is None else num_agents
@@ -99,6 +117,7 @@ class Environment:
         self._sync_papers()
         self._list_scheduled_papers()
         self._update_market_prices()
+        self._clear_review_market()
 
         order = list(self.agents)
         random.shuffle(order)
@@ -112,6 +131,8 @@ class Environment:
         self._schedule_new_papers()
 
         for paper in self.papers:
+            if validate_review_bump_duration(SIM.review_bump_duration) == REVIEW_BUMP_DECAY:
+                paper.refresh_accrual_rate(self.timestep)
             paper.accrue_ac()
         self.update_agent_capital()
 
@@ -151,6 +172,21 @@ class Environment:
         of review effort instead of re-deciding.
         """
         claimers: set[Agent] = set()
+        if self.use_merit_market_clearing:
+            for agent in self.agents:
+                agent.current_timestep = self.timestep
+                if agent.active_review_paper is not None:
+                    continue
+                paper = getattr(agent, "market_claim_assignment", None)
+                if paper is None or not paper.can_start_review(agent):
+                    continue
+                review_kind = agent.choose_review_kind(paper)
+                record = agent.claim_review(paper, review_kind=review_kind)
+                claimers.add(agent)
+                if self.history is not None and record is not None:
+                    self.history.record_action(self, agent, record)
+            return claimers
+
         for agent in order:
             agent.current_timestep = self.timestep
             if (
@@ -196,8 +232,23 @@ class Environment:
 
     def _update_market_prices(self) -> None:
         listed = [p for p in self.papers if p.review_available]
+        eligible = sum(
+            1 for agent in self.agents if agent.active_review_paper is None
+        )
+        eligible = max(1, eligible)
         if not listed:
+            self.reviewer_pressure = 0.0
+            self.scarcity_multiplier = 1.0
             return
+
+        pressure = eligible / max(1, len(listed))
+        self.reviewer_pressure = pressure
+        if self.use_scarcity_pricing:
+            exponent = max(0.0, self.reviewer_pressure_exponent)
+            self.scarcity_multiplier = pressure ** (-exponent)
+        else:
+            self.scarcity_multiplier = 1.0
+
         median_quality = median(p.quality for p in listed)
         epsilons = [
             getattr(a, "peer_review_epsilon_history", SIM.prior_review_epsilon)
@@ -216,7 +267,45 @@ class Environment:
                 mean_epsilon,
                 fair_market_price=self.fair_market_price,
                 pricing_policy=self.pricing_policy,
+                scarcity_multiplier=self.scarcity_multiplier,
             )
+
+    def _clear_review_market(self) -> None:
+        for agent in self.agents:
+            agent.market_claim_assignment = None
+
+        if not self.use_merit_market_clearing:
+            self.market_assignments = 0
+            return
+
+        listed = [paper for paper in self.papers if paper.review_available]
+        if not listed:
+            self.market_assignments = 0
+            return
+
+        candidates: list[tuple[float, Paper, Agent]] = []
+        for paper in listed:
+            for agent in self.agents:
+                would_claim = getattr(agent, "would_claim_paper", None)
+                score_fn = getattr(agent, "claim_preference_score", None)
+                if would_claim is None or score_fn is None:
+                    continue
+                if not would_claim(paper):
+                    continue
+                candidates.append((score_fn(paper), paper, agent))
+
+        candidates.sort(key=lambda row: row[0], reverse=True)
+        assigned_agents: set[Agent] = set()
+        assigned_papers: set[Paper] = set()
+        assignments = 0
+        for _score, paper, agent in candidates:
+            if paper in assigned_papers or agent in assigned_agents:
+                continue
+            agent.market_claim_assignment = paper
+            assigned_agents.add(agent)
+            assigned_papers.add(paper)
+            assignments += 1
+        self.market_assignments = assignments
 
     def _list_scheduled_papers(self) -> None:
         for paper in self.papers:
@@ -285,6 +374,12 @@ class Environment:
                     learning_rate=self.adaptive_pricing_learning_rate,
                     min_multiplier=self.min_author_price_multiplier,
                     max_multiplier=self.max_author_price_multiplier,
+                )
+            if hasattr(agent, "configure_market_economics"):
+                agent.configure_market_economics(
+                    use_competition_adjusted_forecast=self.use_competition_adjusted_forecast,
+                    use_scarcity_pricing=self.use_scarcity_pricing,
+                    use_merit_market_clearing=self.use_merit_market_clearing,
                 )
             if hasattr(agent, "forecast_horizon_timesteps"):
                 agent.forecast_horizon_timesteps = self.forecast_horizon_timesteps

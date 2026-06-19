@@ -40,7 +40,7 @@ class SimConfig:
     # Papers seeded before timestep 1 (bootstraps review material). Set
     # init_papers_per_agent=0 for no starting papers, or init_ac_min=init_ac_max=0
     # to start every agent at zero capital.
-    init_papers_per_agent: int = 100
+    init_papers_per_agent: int = 10
     init_ac_min: float = 0
     init_ac_max: float = 0
     init_accrual_min: float = 0.8
@@ -62,6 +62,13 @@ class SimConfig:
     adaptive_pricing_learning_rate: float = 0.10
     min_author_price_multiplier: float = 0.25
     max_author_price_multiplier: float = 2.0
+
+    # --- Market economics (optional; all off preserves legacy behavior) ----
+    use_competition_adjusted_forecast: bool = True
+    use_scarcity_pricing: bool = True
+    reviewer_pressure_exponent: float = 0.5
+    use_merit_market_clearing: bool = True
+    use_adaptive_author_pricing: bool = True
 
     # --- Paper quality ---------------------------------------------------
     # Each paper's quality is drawn from N(author talent, quality_sigma) and is
@@ -91,6 +98,12 @@ class SimConfig:
     review_jump_width: float = 0.75              # softness of the jump-mode transition
     base_review_accrual_bump: float = 0.20      # log-mode rate bump at exactly the threshold
     first_extra_day_bump: float = 0.10          # log-mode first extra timestep bump
+    # Review bump lifetime. ``permanent`` keeps the current multiplier forever;
+    # ``decay`` applies epsilon at review time then decays it exponentially to
+    # zero (optionally hard-capped after ``review_bump_decay_cap_timesteps``).
+    review_bump_duration: str = "decay"     # "permanent" | "decay"
+    review_bump_decay_rate: float = 0.05        # k in exp(-k * t) since review
+    review_bump_decay_cap_timesteps: float | None = 100  # force bump=0 after this
 
     # --- Publishing ------------------------------------------------------
     paper_threshold: float = 10.0   # legacy forecast normalizer (choice-mode continuous)
@@ -104,7 +117,7 @@ class SimConfig:
     # thresholds above; ``uniform`` samples once per paper from the 50-150 band
     # discussed in sync; ``quality_scaled`` maps higher sampled paper quality to
     # a larger target inside that same band.
-    paper_effort_mode: str = "uniform"             # "fixed" | "uniform" | "quality_scaled"
+    paper_effort_mode: str = "quality_scaled"             # "fixed" | "uniform" | "quality_scaled"
     paper_effort_min: float = 130.0
     paper_effort_max: float = 170.0
     # Continuous-mode asymptotic writing model: a paper's accrual rate approaches

@@ -17,14 +17,19 @@ from Paper import (
     GOOD_FAITH_REVIEW,
     GOOD_REVIEW_TIMESTEPS,
     MIN_REVIEW_EFFORT_THRESHOLD,
+    REVIEW_BUMP_DECAY,
     REVIEW_EFFORT_PER_TIMESTEP,
     Paper,
     accrual_rate_from_effort,
     accrual_rate_from_quality,
+    decayed_accrual_rate,
     fair_market_component,
     fair_market_price_from_epsilons,
     review_accrual_bump,
+    review_bump_factor_at_age,
 )
+import config
+from dataclasses import replace
 from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 
 try:
@@ -255,6 +260,205 @@ class EconomicsTest(unittest.TestCase):
         )
 
         self.assertGreater(paper.offered_share(veteran), paper.offered_share(rookie))
+
+    def test_scarcity_multiplier_lowers_offers(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        paper = _listed_paper(author, quality=1.0)
+
+        paper.update_price_table([reviewer], 1.0, 0.0, scarcity_multiplier=1.0)
+        base = paper.offered_share(reviewer)
+        paper.update_price_table([reviewer], 1.0, 0.0, scarcity_multiplier=0.5)
+
+        self.assertAlmostEqual(paper.offered_share(reviewer), base * 0.5)
+
+
+class ReviewBumpDecayTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+        self.decay_sim = replace(
+            config.SIM,
+            review_bump_duration=REVIEW_BUMP_DECAY,
+            review_bump_decay_rate=0.1,
+            review_bump_decay_cap_timesteps=20.0,
+        )
+
+    def _decay_patches(self):
+        return (
+            mock.patch.object(config, "SIM", self.decay_sim),
+            mock.patch("Paper.SIM", self.decay_sim),
+            mock.patch("Environment.SIM", self.decay_sim),
+        )
+
+    def test_decay_peak_matches_permanent_bump_at_review(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        effort = MIN_REVIEW_EFFORT_THRESHOLD + 2.0
+        paper = _listed_paper(author, quality=1.0, accrual_rate=1.0)
+        paper.update_price_table([reviewer], 1.0, 0.0)
+        expected_peak = paper.accrual_rate * (1.0 + review_accrual_bump(effort, 1.0))
+
+        p1, p2, p3 = self._decay_patches()
+        with p1, p2, p3:
+            paper.start_review(reviewer, current_timestep=5)
+            paper.finish_review(reviewer, effort, current_timestep=5)
+
+        self.assertAlmostEqual(paper.accrual_rate, expected_peak)
+        self.assertAlmostEqual(paper.base_accrual_rate, 1.0)
+        self.assertAlmostEqual(
+            paper.review_bump_epsilon, review_accrual_bump(effort, 1.0)
+        )
+
+    def test_decay_reduces_rate_over_time(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        effort = MIN_REVIEW_EFFORT_THRESHOLD + 1.0
+        paper = _listed_paper(author, quality=1.0, accrual_rate=1.0)
+        paper.update_price_table([reviewer], 1.0, 0.0)
+
+        p1, p2, p3 = self._decay_patches()
+        with p1, p2, p3:
+            paper.start_review(reviewer, current_timestep=1)
+            paper.finish_review(reviewer, effort, current_timestep=1)
+            peak = paper.accrual_rate
+            paper.refresh_accrual_rate(11)
+            later = paper.accrual_rate
+
+        self.assertGreater(peak, later)
+        self.assertGreater(later, paper.base_accrual_rate)
+
+    def test_decay_hard_cap_returns_to_base_rate(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        effort = MIN_REVIEW_EFFORT_THRESHOLD
+        paper = _listed_paper(author, quality=1.0, accrual_rate=1.0)
+        paper.update_price_table([reviewer], 1.0, 0.0)
+
+        p1, p2, p3 = self._decay_patches()
+        with p1, p2, p3:
+            paper.start_review(reviewer, current_timestep=0)
+            paper.finish_review(reviewer, effort, current_timestep=0)
+            paper.refresh_accrual_rate(25)
+
+        self.assertAlmostEqual(paper.accrual_rate, paper.base_accrual_rate)
+
+    def test_decay_accrual_uses_shrinking_rate(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        effort = MIN_REVIEW_EFFORT_THRESHOLD + 1.0
+        paper = _listed_paper(author, quality=1.0, accrual_rate=1.0, current_ac=0.0)
+        paper.update_price_table([reviewer], 1.0, 0.0)
+
+        p1, p2, p3 = self._decay_patches()
+        with p1, p2, p3:
+            paper.start_review(reviewer, current_timestep=10)
+            paper.finish_review(reviewer, effort, current_timestep=10)
+            paper.refresh_accrual_rate(10)
+            paper.accrue_ac()
+            first_gain = paper.current_ac
+            paper.refresh_accrual_rate(11)
+            paper.accrue_ac()
+            second_gain = paper.current_ac - first_gain
+
+        self.assertGreater(first_gain, 0.0)
+        self.assertGreaterEqual(first_gain, second_gain)
+
+    def test_review_bump_factor_helpers(self):
+        with mock.patch("Paper.SIM", self.decay_sim):
+            self.assertAlmostEqual(review_bump_factor_at_age(0.2, 0.0), 0.2)
+            self.assertLess(review_bump_factor_at_age(0.2, 10.0), 0.2)
+            self.assertAlmostEqual(review_bump_factor_at_age(0.2, 25.0), 0.0)
+            self.assertAlmostEqual(decayed_accrual_rate(1.0, 0.2, 0.0), 1.2)
+
+
+class MarketEconomicsTest(unittest.TestCase):
+    def setUp(self):
+        Agent.all_papers = []
+        Agent.all_agents = []
+
+    def test_environment_scarcity_multiplier_when_crowded(self):
+        author = ScriptAgent("author")
+        paper = _listed_paper(author, quality=1.0)
+        agents = [author] + [
+            HeuristicAgent(intrinsic_talent=1.0, name=f"reviewer-{i}")
+            for i in range(5)
+        ]
+        Agent.all_papers = [paper]
+        Agent.all_agents = agents
+        env = Environment(
+            agents=agents,
+            papers=[paper],
+            use_scarcity_pricing=True,
+            reviewer_pressure_exponent=0.5,
+        )
+
+        env._update_market_prices()
+
+        self.assertGreater(env.reviewer_pressure, 1.0)
+        self.assertLess(env.scarcity_multiplier, 1.0)
+
+    def test_competition_forecast_reduces_claim_intent(self):
+        author = ScriptAgent("author")
+        paper = _listed_paper(author, quality=1.0, current_ac=200.0, accrual_rate=1.0)
+        agents = [
+            HeuristicAgent(intrinsic_talent=1.0, name=f"reviewer-{i}")
+            for i in range(10)
+        ]
+        agent = agents[0]
+        agent.configure_paper_effort("fixed", 10.0, 10.0, discrete_timesteps=10.0)
+        Agent.all_papers = [paper]
+        Agent.all_agents = agents
+        paper.update_price_table(agents, 1.0, 0.05)
+
+        agent.configure_market_economics(use_competition_adjusted_forecast=False)
+        self.assertIs(agent.choose_marketplace_action(), paper)
+
+        with mock.patch.object(agent, "_claim_win_probability", return_value=0.01):
+            agent.configure_market_economics(use_competition_adjusted_forecast=True)
+            self.assertIsNone(agent.choose_marketplace_action())
+
+    def test_merit_clearing_assigns_highest_scoring_reviewer(self):
+        author = ScriptAgent("author")
+        rookie = HeuristicAgent(intrinsic_talent=1.0, name="rookie")
+        veteran = HeuristicAgent(intrinsic_talent=1.0, name="veteran")
+        rookie.peer_review_epsilon_history = 0.02
+        veteran.peer_review_epsilon_history = 0.20
+        paper = _listed_paper(author, quality=1.0, current_ac=500.0, accrual_rate=1.0)
+        agents = [author, rookie, veteran]
+        Agent.all_papers = [paper]
+        Agent.all_agents = agents
+        env = Environment(
+            agents=agents,
+            papers=[paper],
+            review_paradigm="discrete",
+            use_merit_market_clearing=True,
+        )
+
+        env._update_market_prices()
+        env._clear_review_market()
+
+        self.assertIs(veteran.market_claim_assignment, paper)
+        self.assertIsNone(rookie.market_claim_assignment)
+        self.assertEqual(env.market_assignments, 1)
+
+    def test_adaptive_author_pricing_bool_enables_policy(self):
+        author = ScriptAgent("author")
+        env = Environment(agents=[author], use_adaptive_author_pricing=True)
+
+        self.assertEqual(env.pricing_policy, "adaptive_multiplier")
+
+    def test_legacy_heuristic_claim_unchanged_when_flags_off(self):
+        agent = HeuristicAgent(intrinsic_talent=1.0)
+        author = ScriptAgent("author")
+        low = _listed_paper(author, quality=1.0, current_ac=10.0)
+        high = _listed_paper(author, quality=1.0, current_ac=200.0)
+        Agent.all_papers = [low, high]
+        Agent.all_agents = [agent, author]
+        for paper in (low, high):
+            paper.update_price_table([agent], 1.0, 0.0)
+
+        agent.configure_market_economics(use_competition_adjusted_forecast=False)
+        self.assertIs(agent.choose_marketplace_action(), high)
 
 
 class ReviewerStateTest(unittest.TestCase):
