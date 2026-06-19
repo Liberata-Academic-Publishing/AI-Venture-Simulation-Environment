@@ -26,10 +26,10 @@ class SimConfig:
     """Every parameter that defines a single simulation run."""
 
     # --- World -----------------------------------------------------------
-    num_heuristic_agents: int = 0
-    num_rl_agents: int = 20
+    num_heuristic_agents: int = 10
+    num_rl_agents: int = 100
     num_dqn_agents: int = 0
-    num_random_agents: int = 0
+    num_random_agents: int = 10
     num_probabilistic_agents: int = 0
     num_timesteps: int = 2000
     seed: int = 7
@@ -91,7 +91,7 @@ class SimConfig:
     review_effort_curve: str = "sigmoid"        # "sigmoid" | "log" | "jump"
     min_review_accrual_bump: float = 0.05       # sigmoid bump at one timestep
     max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
-    review_sigmoid_midpoint: float = 2.5        # review length where impact accelerates
+    review_sigmoid_midpoint: float = 2.0        # review length where impact accelerates
     review_sigmoid_steepness: float = 1.4
     review_jump_threshold: float = 15.0          #f optional jump-mode high-effort cutoff
     review_jump_bump: float = 0.50               # optional extra bump after the cutoff

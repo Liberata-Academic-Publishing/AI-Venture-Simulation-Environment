@@ -165,6 +165,8 @@
         </table>
       </div>
       <div class="panel" id="panel-ac-source"><h2>Academic capital: writing vs peer review</h2><img class="chart-img" id="img-ac_source" alt="Academic capital by source: writing vs peer review"></div>
+      <div class="panel" id="panel-review-benefit"><h2>Reviewer vs author benefit (good vs bad faith)</h2><img class="chart-img" id="img-review_benefit" alt="Reviewer vs author benefit by good and bad faith"></div>
+      <div class="panel" id="panel-review-surplus"><h2>System-wide review surplus (authors vs reviewers)</h2><img class="chart-img" id="img-review_surplus_aggregate" alt="System-wide review surplus and split between authors and reviewers"></div>
       <div class="panel" id="panel-review"><h2>Review behavior</h2><img class="chart-img" id="img-review_behavior" alt="Review behavior"><canvas id="reviewChart"></canvas></div>
       <div class="panel" id="panel-marketplace"><h2>Review marketplace: supply, claims, and reviews completed</h2><img class="chart-img" id="img-marketplace_activity" alt="Review marketplace"><canvas id="marketplaceChart"></canvas></div>
       <div class="panel" id="panel-marketplace-0-100"><h2>Marketplace supply (timesteps 0–100)</h2><img class="chart-img" id="img-marketplace_0_100" alt="Marketplace supply timesteps 0-100"></div>
@@ -966,6 +968,8 @@
       { panel: "panel-marketplace-1800-1900", chart: "marketplace_1800_1900", imgId: "img-marketplace_1800_1900" },
       { panel: "panel-review-price", chart: "accepted_review_price_binned", imgId: "img-accepted_review_price_binned" },
       { panel: "panel-ac-source", chart: "ac_source", canvasId: null, imgId: "img-ac_source" },
+      { panel: "panel-review-benefit", chart: "review_benefit", imgId: "img-review_benefit" },
+      { panel: "panel-review-surplus", chart: "review_surplus_aggregate", imgId: "img-review_surplus_aggregate" },
       { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
       { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
       { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },

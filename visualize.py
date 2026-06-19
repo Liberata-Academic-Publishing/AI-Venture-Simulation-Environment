@@ -450,9 +450,181 @@ def plot_review_benefit(history: "History", path: str | None = None, show: bool 
     return _finish(fig, path, show)
 
 
+def _review_benefit_scalar_keys() -> tuple[str, ...]:
+    return (
+        "author_net_good",
+        "author_net_bad",
+        "reviewer_benefit_good",
+        "reviewer_benefit_bad",
+        "value_created_good",
+        "value_created_bad",
+    )
+
+
+def _has_review_benefit(history: "History") -> bool:
+    scalars = history.scalars
+    return any(any(scalars.get(key, [])) for key in _review_benefit_scalar_keys())
+
+
+def _review_benefit_total_series(
+    history: "History",
+) -> tuple[list[float], list[float], list[float]]:
+    """Cumulative system totals (good + bad faith) aligned to ``history.days``."""
+    scalars = history.scalars
+
+    def combine(good_key: str, bad_key: str) -> list[float]:
+        good = scalars.get(good_key, [])
+        bad = scalars.get(bad_key, [])
+        length = max(len(good), len(bad), len(history.days))
+        totals: list[float] = []
+        for index in range(length):
+            good_value = float(good[index]) if index < len(good) else 0.0
+            bad_value = float(bad[index]) if index < len(bad) else 0.0
+            totals.append(good_value + bad_value)
+        return totals
+
+    value_created = combine("value_created_good", "value_created_bad")
+    reviewer_benefit = combine("reviewer_benefit_good", "reviewer_benefit_bad")
+    author_net = combine("author_net_good", "author_net_bad")
+    return value_created, reviewer_benefit, author_net
+
+
 # Writing earns the blue capital; peer review earns the purple capital.
 WRITING_COLOR = "#2563eb"
 REVIEW_COLOR = "#a855f7"
+
+
+def _draw_review_surplus_aggregate(ax_left, ax_right, history: "History") -> None:
+    """System-wide review surplus: absolute totals and how value is split."""
+    value_created, reviewer_benefit, author_net = _review_benefit_total_series(history)
+    if not any(value_created):
+        for ax in (ax_left, ax_right):
+            ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
+            ax.set_axis_off()
+        return
+
+    days = history.days
+    value_color = "#94a3b8"
+
+    ax_left.axhline(0.0, color="#6b7280", linestyle="--", linewidth=1.0)
+    ax_left.plot(
+        days,
+        value_created,
+        color=value_color,
+        linewidth=2.0,
+        label="Value created",
+    )
+    ax_left.plot(
+        days,
+        reviewer_benefit,
+        color=REVIEW_COLOR,
+        linewidth=2.0,
+        label="Reviewers capture",
+    )
+    ax_left.plot(
+        days,
+        author_net,
+        color=WRITING_COLOR,
+        linewidth=2.0,
+        label="Authors net gain",
+    )
+    ax_left.set_xlabel("Timestep")
+    ax_left.set_ylabel("Cumulative surplus (AC)")
+    ax_left.set_title("How much value do reviews create and who keeps it?")
+    ax_left.legend(fontsize=8, loc="best")
+
+    author_pct: list[float] = []
+    reviewer_pct: list[float] = []
+    for created, author, reviewer in zip(value_created, author_net, reviewer_benefit):
+        if created > 1e-9:
+            author_pct.append(100.0 * author / created)
+            reviewer_pct.append(100.0 * reviewer / created)
+        else:
+            author_pct.append(0.0)
+            reviewer_pct.append(0.0)
+
+    ax_right.axhline(0.0, color="#6b7280", linestyle="--", linewidth=1.0)
+    ax_right.axhline(
+        100.0,
+        color="#6b7280",
+        linestyle=":",
+        linewidth=1.0,
+        alpha=0.7,
+        label="100% of value created",
+    )
+    ax_right.plot(
+        days,
+        reviewer_pct,
+        color=REVIEW_COLOR,
+        linewidth=2.0,
+        label="Reviewers' share",
+    )
+    ax_right.plot(
+        days,
+        author_pct,
+        color=WRITING_COLOR,
+        linewidth=2.0,
+        label="Authors' share",
+    )
+    ax_right.set_xlabel("Timestep")
+    ax_right.set_ylabel("Share of review value created (%)")
+    ax_right.set_title("How the surplus is split")
+    ax_right.legend(fontsize=8, loc="best")
+
+    final_created = value_created[-1]
+    final_reviewer = reviewer_benefit[-1]
+    final_author = author_net[-1]
+    if final_created > 1e-9:
+        final_author_pct = 100.0 * final_author / final_created
+        final_reviewer_pct = 100.0 * final_reviewer / final_created
+    else:
+        final_author_pct = 0.0
+        final_reviewer_pct = 0.0
+
+    if final_author >= 0.0 and final_reviewer > 0.0:
+        outcome = "Both sides gain from reviews"
+    elif final_author < 0.0:
+        outcome = (
+            f"Authors disadvantaged (net −{abs(final_author):.1f} AC vs no review)"
+        )
+    elif final_reviewer <= 0.0:
+        outcome = "Reviewers capture no surplus"
+    else:
+        outcome = "Authors gain; reviewers break even"
+
+    summary = (
+        f"Final totals (AC)\n"
+        f"Value created: {final_created:.1f}\n"
+        f"Reviewers: {final_reviewer:.1f} ({final_reviewer_pct:.0f}%)\n"
+        f"Authors net: {final_author:.1f} ({final_author_pct:.0f}%)\n"
+        f"{outcome}"
+    )
+    ax_right.text(
+        0.02,
+        0.02,
+        summary,
+        transform=ax_right.transAxes,
+        fontsize=8,
+        color="#e6edf3",
+        verticalalignment="bottom",
+        bbox={
+            "boxstyle": "round",
+            "facecolor": "#161d24",
+            "edgecolor": "#6b7280",
+            "alpha": 0.92,
+        },
+    )
+
+
+def plot_review_surplus_aggregate(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """System-wide review surplus and split between authors and reviewers."""
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 5))
+    _draw_review_surplus_aggregate(ax_left, ax_right, history)
+    fig.suptitle("System-wide review surplus (authors vs reviewers)", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return _finish(fig, path, show)
 
 
 def _draw_ac_source(ax_left, ax_right, history: "History") -> None:
@@ -1546,6 +1718,8 @@ _GALLERY_CHARTS = (
     ("ac_source",
      lambda h: bool(h.scalars.get("writing_held_ac") or h.scalars.get("review_held_ac")),
      plot_ac_source),
+    ("review_benefit", _has_review_benefit, plot_review_benefit),
+    ("review_surplus_aggregate", _has_review_benefit, plot_review_surplus_aggregate),
     ("accepted_review_price_binned", _has_accepted_review_price, plot_accepted_review_price_binned),
 )
 
@@ -1621,6 +1795,9 @@ def plot_all(
         ),
         "review_benefit": plot_review_benefit(
             history, os.path.join(outdir, "review_benefit.png"), show=show
+        ),
+        "review_surplus_aggregate": plot_review_surplus_aggregate(
+            history, os.path.join(outdir, "review_surplus_aggregate.png"), show=show
         ),
         "ac_source": plot_ac_source(
             history, os.path.join(outdir, "ac_source.png"), show=show
