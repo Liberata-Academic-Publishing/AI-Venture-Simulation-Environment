@@ -75,6 +75,18 @@ class ActionRecord:
     writing_effort: float | None = None
 
 
+def portfolio_accrual_rate(agent: "Agent", papers: list[Paper] | None = None) -> float:
+    """Share-weighted sum of accrual rates on papers this agent owns."""
+    if papers is None:
+        papers = Agent.all_papers
+    total = 0.0
+    for paper in papers:
+        share = paper.share_distribution.get(agent, 0.0)
+        if share:
+            total += float(share) * float(paper.accrual_rate)
+    return total
+
+
 class Agent(ABC):
 
     all_papers: list[Paper] = []  # class variable shared across all agents

@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any
 
+from Agent import portfolio_accrual_rate
 from Paper import BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW
 
 if TYPE_CHECKING:
@@ -202,6 +203,7 @@ class History:
         self.timesteps: list[int] = []
         self.scalars: dict[str, list[float]] = {name: [] for name in self.metrics}
         self.agent_capital: dict[str, list[float]] = {}
+        self.agent_accrual_rate: dict[str, list[float]] = {}
         self.agent_review_history: dict[str, list[float]] = {}
         self.agent_review_epsilon_history: dict[str, list[float]] = {}
         self.agent_groups: dict[str, str] = {}  # agent label -> class name
@@ -225,6 +227,8 @@ class History:
             tuple[int, str, str | None, float, str | None]
         ] = []
         self.writing_efforts: list[tuple[int, str, float, bool]] = []
+        # (timestep, agreed reviewer share) for each accepted marketplace claim.
+        self.accepted_review_claims: list[tuple[int, float]] = []
         self.action_counts: Counter[str] = Counter()
         self.agent_actions: dict[str, list[str]] = {}
 
@@ -252,6 +256,12 @@ class History:
                 env.agents,
                 self.agent_capital,
                 lambda a: float(getattr(a, "academic_capital", 0.0)),
+                "Agent",
+            )
+            self._record_series(
+                env.agents,
+                self.agent_accrual_rate,
+                lambda a: portfolio_accrual_rate(a, env.papers),
                 "Agent",
             )
             self._record_series(
@@ -311,6 +321,10 @@ class History:
         )
         self.actions.append((timestep, agent_label, record.kind, paper_label))
         self.action_counts[record.kind] += 1
+        if record.kind == "review_started" and record.paper is not None:
+            price = float(getattr(record.paper, "agreed_review_share", 0.0))
+            if price > 0.0:
+                self.accepted_review_claims.append((timestep, price))
         if (
             record.review_effort is not None
             and record.kind in COMPLETED_REVIEW_KINDS
@@ -411,6 +425,7 @@ class History:
             "days": list(self.timesteps),
             "scalars": {k: list(v) for k, v in self.scalars.items()},
             "agent_capital": {k: list(v) for k, v in self.agent_capital.items()},
+            "agent_accrual_rate": {k: list(v) for k, v in self.agent_accrual_rate.items()},
             "agent_review_history": {
                 k: list(v) for k, v in self.agent_review_history.items()
             },
@@ -455,6 +470,10 @@ class History:
                     "published": p,
                 }
                 for (d, a, e, p) in self.writing_efforts
+            ],
+            "accepted_review_claims": [
+                {"timestep": d, "day": d, "price": p}
+                for (d, p) in self.accepted_review_claims
             ],
             "action_counts": dict(self.action_counts),
             "action_counts_by_timestep": self.action_counts_by_timestep(),
@@ -737,6 +756,10 @@ class History:
             k: [float(x) for x in v]
             for k, v in (data.get("agent_capital") or {}).items()
         }
+        history.agent_accrual_rate = {
+            k: [float(x) for x in v]
+            for k, v in (data.get("agent_accrual_rate") or {}).items()
+        }
         history.agent_review_history = {
             k: [float(x) for x in v]
             for k, v in (data.get("agent_review_history") or {}).items()
@@ -808,6 +831,11 @@ class History:
                 bool(r.get("published", False)),
             )
             for r in (data.get("writing_efforts") or [])
+        ]
+        history.accepted_review_claims = [
+            (_ts(r), float(r.get("price", 0.0)))
+            for r in (data.get("accepted_review_claims") or [])
+            if float(r.get("price", 0.0)) > 0.0
         ]
 
         counts = data.get("action_counts")

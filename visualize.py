@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 from Paper import MIN_REVIEW_EFFORT_THRESHOLD
@@ -146,6 +147,168 @@ def plot_agent_capital(history: "History", path: str | None = None, show: bool =
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_agent_capital(ax, history)
     ax.set_title("Academic capital per agent over time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def _agent_number(label: str) -> str:
+    """Extract the trailing agent index from labels like ``RL Agent 12``."""
+    match = re.search(r"(\d+)\s*$", label)
+    return match.group(1) if match else label
+
+
+def _running_mean_review_effort_by_agent(
+    history: "History",
+) -> dict[str, list[float]]:
+    """Per-agent running mean completed review effort, aligned to ``history.days``."""
+    labels = list(history.agent_capital)
+    if not labels:
+        return {}
+
+    running_sum = {label: 0.0 for label in labels}
+    running_count = {label: 0 for label in labels}
+    series = {label: [] for label in labels}
+    reviews_by_day: dict[int, list[tuple[str, float]]] = {}
+    for day, agent, _, effort, _ in history.completed_reviews:
+        reviews_by_day.setdefault(int(day), []).append((agent, float(effort)))
+
+    for day in history.days:
+        for agent, effort in reviews_by_day.get(int(day), []):
+            if agent not in running_sum:
+                continue
+            running_sum[agent] += effort
+            running_count[agent] += 1
+        for label in labels:
+            count = running_count[label]
+            series[label].append(running_sum[label] / count if count else 0.0)
+    return series
+
+
+def _annotate_agent_trajectories(ax, xs: list[float], ys: list[float], label: str) -> None:
+    """Label the end of a trajectory with the agent's numeric id."""
+    if not xs or not ys:
+        return
+    ax.annotate(
+        _agent_number(label),
+        (xs[-1], ys[-1]),
+        fontsize=7,
+        alpha=0.85,
+        xytext=(3, 0),
+        textcoords="offset points",
+    )
+
+
+def _agent_talent_legend_label(label: str, history: "History") -> str:
+    """Legend entry: agent number plus intrinsic talent."""
+    num = _agent_number(label)
+    talent = history.agent_talent.get(label)
+    if talent is not None:
+        return f"{num} (talent={talent:.2f})"
+    return num
+
+
+def _sorted_agent_labels(labels) -> list[str]:
+    def sort_key(label: str) -> tuple:
+        num = _agent_number(label)
+        try:
+            return (int(num), label)
+        except ValueError:
+            return (9999, label)
+
+    return sorted(labels, key=sort_key)
+
+
+def _draw_talent_vs_ac(ax, history: "History") -> bool:
+    """Each agent's portfolio AC accrual rate over time; legend maps agent to talent."""
+    rates = history.agent_accrual_rate
+    if not rates or not any(rates.values()):
+        ax.text(
+            0.5,
+            0.5,
+            "No portfolio accrual rate recorded\n(re-run simulation to populate)",
+            ha="center",
+            va="center",
+        )
+        ax.set_axis_off()
+        return False
+
+    drew = False
+    for label in _sorted_agent_labels(rates):
+        series = rates.get(label)
+        if not series:
+            continue
+        ax.plot(
+            history.days,
+            series,
+            linewidth=1.0,
+            alpha=0.75,
+            label=_agent_talent_legend_label(label, history),
+        )
+        _annotate_agent_trajectories(ax, list(history.days), series, label)
+        drew = True
+
+    if not drew:
+        ax.text(0.5, 0.5, "No portfolio accrual rate recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return False
+
+    ax.set_xlabel("Timestep")
+    ax.set_ylabel("Portfolio AC accrual rate")
+    n_agents = len(rates)
+    if 0 < n_agents <= 40:
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=7)
+    return True
+
+
+def plot_talent_vs_ac(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Portfolio AC accrual rate over time; legend shows each agent's talent."""
+    fig, ax = plt.subplots(figsize=(14, 6))
+    has_legend = _draw_talent_vs_ac(ax, history)
+    ax.set_title("Portfolio AC accrual rate over time")
+    if has_legend:
+        fig.tight_layout(rect=[0, 0, 0.82, 1])
+    else:
+        fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def _draw_mean_review_effort_vs_ac(ax, history: "History") -> None:
+    """Each agent's capital trajectory in (running mean review effort, AC) space."""
+    if not history.agent_capital:
+        ax.text(0.5, 0.5, "No agent capital recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    effort_series = _running_mean_review_effort_by_agent(history)
+    drew = False
+    for label, ac_series in history.agent_capital.items():
+        if not ac_series:
+            continue
+        efforts = effort_series.get(label, [])
+        if len(efforts) != len(ac_series):
+            continue
+        ax.plot(efforts, ac_series, linewidth=1.0, alpha=0.65)
+        _annotate_agent_trajectories(ax, efforts, ac_series, label)
+        drew = True
+
+    if not drew:
+        ax.text(0.5, 0.5, "No agent capital recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    ax.set_xlabel("Mean peer review effort (running)")
+    ax.set_ylabel("Total academic capital")
+
+
+def plot_mean_review_effort_vs_ac(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Running mean review effort vs total academic capital per agent."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_mean_review_effort_vs_ac(ax, history)
+    ax.set_title("Mean peer review effort vs total academic capital")
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -365,6 +528,160 @@ def plot_marketplace_activity(
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_marketplace(ax, history)
     ax.set_title("Review marketplace: supply, claims, and reviews completed")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+_MARKETPLACE_ZOOM_WINDOWS: tuple[tuple[int, int, str], ...] = (
+    (0, 100, "marketplace_0_100"),
+    (200, 300, "marketplace_200_300"),
+    (600, 700, "marketplace_600_700"),
+    (1800, 1900, "marketplace_1800_1900"),
+)
+
+
+def _draw_marketplace_supply(
+    ax, history: "History", *, xlim: tuple[int, int] | None = None
+) -> None:
+    """Supply/listing/claim series only (no cumulative reviews axis)."""
+    scalars = history.scalars
+    handles = []
+    if "papers_on_market" in scalars:
+        (line,) = ax.plot(
+            history.days,
+            scalars["papers_on_market"],
+            color="#f59e0b",
+            label="papers on market",
+        )
+        handles.append(line)
+    if "papers_listed_this_timestep" in scalars:
+        (line,) = ax.plot(
+            history.days,
+            scalars["papers_listed_this_timestep"],
+            color="#22c55e",
+            linewidth=1.2,
+            alpha=0.85,
+            label="papers listed this timestep",
+        )
+        handles.append(line)
+    if "papers_claimed_this_timestep" in scalars:
+        (line,) = ax.plot(
+            history.days,
+            scalars["papers_claimed_this_timestep"],
+            color="#ef4444",
+            linewidth=1.2,
+            alpha=0.85,
+            label="papers claimed this timestep",
+        )
+        handles.append(line)
+    ax.set_xlabel("Timestep")
+    ax.set_ylabel("Count")
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if handles:
+        ax.legend(handles, [h.get_label() for h in handles], loc="upper left", fontsize=8)
+
+
+def plot_marketplace_zoom(
+    history: "History",
+    start: int,
+    end: int,
+    path: str | None = None,
+    show: bool = False,
+):
+    """Zoomed marketplace supply view for a timestep window."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_marketplace_supply(ax, history, xlim=(start, end))
+    ax.set_title(f"Review marketplace supply (timesteps {start}–{end})")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_marketplace_zoom_charts(
+    history: "History", outdir: str, *, show: bool = False
+) -> dict[str, str]:
+    """Render the standard marketplace zoom windows into ``outdir``."""
+    os.makedirs(outdir, exist_ok=True)
+    paths: dict[str, str] = {}
+    for start, end, name in _MARKETPLACE_ZOOM_WINDOWS:
+        path = os.path.join(outdir, f"{name}.png")
+        plot_marketplace_zoom(history, start, end, path, show=show)
+        paths[name] = path
+    return paths
+
+
+ACCEPTED_REVIEW_PRICE_BIN_SIZE = 10
+
+
+def _accepted_review_price_bin_series(
+    history: "History",
+    *,
+    bin_size: int = ACCEPTED_REVIEW_PRICE_BIN_SIZE,
+) -> tuple[list[float], list[float]]:
+    """Mean agreed review share per ``bin_size``-timestep window."""
+    claims = getattr(history, "accepted_review_claims", None) or []
+    max_t = max(history.timesteps) if history.timesteps else 0
+    if max_t <= 0:
+        return [], []
+
+    num_bins = (max_t - 1) // bin_size + 1
+    sums = [0.0] * num_bins
+    counts = [0] * num_bins
+    for day, price in claims:
+        t = int(day)
+        if t <= 0:
+            continue
+        b = (t - 1) // bin_size
+        if 0 <= b < num_bins:
+            sums[b] += float(price)
+            counts[b] += 1
+
+    xs: list[float] = []
+    ys: list[float] = []
+    midpoint = bin_size / 2.0
+    for b in range(num_bins):
+        if counts[b] == 0:
+            continue
+        xs.append(b * bin_size + midpoint)
+        ys.append(sums[b] / counts[b])
+    return xs, ys
+
+
+def _draw_accepted_review_price_binned(
+    ax, history: "History", *, bin_size: int = ACCEPTED_REVIEW_PRICE_BIN_SIZE
+) -> None:
+    xs, ys = _accepted_review_price_bin_series(history, bin_size=bin_size)
+    if not xs:
+        if not getattr(history, "accepted_review_claims", None):
+            msg = (
+                "No accepted review prices recorded\n"
+                "(re-run simulation to populate)"
+            )
+        else:
+            msg = "No accepted review claims in this run"
+        ax.text(0.5, 0.5, msg, ha="center", va="center")
+        ax.set_axis_off()
+        return
+    ax.scatter(
+        xs,
+        ys,
+        s=18,
+        alpha=0.75,
+        color="#60a5fa",
+        edgecolors="#1e3a5f",
+        linewidths=0.4,
+    )
+    ax.set_xlabel(f"Timestep ({bin_size}-step bin midpoint)")
+    ax.set_ylabel("Mean accepted review price (share)")
+
+
+def plot_accepted_review_price_binned(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Scatter of mean agreed review share per 10-timestep bin."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_accepted_review_price_binned(ax, history)
+    ax.set_title("Mean accepted peer review price (10-timestep bins)")
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -1132,12 +1449,23 @@ def plot_all(
 ) -> dict[str, str]:
     """Render every chart into ``outdir`` and return {name: path}."""
     os.makedirs(outdir, exist_ok=True)
-    return {
+    paths: dict[str, str] = {
         "summary": plot_run_summary(
             history, os.path.join(outdir, "summary.png"), show=show
         ),
         "agent_capital": plot_agent_capital(
             history, os.path.join(outdir, "agent_capital.png"), show=show
+        ),
+        "agent_capital_by_group": plot_agent_capital_by_group(
+            history, os.path.join(outdir, "agent_capital_by_group.png"), show=show
+        ),
+        "talent_vs_ac": plot_talent_vs_ac(
+            history, os.path.join(outdir, "talent_vs_ac.png"), show=show
+        ),
+        "mean_review_effort_vs_ac": plot_mean_review_effort_vs_ac(
+            history,
+            os.path.join(outdir, "mean_review_effort_vs_ac.png"),
+            show=show,
         ),
         "mean_review_effort": plot_mean_review_effort(
             history, os.path.join(outdir, "mean_review_effort.png"), show=show
@@ -1147,6 +1475,14 @@ def plot_all(
         ),
         "system_aggregates": plot_system_aggregates(
             history, os.path.join(outdir, "system_aggregates.png"), show=show
+        ),
+        "review_behavior": plot_review_behavior(
+            history, os.path.join(outdir, "review_behavior.png"), show=show
+        ),
+        "accepted_review_price_binned": plot_accepted_review_price_binned(
+            history,
+            os.path.join(outdir, "accepted_review_price_binned.png"),
+            show=show,
         ),
         "marketplace_activity": plot_marketplace_activity(
             history, os.path.join(outdir, "marketplace_activity.png"), show=show
@@ -1174,6 +1510,9 @@ def plot_all(
         "review_effort_histogram": plot_review_effort_histogram(
             history, os.path.join(outdir, "review_effort_histogram.png"), show=show
         ),
+        "review_effort_scatter": plot_review_effort_scatter(
+            history, os.path.join(outdir, "review_effort_scatter.png"), show=show
+        ),
         "writing_effort_distribution": plot_writing_effort_distribution(
             history,
             os.path.join(outdir, "writing_effort_distribution.png"),
@@ -1188,3 +1527,5 @@ def plot_all(
             history, os.path.join(outdir, "paper_ac.png"), show=show
         ),
     }
+    paths.update(plot_marketplace_zoom_charts(history, outdir, show=show))
+    return paths

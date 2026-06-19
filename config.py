@@ -48,9 +48,9 @@ class SimConfig:
 
     # --- Paper economics -------------------------------------------------
     default_accrual_rate: float = 1.0       # base AC gained per timestep, before bumps
-    default_review_share: float = 0.05      # legacy fallback when fair-market pricing is off
+    default_review_share: float = 0.005      # legacy fallback when fair-market pricing is off
     default_max_reviewer_share: float = 0.1       # cap on a single review's share
-    min_offer_share: float = 0.005          # floor on a non-zero review offer
+    min_offer_share: float = 0.001          # floor on a non-zero review offer
     use_fair_market_pricing: bool = True
     prior_review_epsilon: float = 0.05      # prior reviewer effect before review history exists
     # Author-side pricing policy. ``static_fair_market`` preserves the current

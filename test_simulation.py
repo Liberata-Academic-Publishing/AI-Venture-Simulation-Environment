@@ -620,6 +620,31 @@ class EnvironmentTest(unittest.TestCase):
         self.assertEqual(len(rows), 1 + 3)
         self.assertEqual([row[0] for row in rows[1:]], ["1", "2", "3"])
 
+    def test_history_records_accepted_review_price_on_claim(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent(
+            "reviewer",
+            marketplace=[],
+            work=[("peer_review", None)],
+        )
+        paper = _listed_paper(author, quality=1.0, current_ac=50.0)
+        reviewer.marketplace = [paper]
+        paper.update_price_table([reviewer], 1.0, 0.05)
+        expected = paper.offered_share(reviewer)
+
+        history = History()
+        env = Environment(
+            agents=[author, reviewer],
+            papers=[paper],
+            history=history,
+            review_paradigm="discrete",
+        )
+        env.run(2)
+
+        self.assertGreater(expected, 0.0)
+        self.assertGreaterEqual(len(history.accepted_review_claims), 1)
+        self.assertAlmostEqual(history.accepted_review_claims[0][1], expected)
+
 
 class ContinuousAccrualTest(unittest.TestCase):
     def setUp(self):
