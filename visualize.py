@@ -14,7 +14,9 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 
+import Paper as paper_mod
 from Paper import MIN_REVIEW_EFFORT_THRESHOLD
+from config import SIM
 
 if TYPE_CHECKING:
     from History import History
@@ -975,6 +977,174 @@ def plot_accepted_review_price_binned(
     return _finish(fig, path, show)
 
 
+def _scalar_series(history: "History", key: str) -> list[float]:
+    values = history.scalars.get(key) or []
+    return [float(x) for x in values]
+
+
+def _market_pricing_claim_points(
+    history: "History",
+) -> list[tuple[int, float]]:
+    claims = getattr(history, "accepted_review_claims", None) or []
+    points: list[tuple[int, float]] = []
+    for timestep, price in claims:
+        value = float(price)
+        if value > 0.0:
+            points.append((int(timestep), value))
+    return points
+
+
+def _aligned_scalar_plot(
+    history: "History", key: str
+) -> tuple[list[float], list[float]]:
+    """Return (timesteps, values) for a scalar series aligned to ``history.days``."""
+    values = _scalar_series(history, key)
+    if not values:
+        return [], []
+    days = [float(d) for d in history.days[: len(values)]]
+    return days, values
+
+
+def _draw_market_pricing_dynamics(
+    ax_top, ax_bottom, history: "History"
+) -> None:
+    """Within-run review pricing: market drivers and agreed claim prices."""
+    if not history.days:
+        for ax in (ax_top, ax_bottom):
+            ax.text(0.5, 0.5, "No timestep data", ha="center", va="center")
+            ax.set_axis_off()
+        return
+
+    top_handles: list[Any] = []
+    fair_days, fair_prices = _aligned_scalar_plot(history, "fair_market_price")
+    if fair_days:
+        (line,) = ax_top.plot(
+            fair_days,
+            fair_prices,
+            color="#60a5fa",
+            linewidth=1.8,
+            label="fair market price",
+        )
+        top_handles.append(line)
+
+    claims = _market_pricing_claim_points(history)
+    if claims:
+        claim_x, claim_y = zip(*claims)
+        scatter = ax_top.scatter(
+            claim_x,
+            claim_y,
+            s=22,
+            alpha=0.75,
+            color="#fbbf24",
+            edgecolors="#78350f",
+            linewidths=0.4,
+            label="accepted claim price",
+            zorder=5,
+        )
+        top_handles.append(scatter)
+
+    author_days, author_mult = _aligned_scalar_plot(
+        history, "mean_author_price_multiplier"
+    )
+    if author_days:
+        twin_top = ax_top.twinx()
+        (line,) = twin_top.plot(
+            author_days,
+            author_mult,
+            color="#34d399",
+            linestyle="--",
+            linewidth=1.4,
+            label="mean author multiplier",
+        )
+        twin_top.set_ylabel("Author multiplier", color="#34d399")
+        twin_top.tick_params(axis="y", labelcolor="#34d399")
+        top_handles.append(line)
+
+    ax_top.set_ylabel("Review share")
+    ax_top.set_title("Offer baseline and agreed claim prices")
+    if top_handles:
+        ax_top.legend(
+            top_handles,
+            [h.get_label() for h in top_handles],
+            loc="upper right",
+            fontsize=8,
+        )
+
+    bottom_handles: list[Any] = []
+    scarcity_days, scarcity = _aligned_scalar_plot(history, "scarcity_multiplier")
+    if scarcity_days:
+        (line,) = ax_bottom.plot(
+            scarcity_days,
+            scarcity,
+            color="#f472b6",
+            linewidth=1.8,
+            label="scarcity multiplier",
+        )
+        bottom_handles.append(line)
+
+    pressure_days, pressure = _aligned_scalar_plot(history, "reviewer_pressure")
+    if pressure_days:
+        twin_bottom = ax_bottom.twinx()
+        (line,) = twin_bottom.plot(
+            pressure_days,
+            pressure,
+            color="#a78bfa",
+            linestyle="--",
+            linewidth=1.4,
+            label="reviewer pressure",
+        )
+        twin_bottom.set_ylabel("Reviewers / listed papers", color="#a78bfa")
+        twin_bottom.tick_params(axis="y", labelcolor="#a78bfa")
+        bottom_handles.append(line)
+
+    ax_bottom.axhline(
+        1.0,
+        color="#6b7280",
+        linestyle=":",
+        linewidth=1.0,
+        alpha=0.7,
+    )
+    ax_bottom.set_xlabel("Timestep")
+    ax_bottom.set_ylabel("Scarcity multiplier", color="#f472b6")
+    ax_bottom.tick_params(axis="y", labelcolor="#f472b6")
+    ax_bottom.set_title(
+        "Market pressure (pressure > 1 ⇒ more reviewers than papers ⇒ lower offers)"
+    )
+    if bottom_handles:
+        ax_bottom.legend(
+            bottom_handles,
+            [h.get_label() for h in bottom_handles],
+            loc="upper right",
+            fontsize=8,
+        )
+
+    if not top_handles and not bottom_handles:
+        for ax in (ax_top, ax_bottom):
+            ax.text(
+                0.5,
+                0.5,
+                "No pricing scalars recorded\n(re-run simulation to populate)",
+                ha="center",
+                va="center",
+            )
+            ax.set_axis_off()
+
+
+def plot_market_pricing_dynamics(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Review share pricing over timesteps: drivers, pressure, and claim prices."""
+    fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+    _draw_market_pricing_dynamics(ax_top, ax_bottom, history)
+    fig.suptitle(
+        "Dynamic review pricing during the run",
+        fontweight="bold",
+        y=0.98,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return _finish(fig, path, show)
+
+
 def _paper_quality_ac_points(history: "History") -> list[tuple[float, float, bool]]:
     """(quality, final AC, reviewed?) for every paper that was tracked."""
     points: list[tuple[float, float, bool]] = []
@@ -1294,6 +1464,90 @@ def plot_review_effort_scatter(
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_effort_scatter(ax, history, threshold)
     ax.set_title("Completed peer reviews over time")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def _reward_curve_max_effort(sim=SIM) -> float:
+    """Upper x-axis bound for the review reward curve (matches gallery JS)."""
+    threshold = float(sim.min_review_effort_threshold)
+    good_ts = float(sim.good_review_timesteps)
+    curve = str(sim.review_effort_curve).strip().lower()
+    if curve == "log":
+        return max(good_ts * 4, threshold + 15, 20)
+    if curve == "jump":
+        return max(good_ts * 2.5, float(sim.review_jump_threshold) + 5)
+    return max(good_ts * 2.5, threshold + 8)
+
+
+def _reward_curve_label(sim=SIM) -> str:
+    curve = str(sim.review_effort_curve).strip().lower()
+    if curve == "log":
+        return "log: base + first_extra × log₂(1 + extra effort)"
+    if curve == "jump":
+        return "jump: sigmoid baseline + high-effort threshold bonus"
+    return "sigmoid: min + (max − min) × normalized sigmoid"
+
+
+def _draw_review_reward_curve(ax, *, sim=SIM) -> None:
+    """Plot review accrual bump E = F(T) using the active Paper reward function."""
+    threshold = float(paper_mod.MIN_REVIEW_EFFORT_THRESHOLD)
+    xmax = _reward_curve_max_effort(sim)
+    steps = 80
+    efforts = [xmax * i / steps for i in range(steps + 1)]
+    bumps = [paper_mod.review_accrual_bump(effort, quality=1.0) for effort in efforts]
+
+    ax.plot(efforts, bumps, linewidth=2.0, color="#16a34a", label="accrual bump")
+    ax.fill_between(efforts, bumps, alpha=0.2, color="#16a34a")
+    ax.axvline(
+        threshold,
+        color="#dc2626",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"reward threshold ({threshold:g})",
+    )
+
+    if str(sim.review_paradigm).strip().lower() == "discrete":
+        for effort, label in (
+            (float(sim.bad_review_timesteps), "bad"),
+            (float(sim.good_review_timesteps), "good"),
+        ):
+            bump = paper_mod.review_accrual_bump(effort, quality=1.0)
+            ax.scatter(
+                [effort],
+                [bump],
+                s=80,
+                marker="D",
+                color="#fbbf24",
+                edgecolors="#1e293b",
+                linewidths=0.8,
+                zorder=5,
+                label=f"discrete {label} ({effort:g})",
+            )
+
+    ax.set_xlim(0, xmax)
+    ymax = max(bumps) if bumps else 1.0
+    ax.set_ylim(0, ymax * 1.08 if ymax > 0 else 1.0)
+    ax.set_xlabel("Review effort (timesteps)")
+    ax.set_ylabel("Accrual bump (ε)")
+    ax.legend(fontsize=8, loc="best")
+
+
+def plot_review_reward_curve(
+    history: "History | None" = None,
+    path: str | None = None,
+    show: bool = False,
+    *,
+    sim=SIM,
+):
+    """Review accrual bump E = F(T) for the active curve and threshold."""
+    del history  # config-driven chart; history unused
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_review_reward_curve(ax, sim=sim)
+    ax.set_title(
+        f"Review reward curve — {_reward_curve_label(sim)}\n"
+        "new rate = base × (1 + bump), quality 1.0",
+    )
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -1687,6 +1941,10 @@ def _has_accepted_review_price(history: "History") -> bool:
     return bool(getattr(history, "accepted_review_claims", None))
 
 
+def _has_market_pricing_scalars(history: "History") -> bool:
+    return bool(history.scalars.get("fair_market_price"))
+
+
 # Static charts shown in the gallery: (png name, data gate, plot function).
 _GALLERY_CHARTS = (
     ("agent_capital_by_group", _has_agent_capital_by_group, plot_agent_capital_by_group),
@@ -1721,6 +1979,8 @@ _GALLERY_CHARTS = (
     ("review_benefit", _has_review_benefit, plot_review_benefit),
     ("review_surplus_aggregate", _has_review_benefit, plot_review_surplus_aggregate),
     ("accepted_review_price_binned", _has_accepted_review_price, plot_accepted_review_price_binned),
+    ("market_pricing_dynamics", _has_market_pricing_scalars, plot_market_pricing_dynamics),
+    ("review_reward_curve", lambda h: True, plot_review_reward_curve),
 )
 
 
@@ -1813,6 +2073,11 @@ def plot_all(
             os.path.join(outdir, "accepted_review_price_binned.png"),
             show=show,
         ),
+        "market_pricing_dynamics": plot_market_pricing_dynamics(
+            history,
+            os.path.join(outdir, "market_pricing_dynamics.png"),
+            show=show,
+        ),
         "marketplace_activity": plot_marketplace_activity(
             history, os.path.join(outdir, "marketplace_activity.png"), show=show
         ),
@@ -1841,6 +2106,9 @@ def plot_all(
         ),
         "review_effort_scatter": plot_review_effort_scatter(
             history, os.path.join(outdir, "review_effort_scatter.png"), show=show
+        ),
+        "review_reward_curve": plot_review_reward_curve(
+            history, os.path.join(outdir, "review_reward_curve.png"), show=show
         ),
         "writing_effort_distribution": plot_writing_effort_distribution(
             history,

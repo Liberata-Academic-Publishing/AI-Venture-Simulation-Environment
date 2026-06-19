@@ -577,7 +577,17 @@ class Agent(ABC):
     ) -> None:
         """Update public peer-review reputation and epsilon history on completion."""
         self.completed_review_count += 1
-        self.total_ac_from_reviews += share * paper.current_ac
+        a0 = paper.ac_at_review_baseline()
+        incremental = max(0.0, paper.current_ac - a0)
+        if incremental <= 0.0 and share > 0.0:
+            epsilon = 0.0
+            if getattr(paper, "review_records", None):
+                try:
+                    epsilon = float(paper.review_records[-1].get("epsilon", 0.0))
+                except (TypeError, ValueError):
+                    epsilon = 0.0
+            incremental = paper.accrual_rate * (1.0 + max(0.0, epsilon))
+        self.total_ac_from_reviews += share * incremental
         self.peer_review_history = (
             self.total_ac_from_reviews / self.completed_review_count
         )
@@ -704,13 +714,13 @@ class Agent(ABC):
         return WRITING_EFFORT_PER_TIMESTEP
 
     def paper_completion_threshold(self) -> float:
+        if self.continuous_publish_by_threshold():
+            return self.continuous_paper_timesteps
         self._ensure_next_paper_state()
         if self.next_paper_required_effort is not None:
             return self.next_paper_required_effort
         if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
             return self.discrete_paper_timesteps
-        if self.continuous_publish_by_threshold():
-            return self.continuous_paper_timesteps
         return PAPER_THRESHOLD
 
     def _clear_last_review_result(self):

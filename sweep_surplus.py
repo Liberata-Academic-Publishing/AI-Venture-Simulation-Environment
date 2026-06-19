@@ -46,6 +46,8 @@ TRAIN_EPISODES = 100
 HARD_CAP_RUNS = 30
 STALL_RUNS = 3
 NEGATIVE_STREAK_FOR_PERMANENT = 3
+MIN_REVIEWER_SHARE = 0.01
+MAX_QUALITY_PRICE_SCALE = 3.0
 
 
 @dataclass
@@ -57,6 +59,26 @@ class BumpParams:
     review_bump_decay_cap_timesteps: float | None = 100.0
     default_max_reviewer_share: float = 0.10
     review_sigmoid_midpoint: float = 2.0
+    history_price_scale: float = 0.5
+    quality_price_scale: float = 1.0
+
+
+def params_equal(a: BumpParams, b: BumpParams) -> bool:
+    return asdict(a) == asdict(b)
+
+
+def bump_params_from_config() -> BumpParams:
+    return BumpParams(
+        min_review_accrual_bump=SIM.min_review_accrual_bump,
+        max_review_accrual_bump=SIM.max_review_accrual_bump,
+        review_bump_duration=SIM.review_bump_duration,
+        review_bump_decay_rate=SIM.review_bump_decay_rate,
+        review_bump_decay_cap_timesteps=SIM.review_bump_decay_cap_timesteps,
+        default_max_reviewer_share=SIM.default_max_reviewer_share,
+        review_sigmoid_midpoint=SIM.review_sigmoid_midpoint,
+        history_price_scale=SIM.history_price_scale,
+        quality_price_scale=SIM.quality_price_scale,
+    )
 
 
 def apply_sim_overrides(
@@ -76,6 +98,8 @@ def apply_sim_overrides(
         review_bump_decay_cap_timesteps=params.review_bump_decay_cap_timesteps,
         default_max_reviewer_share=params.default_max_reviewer_share,
         review_sigmoid_midpoint=params.review_sigmoid_midpoint,
+        history_price_scale=params.history_price_scale,
+        quality_price_scale=params.quality_price_scale,
         rl_reward_ac_weight=rl_reward_ac_weight,
         rl_reward_accrual_weight=rl_reward_accrual_weight,
         rl_reward_rank_weight=rl_reward_rank_weight,
@@ -85,6 +109,8 @@ def apply_sim_overrides(
     Paper.MAX_REVIEW_ACCRUAL_BUMP = sim.max_review_accrual_bump
     Paper.DEFAULT_MAX_REVIEWER_SHARE = sim.default_max_reviewer_share
     Paper.REVIEW_SIGMOID_MIDPOINT = sim.review_sigmoid_midpoint
+    Paper.HISTORY_PRICE_SCALE = sim.history_price_scale
+    Paper.QUALITY_PRICE_SCALE = sim.quality_price_scale
 
 
 def _decay_cap_cli(value: float | None) -> str:
@@ -206,7 +232,7 @@ def propose_next_params(
 
         old_share = next_params.default_max_reviewer_share
         next_params.default_max_reviewer_share = max(
-            0.03, next_params.default_max_reviewer_share - 0.01
+            MIN_REVIEWER_SHARE, next_params.default_max_reviewer_share - 0.01
         )
         if next_params.default_max_reviewer_share != old_share:
             notes.append(
@@ -241,6 +267,42 @@ def propose_next_params(
                 f"sigmoid_mid {old_mid:.1f}->{next_params.review_sigmoid_midpoint:.1f}"
             )
 
+        # When bump/share knobs are exhausted, keep pushing author-fair pricing.
+        if not notes or (
+            next_params.max_review_accrual_bump >= 0.60 - 1e-9
+            and next_params.min_review_accrual_bump >= 0.15 - 1e-9
+            and next_params.default_max_reviewer_share <= MIN_REVIEWER_SHARE + 1e-9
+            and next_params.review_sigmoid_midpoint <= 1.0 + 1e-9
+        ):
+            old_quality = next_params.quality_price_scale
+            next_params.quality_price_scale = min(
+                MAX_QUALITY_PRICE_SCALE, next_params.quality_price_scale + 0.25
+            )
+            if next_params.quality_price_scale != old_quality:
+                notes.append(
+                    f"quality_price {old_quality:.2f}->"
+                    f"{next_params.quality_price_scale:.2f}"
+                )
+            old_history = next_params.history_price_scale
+            next_params.history_price_scale = max(
+                0.0, next_params.history_price_scale - 0.1
+            )
+            if next_params.history_price_scale != old_history:
+                notes.append(
+                    f"history_price {old_history:.2f}->"
+                    f"{next_params.history_price_scale:.2f}"
+                )
+            if next_params.default_max_reviewer_share > MIN_REVIEWER_SHARE + 1e-9:
+                old_share = next_params.default_max_reviewer_share
+                next_params.default_max_reviewer_share = max(
+                    MIN_REVIEWER_SHARE, next_params.default_max_reviewer_share - 0.005
+                )
+                if next_params.default_max_reviewer_share != old_share:
+                    notes.append(
+                        f"max_share {old_share:.3f}->"
+                        f"{next_params.default_max_reviewer_share:.3f}"
+                    )
+
     elif metrics.reviewer_total <= 0.0:
         old_share = next_params.default_max_reviewer_share
         next_params.default_max_reviewer_share = min(
@@ -251,7 +313,7 @@ def propose_next_params(
     if metrics.value_created_total > 1e-9 and metrics.gap > 2.0 * metrics.value_created_total:
         old_share = next_params.default_max_reviewer_share
         next_params.default_max_reviewer_share = max(
-            0.03, next_params.default_max_reviewer_share - 0.015
+            MIN_REVIEWER_SHARE, next_params.default_max_reviewer_share - 0.015
         )
         if next_params.default_max_reviewer_share != old_share:
             notes.append(
@@ -274,6 +336,8 @@ def _csv_fieldnames() -> list[str]:
         "review_bump_decay_cap_timesteps",
         "default_max_reviewer_share",
         "review_sigmoid_midpoint",
+        "history_price_scale",
+        "quality_price_scale",
         "rl_reward_ac_weight",
         "rl_reward_accrual_weight",
         "rl_reward_rank_weight",
@@ -342,7 +406,7 @@ def _log(msg: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_sweep_args(argv)
-    params = BumpParams()
+    params = bump_params_from_config()
     apply_sim_overrides(params)
 
     _log("Adaptive surplus sweep")
@@ -378,7 +442,9 @@ def main(argv: list[str] | None = None) -> int:
             f"decay_rate={params.review_bump_decay_rate} "
             f"decay_cap={params.review_bump_decay_cap_timesteps} "
             f"max_share={params.default_max_reviewer_share:.3f} "
-            f"sigmoid_mid={params.review_sigmoid_midpoint:.1f}"
+            f"sigmoid_mid={params.review_sigmoid_midpoint:.1f} "
+            f"hist_price={params.history_price_scale:.2f} "
+            f"qual_price={params.quality_price_scale:.2f}"
         )
 
         _log("  Training RL...")
@@ -457,6 +523,14 @@ def main(argv: list[str] | None = None) -> int:
         append_csv_row(args.output, row, write_header=not csv_exists)
         csv_exists = True
         _log(f"  next adjustment: {notes}")
+
+        if notes == "no change" or params_equal(params, next_params):
+            _log(
+                "\nStopping: no further parameters to adjust. "
+                "Bump/share/pricing knobs exhausted — authors still negative. "
+                "May need a market code change (share on future value only)."
+            )
+            break
 
         if metrics.author_net_total < 0.0:
             negative_streak += 1

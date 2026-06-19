@@ -49,7 +49,7 @@ class SimConfig:
     # --- Paper economics -------------------------------------------------
     default_accrual_rate: float = 1.0       # base AC gained per timestep, before bumps
     default_review_share: float = 0.005      # legacy fallback when fair-market pricing is off
-    default_max_reviewer_share: float = 0.1       # cap on a single review's share
+    default_max_reviewer_share: float = 0.10       # cap on a single review's share
     min_offer_share: float = 0.001          # floor on a non-zero review offer
     use_fair_market_pricing: bool = True
     prior_review_epsilon: float = 0.05      # prior reviewer effect before review history exists
@@ -77,8 +77,8 @@ class SimConfig:
     # drives the per-reviewer share the author is willing to offer.
     quality_sigma: float = 0.20
     min_paper_quality: float = 0.10
-    quality_price_scale: float = 1.0    # higher quality -> smaller offered share
-    history_price_scale: float = 0.5    # better reviewer history -> larger offered share
+    quality_price_scale: float = 1.5    # higher quality -> smaller offered share
+    history_price_scale: float = 0.0    # better reviewer history -> larger offered share
 
     # --- Effort & reward model -------------------------------------------
     review_paradigm: str = "continuous"       # "continuous" | "discrete"
@@ -89,9 +89,9 @@ class SimConfig:
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
     good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
     review_effort_curve: str = "sigmoid"        # "sigmoid" | "log" | "jump"
-    min_review_accrual_bump: float = 0.05       # sigmoid bump at one timestep
-    max_review_accrual_bump: float = 0.35       # sigmoid saturation near a long review
-    review_sigmoid_midpoint: float = 2.0        # review length where impact accelerates
+    min_review_accrual_bump: float = 0.15       # sigmoid bump at one timestep
+    max_review_accrual_bump: float = 0.60       # sigmoid saturation near a long review
+    review_sigmoid_midpoint: float = 1.0        # review length where impact accelerates
     review_sigmoid_steepness: float = 1.4
     review_jump_threshold: float = 15.0          #f optional jump-mode high-effort cutoff
     review_jump_bump: float = 0.50               # optional extra bump after the cutoff
@@ -101,9 +101,9 @@ class SimConfig:
     # Review bump lifetime. ``permanent`` keeps the current multiplier forever;
     # ``decay`` applies epsilon at review time then decays it exponentially to
     # zero (optionally hard-capped after ``review_bump_decay_cap_timesteps``).
-    review_bump_duration: str = "decay"     # "permanent" | "decay"
+    review_bump_duration: str = "permanent"     # "permanent" | "decay"
     review_bump_decay_rate: float = 0.05        # k in exp(-k * t) since review
-    review_bump_decay_cap_timesteps: float | None = 100  # force bump=0 after this
+    review_bump_decay_cap_timesteps: float | None = 800  # force bump=0 after this
 
     # --- Publishing ------------------------------------------------------
     paper_threshold: float = 10.0   # legacy forecast normalizer (choice-mode continuous)
@@ -141,9 +141,9 @@ class SimConfig:
     rl_backend: str = "tabular"     # "tabular" | "linear"
     rl_epsilon: float = 0.1         # exploration when learning online
     rl_gamma: float = 0.95          # TD discount
-    rl_reward_ac_weight: float = 0.0       # weight on Δ academic capital
-    rl_reward_rank_weight: float = 0.0   # weight on Δ AC percentile rank (0..1)
-    rl_reward_accrual_weight: float = 1.0  # weight on Δ portfolio accrual rate
+    rl_reward_ac_weight: float = 0.5       # weight on Δ academic capital
+    rl_reward_rank_weight: float = 100.0   # weight on Δ AC percentile rank (0..1)
+    rl_reward_accrual_weight: float = 0.5  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
     talent_min: float = 0.6         # default talent spread; CLI can widen/narrow it
     talent_max: float = 1.4

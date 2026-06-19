@@ -346,6 +346,7 @@ CHART_DESCRIPTIONS = {
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
     "review_behavior": "Cumulative good- vs bad-faith reviews and paper count over time",
     "accepted_review_price_binned": "Mean agreed review share per 10-timestep bin (one dot per bin)",
+    "market_pricing_dynamics": "Review share pricing over timesteps: fair-market baseline, scarcity, pressure, and claim prices",
     "marketplace_activity": "Papers on market, listings/claims, and cumulative reviews completed",
     "marketplace_0_100": "Marketplace supply zoom: timesteps 0–100",
     "marketplace_200_300": "Marketplace supply zoom: timesteps 200–300",
@@ -359,6 +360,7 @@ CHART_DESCRIPTIONS = {
     "choice_breakdown": "Agent decisions (write / review / finish)",
     "review_effort_histogram": "Completed peer reviews by effort level",
     "review_effort_scatter": "Each completed review: timestep vs effort invested",
+    "review_reward_curve": "Review accrual bump E = F(T) for the active curve (sigmoid/log/jump) and threshold",
     "writing_effort_distribution": "Total paper-writing effort by agent",
     "paper_writing_effort_distribution": "Writing effort per paper (frequency)",
     "paper_ac": "Accrued capital per paper over time",
@@ -1011,9 +1013,6 @@ def build_run_config(
     adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
     min_author_price_multiplier: float = SIM.min_author_price_multiplier,
     max_author_price_multiplier: float = SIM.max_author_price_multiplier,
-    review_bump_duration: str = SIM.review_bump_duration,
-    review_bump_decay_rate: float = SIM.review_bump_decay_rate,
-    review_bump_decay_cap_timesteps: float | None = SIM.review_bump_decay_cap_timesteps,
     gallery_action_limit: int = SIM.gallery_action_limit,
 ) -> dict:
     """Full SimConfig snapshot for this run, with runtime overrides applied.
@@ -1022,8 +1021,12 @@ def build_run_config(
     simulation variables, then patches in the values that CLI flags may have
     changed for this run. ``num_agents`` is kept as an alias of
     ``num_heuristic_agents`` for backward compatibility with older gallery data.
+
+    Uses ``config_module.SIM`` (not the import-time ``SIM`` binding) so runtime
+    ``replace()`` patches from CLI flags or ``sweep_surplus.apply_sim_overrides``
+    are archived correctly.
     """
-    config = asdict(SIM)
+    config = asdict(config_module.SIM)
     config["num_heuristic_agents"] = heuristic_agents
     config["num_timesteps"] = timesteps
     config["seed"] = seed
@@ -1051,9 +1054,9 @@ def build_run_config(
     config["adaptive_pricing_learning_rate"] = adaptive_pricing_learning_rate
     config["min_author_price_multiplier"] = min_author_price_multiplier
     config["max_author_price_multiplier"] = max_author_price_multiplier
-    config["review_bump_duration"] = review_bump_duration
-    config["review_bump_decay_rate"] = review_bump_decay_rate
-    config["review_bump_decay_cap_timesteps"] = review_bump_decay_cap_timesteps
+    # Bump lifetime fields already come from ``config_module.SIM`` (live after
+    # ``_apply_review_bump_config`` / sweep overrides). Do not overwrite with
+    # import-time default parameters from this function's signature.
     config["gallery_action_limit"] = gallery_action_limit
     config["num_agents"] = heuristic_agents
     # Aliases so the static gallery (which also reads pre-overhaul runs) keeps

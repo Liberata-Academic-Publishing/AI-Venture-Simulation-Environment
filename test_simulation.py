@@ -252,14 +252,15 @@ class EconomicsTest(unittest.TestCase):
         veteran.peer_review_epsilon_history = 0.20
         paper = _listed_paper(author, quality=1.0)
 
-        paper.update_price_table(
-            [rookie, veteran],
-            market_median_quality=1.0,
-            mean_peer_review_epsilon=0.11,
-            fair_market_price=fair_market_price_from_epsilons([0.02, 0.20]),
-        )
+        with mock.patch("Paper.HISTORY_PRICE_SCALE", 0.5):
+            paper.update_price_table(
+                [rookie, veteran],
+                market_median_quality=1.0,
+                mean_peer_review_epsilon=0.11,
+                fair_market_price=fair_market_price_from_epsilons([0.02, 0.20]),
+            )
 
-        self.assertGreater(paper.offered_share(veteran), paper.offered_share(rookie))
+            self.assertGreater(paper.offered_share(veteran), paper.offered_share(rookie))
 
     def test_scarcity_multiplier_lowers_offers(self):
         author = ScriptAgent("author")
@@ -423,19 +424,20 @@ class MarketEconomicsTest(unittest.TestCase):
         veteran = HeuristicAgent(intrinsic_talent=1.0, name="veteran")
         rookie.peer_review_epsilon_history = 0.02
         veteran.peer_review_epsilon_history = 0.20
-        paper = _listed_paper(author, quality=1.0, current_ac=500.0, accrual_rate=1.0)
+        paper = _listed_paper(author, quality=1.0, current_ac=500.0, accrual_rate=10.0)
         agents = [author, rookie, veteran]
         Agent.all_papers = [paper]
         Agent.all_agents = agents
-        env = Environment(
-            agents=agents,
-            papers=[paper],
-            review_paradigm="discrete",
-            use_merit_market_clearing=True,
-        )
+        with mock.patch("Paper.HISTORY_PRICE_SCALE", 0.5):
+            env = Environment(
+                agents=agents,
+                papers=[paper],
+                review_paradigm="discrete",
+                use_merit_market_clearing=True,
+            )
 
-        env._update_market_prices()
-        env._clear_review_market()
+            env._update_market_prices()
+            env._clear_review_market()
 
         self.assertIs(veteran.market_claim_assignment, paper)
         self.assertIsNone(rookie.market_claim_assignment)
@@ -450,8 +452,8 @@ class MarketEconomicsTest(unittest.TestCase):
     def test_legacy_heuristic_claim_unchanged_when_flags_off(self):
         agent = HeuristicAgent(intrinsic_talent=1.0)
         author = ScriptAgent("author")
-        low = _listed_paper(author, quality=1.0, current_ac=10.0)
-        high = _listed_paper(author, quality=1.0, current_ac=200.0)
+        low = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=0.5)
+        high = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=5.0)
         Agent.all_papers = [low, high]
         Agent.all_agents = [agent, author]
         for paper in (low, high):
@@ -562,6 +564,7 @@ class ReviewParadigmTest(unittest.TestCase):
             papers=Agent.all_papers,
             history=history,
             review_paradigm="discrete",
+            use_merit_market_clearing=False,
         )
 
         env.run_timestep()
@@ -591,6 +594,7 @@ class ReviewParadigmTest(unittest.TestCase):
             papers=Agent.all_papers,
             history=history,
             review_paradigm="discrete",
+            use_merit_market_clearing=False,
         )
 
         env.run(int(GOOD_REVIEW_TIMESTEPS) - 1)
@@ -662,8 +666,8 @@ class HeuristicPolicyTest(unittest.TestCase):
     def test_claims_highest_value_listed_paper(self):
         agent = HeuristicAgent(intrinsic_talent=1.0)
         author = ScriptAgent("author")
-        low = _listed_paper(author, quality=1.0, current_ac=10.0)
-        high = _listed_paper(author, quality=1.0, current_ac=200.0)
+        low = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=0.5)
+        high = _listed_paper(author, quality=1.0, current_ac=10.0, accrual_rate=5.0)
         Agent.all_papers = [low, high]
         for paper in (low, high):
             paper.update_price_table([agent], 1.0, 0.0)
@@ -671,7 +675,7 @@ class HeuristicPolicyTest(unittest.TestCase):
         self.assertIs(agent.choose_marketplace_action(), high)
 
     def test_work_phase_finishes_a_normal_review(self):
-        agent = HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_timesteps=30)
+        agent = HeuristicAgent(intrinsic_talent=1.0, forecast_horizon_timesteps=5)
         author = ScriptAgent("author")
         paper = _listed_paper(author, quality=1.0, current_ac=10.0)
         paper.update_price_table([agent], 1.0, 0.0)
@@ -766,6 +770,7 @@ class EnvironmentTest(unittest.TestCase):
             papers=Agent.all_papers,
             history=history,
             review_paradigm="discrete",
+            use_merit_market_clearing=False,
         )
 
         env.run(int(GOOD_REVIEW_TIMESTEPS))
@@ -833,8 +838,6 @@ class EnvironmentTest(unittest.TestCase):
         )
         paper = _listed_paper(author, quality=1.0, current_ac=50.0)
         reviewer.marketplace = [paper]
-        paper.update_price_table([reviewer], 1.0, 0.05)
-        expected = paper.offered_share(reviewer)
 
         history = History()
         env = Environment(
@@ -842,7 +845,10 @@ class EnvironmentTest(unittest.TestCase):
             papers=[paper],
             history=history,
             review_paradigm="discrete",
+            use_merit_market_clearing=False,
         )
+        env._update_market_prices()
+        expected = paper.offered_share(reviewer)
         env.run(2)
 
         self.assertGreater(expected, 0.0)
@@ -1169,6 +1175,30 @@ class QLearningRewardTest(unittest.TestCase):
         )
 
 
+class BuildRunConfigTest(unittest.TestCase):
+    def test_reflects_runtime_sim_replace(self):
+        """Gallery config must snapshot live config.SIM after runtime patches."""
+        from dataclasses import replace
+
+        import config as config_module
+        from run_simulation import build_run_config
+
+        old_sim = config_module.SIM
+        config_module.SIM = replace(
+            old_sim,
+            max_review_accrual_bump=0.42,
+            min_review_accrual_bump=0.11,
+            review_bump_duration="permanent",
+        )
+        try:
+            config = build_run_config()
+            self.assertEqual(config["max_review_accrual_bump"], 0.42)
+            self.assertEqual(config["min_review_accrual_bump"], 0.11)
+            self.assertEqual(config["review_bump_duration"], "permanent")
+        finally:
+            config_module.SIM = old_sim
+
+
 class DQNAgentTest(unittest.TestCase):
     def test_dqn_backend_q_values_shape(self):
         import numpy as np
@@ -1223,6 +1253,25 @@ class UtilityTest(unittest.TestCase):
         self.assertEqual(gini([]), 0.0)
         self.assertEqual(gini([5.0, 5.0, 5.0]), 0.0)
         self.assertAlmostEqual(gini([0.0, 0.0, 0.0, 10.0]), 0.75)
+
+    @unittest.skipUnless(_HAS_MPL, "matplotlib not installed")
+    def test_market_pricing_series_helpers(self):
+        import visualize
+
+        history = History()
+        history.timesteps = [1, 2, 3]
+        history.scalars["fair_market_price"] = [0.01, 0.02, 0.03]
+        history.scalars["scarcity_multiplier"] = [1.1, 1.0, 0.9]
+        history.accepted_review_claims = [(2, 0.015), (3, 0.0)]
+
+        days, values = visualize._aligned_scalar_plot(history, "fair_market_price")
+        self.assertEqual(days, [1.0, 2.0, 3.0])
+        self.assertEqual(values, [0.01, 0.02, 0.03])
+        self.assertEqual(
+            visualize._market_pricing_claim_points(history),
+            [(2, 0.015)],
+        )
+        self.assertTrue(visualize._has_market_pricing_scalars(history))
 
     @unittest.skipUnless(_HAS_MPL, "matplotlib not installed")
     def test_visualize_writes_pngs(self):

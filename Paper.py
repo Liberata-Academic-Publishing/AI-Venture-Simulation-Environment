@@ -627,6 +627,36 @@ class Paper:
 
         self.share_distribution[agent] = share_value
 
+    def ac_at_review_baseline(self) -> float:
+        """Paper AC credited entirely to the author at review completion (A0)."""
+        if not self.review_records:
+            return 0.0
+        return float(self.review_records[0].get("current_ac_at_review", 0.0))
+
+    def incremental_ac(self) -> float:
+        """AC accrued after the review finished; review shares apply only here."""
+        return max(0.0, self.current_ac - self.ac_at_review_baseline())
+
+    def reviewer_share_total(self) -> float:
+        return sum(
+            share
+            for agent, share in self.share_distribution.items()
+            if agent is not self.author and share > 0.0
+        )
+
+    def capital_credit_for(self, agent: Agent) -> float:
+        """AC units this shareholder holds from the paper (marginal review pricing)."""
+        share = self.share_distribution.get(agent, 0.0)
+        if not self.review_records:
+            return share * self.current_ac
+        if agent is self.author:
+            baseline = self.ac_at_review_baseline()
+            reviewer_share = self.reviewer_share_total()
+            return baseline + (1.0 - reviewer_share) * self.incremental_ac()
+        if share <= 0.0:
+            return 0.0
+        return share * self.incremental_ac()
+
     def advance_accrual(self, time_steps: int = 1):
         self.accrue_ac(time_steps)
 
