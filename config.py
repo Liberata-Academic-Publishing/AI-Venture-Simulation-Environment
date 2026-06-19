@@ -26,10 +26,10 @@ class SimConfig:
     """Every parameter that defines a single simulation run."""
 
     # --- World -----------------------------------------------------------
-    num_heuristic_agents: int = 10
-    num_rl_agents: int = 100
+    num_heuristic_agents: int = 0
+    num_rl_agents: int = 20
     num_dqn_agents: int = 0
-    num_random_agents: int = 10
+    num_random_agents: int = 0
     num_probabilistic_agents: int = 0
     num_timesteps: int = 2000
     seed: int = 7
@@ -40,7 +40,7 @@ class SimConfig:
     # Papers seeded before timestep 1 (bootstraps review material). Set
     # init_papers_per_agent=0 for no starting papers, or init_ac_min=init_ac_max=0
     # to start every agent at zero capital.
-    init_papers_per_agent: int = 0
+    init_papers_per_agent: int = 100
     init_ac_min: float = 0
     init_ac_max: float = 0
     init_accrual_min: float = 0.8

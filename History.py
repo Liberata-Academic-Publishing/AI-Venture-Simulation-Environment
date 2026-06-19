@@ -168,6 +168,31 @@ def _review_benefit_components(env: "Environment") -> dict[str, float]:
     return totals
 
 
+def _ac_by_source(env: "Environment") -> dict[str, float]:
+    """Split current academic capital by how it was earned: writing vs reviewing.
+
+    Every unit of AC is held by exactly one of a paper's shareholders. The
+    paper's author holds AC earned by *writing*; any other shareholder holds AC
+    earned by *peer reviewing* (their granted review share of the paper). The two
+    sums add up to the system's ``total_capital``.
+    """
+    agent_set = set(env.agents)
+    writing = 0.0
+    review = 0.0
+    for paper in env.papers:
+        author = getattr(paper, "author", None)
+        current_ac = float(getattr(paper, "current_ac", 0.0))
+        for agent, share in paper.share_distribution.items():
+            if agent not in agent_set:
+                continue
+            value = float(share) * current_ac
+            if agent is author:
+                writing += value
+            else:
+                review += value
+    return {"writing_held_ac": writing, "review_held_ac": review}
+
+
 def default_metrics() -> dict[str, MetricFn]:
     """Scalar, per-timestep metrics recorded by default (aggregates + review behavior)."""
     return {
@@ -245,6 +270,10 @@ def default_metrics() -> dict[str, MetricFn]:
         "value_created_bad": (
             lambda env: _review_benefit_components(env)["value_created_bad"]
         ),
+        # Total AC currently held by source: writing (author shares) vs peer
+        # review (reviewer shares). Sums to ``total_capital``.
+        "writing_held_ac": lambda env: _ac_by_source(env)["writing_held_ac"],
+        "review_held_ac": lambda env: _ac_by_source(env)["review_held_ac"],
     }
 
 
@@ -286,6 +315,9 @@ class History:
         self.paper_quality: dict[str, float] = {}
         self.paper_authors: dict[str, str] = {}
         self.paper_reviewed: dict[str, bool] = {}
+        # Reviewer ownership per paper, for the writing-vs-peer-review AC split.
+        self.paper_reviewer: dict[str, str] = {}
+        self.paper_reviewer_share: dict[str, float] = {}
         self.paper_writing_effort: dict[str, float] = {}
         self.paper_required_writing_effort: dict[str, float] = {}
         self.paper_accrual_rate: dict[str, float] = {}
@@ -365,6 +397,12 @@ class History:
                 self.paper_authors[label] = self._label(paper.author, "Agent")
                 self.paper_quality[label] = float(getattr(paper, "quality", 0.0))
                 self.paper_reviewed[label] = bool(getattr(paper, "reviewed", False))
+                reviewer = getattr(paper, "reviewer", None)
+                if reviewer is not None:
+                    self.paper_reviewer[label] = self._label(reviewer, "Agent")
+                    self.paper_reviewer_share[label] = float(
+                        paper.share_distribution.get(reviewer, 0.0)
+                    )
                 effort = getattr(paper, "writing_effort", None)
                 if effort is not None:
                     self.paper_writing_effort[label] = float(effort)
@@ -554,8 +592,19 @@ class History:
             "agent_outcome_summary": self.agent_outcome_summary(),
         }
 
+    def _ac_from_reviewing_by_agent(self) -> dict[str, float]:
+        """Final AC each agent holds via reviewer shares (earned by peer review)."""
+        held: dict[str, float] = {}
+        for paper_label, reviewer_label in self.paper_reviewer.items():
+            share = self.paper_reviewer_share.get(paper_label, 0.0)
+            series = self.paper_ac.get(paper_label, [])
+            final_ac = float(series[-1]) if series else 0.0
+            held[reviewer_label] = held.get(reviewer_label, 0.0) + share * final_ac
+        return held
+
     def agent_group_summary(self) -> dict[str, dict[str, Any]]:
         """Aggregate final outcomes by concrete agent class."""
+        reviewer_held = self._ac_from_reviewing_by_agent()
         groups: dict[str, dict[str, Any]] = {}
 
         def ensure(group: str) -> dict[str, Any]:
@@ -573,6 +622,8 @@ class History:
                     "total_peer_review_history": 0.0,
                     "total_peer_review_epsilon": 0.0,
                     "total_writing_effort": 0.0,
+                    "total_ac_from_writing": 0.0,
+                    "total_ac_from_reviewing": 0.0,
                     "actions": Counter(),
                 }
             return groups[group]
@@ -591,6 +642,10 @@ class History:
             stats["max_final_capital"] = (
                 final_capital if current_max is None else max(current_max, final_capital)
             )
+
+            from_reviewing = float(reviewer_held.get(agent_label, 0.0))
+            stats["total_ac_from_reviewing"] += from_reviewing
+            stats["total_ac_from_writing"] += max(0.0, final_capital - from_reviewing)
 
             review_series = self.agent_review_history.get(agent_label, [])
             if review_series:
