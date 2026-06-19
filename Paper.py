@@ -447,6 +447,10 @@ class Paper:
                 "epsilon": epsilon,
                 "review_kind": completed_review_kind,
                 "accrual_rate": self.accrual_rate,
+                # Paper AC at the instant the review finished, before any
+                # accrual at the bumped rate. This is the counterfactual
+                # baseline A0 used by the reviewer-vs-author benefit metric.
+                "current_ac_at_review": self.current_ac,
             }
         )
         return share

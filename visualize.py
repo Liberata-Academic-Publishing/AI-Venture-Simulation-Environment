@@ -390,6 +390,66 @@ def plot_agent_group_comparison(
     return _finish(fig, path, show)
 
 
+def _draw_review_benefit(ax_left, ax_right, history: "History") -> None:
+    """Reviewer-vs-author benefit over time, split by good/bad faith.
+
+    Left: author net gain relative to the no-review counterfactual (the bad-faith
+    line dipping below zero is the exploitation story). Right: the AC reviewers
+    captured via their share.
+    """
+    scalars = history.scalars
+    keys = (
+        "author_net_good",
+        "author_net_bad",
+        "reviewer_benefit_good",
+        "reviewer_benefit_bad",
+    )
+    if not any(any(scalars.get(k, [])) for k in keys):
+        for ax in (ax_left, ax_right):
+            ax.text(0.5, 0.5, "No completed reviews", ha="center", va="center")
+            ax.set_axis_off()
+        return
+
+    good_color, bad_color = "#16a34a", "#f87171"
+    days = history.days
+
+    ax_left.axhline(0.0, color="#6b7280", linestyle="--", linewidth=1.0)
+    ax_left.plot(
+        days, scalars.get("author_net_good", []),
+        color=good_color, linewidth=2.0, label="good faith",
+    )
+    ax_left.plot(
+        days, scalars.get("author_net_bad", []),
+        color=bad_color, linewidth=2.0, label="bad faith",
+    )
+    ax_left.set_xlabel("Timestep")
+    ax_left.set_ylabel("Author net gain vs no review (AC)")
+    ax_left.set_title("Are authors better off being reviewed?")
+    ax_left.legend(fontsize=8, loc="best")
+
+    ax_right.plot(
+        days, scalars.get("reviewer_benefit_good", []),
+        color=good_color, linewidth=2.0, label="good faith",
+    )
+    ax_right.plot(
+        days, scalars.get("reviewer_benefit_bad", []),
+        color=bad_color, linewidth=2.0, label="bad faith",
+    )
+    ax_right.set_xlabel("Timestep")
+    ax_right.set_ylabel("Reviewer captured value (AC)")
+    ax_right.set_title("What reviewers capture")
+    ax_right.legend(fontsize=8, loc="best")
+
+
+def plot_review_benefit(history: "History", path: str | None = None, show: bool = False):
+    """Reviewer vs author benefit (good vs bad faith); author_net < 0 = exploited."""
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 5))
+    _draw_review_benefit(ax_left, ax_right, history)
+    fig.suptitle("Reviewer vs author benefit (good vs bad faith)", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return _finish(fig, path, show)
+
+
 def _draw_system_aggregates(ax, history: "History") -> None:
     scalars = history.scalars
     for key in ("total_capital", "mean_capital", "max_capital"):
@@ -1381,8 +1441,28 @@ def _has_groups(history: "History") -> bool:
     return bool(history.agent_group_summary())
 
 
+def _has_agent_capital_by_group(history: "History") -> bool:
+    return bool(history.agent_capital)
+
+
+def _has_talent_vs_ac(history: "History") -> bool:
+    rates = getattr(history, "agent_accrual_rate", {})
+    return any(any(values) for values in rates.values())
+
+
+def _has_mean_review_effort_vs_ac(history: "History") -> bool:
+    return bool(history.agent_capital) and bool(history.completed_reviews)
+
+
+def _has_accepted_review_price(history: "History") -> bool:
+    return bool(getattr(history, "accepted_review_claims", None))
+
+
 # Static charts shown in the gallery: (png name, data gate, plot function).
 _GALLERY_CHARTS = (
+    ("agent_capital_by_group", _has_agent_capital_by_group, plot_agent_capital_by_group),
+    ("talent_vs_ac", _has_talent_vs_ac, plot_talent_vs_ac),
+    ("mean_review_effort_vs_ac", _has_mean_review_effort_vs_ac, plot_mean_review_effort_vs_ac),
     ("review_behavior", _has_review_behavior, plot_review_behavior),
     ("marketplace_activity", _has_marketplace, plot_marketplace_activity),
     ("review_reputation", _has_reputation, plot_review_reputation),
@@ -1406,6 +1486,7 @@ _GALLERY_CHARTS = (
      lambda h: bool(getattr(h, "paper_writing_effort", {})),
      plot_paper_writing_effort_distribution),
     ("agent_group_comparison", _has_groups, plot_agent_group_comparison),
+    ("accepted_review_price_binned", _has_accepted_review_price, plot_accepted_review_price_binned),
 )
 
 
@@ -1441,6 +1522,11 @@ def render_gallery_charts(
             else:
                 plot_fn(history, path)
             produced.append(name)
+        if _has_marketplace(history) and history.timesteps:
+            for start, end, name in _MARKETPLACE_ZOOM_WINDOWS:
+                path = os.path.join(outdir, f"{name}.png")
+                plot_marketplace_zoom(history, start, end, path)
+                produced.append(name)
     return produced
 
 
@@ -1472,6 +1558,9 @@ def plot_all(
         ),
         "agent_group_comparison": plot_agent_group_comparison(
             history, os.path.join(outdir, "agent_group_comparison.png"), show=show
+        ),
+        "review_benefit": plot_review_benefit(
+            history, os.path.join(outdir, "review_benefit.png"), show=show
         ),
         "system_aggregates": plot_system_aggregates(
             history, os.path.join(outdir, "system_aggregates.png"), show=show

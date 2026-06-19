@@ -322,6 +322,7 @@ CHART_DESCRIPTIONS = {
     "mean_review_effort_vs_ac": "Running mean peer review effort vs total academic capital (labeled by agent number)",
     "mean_review_effort": "Running mean effort of completed peer reviews over time",
     "agent_group_comparison": "Mean capital and review outcomes by agent type",
+    "review_benefit": "Reviewer vs author benefit (good vs bad faith); author_net<0 = exploited",
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
     "review_behavior": "Cumulative good- vs bad-faith reviews and paper count over time",
     "accepted_review_price_binned": "Mean agreed review share per 10-timestep bin (one dot per bin)",

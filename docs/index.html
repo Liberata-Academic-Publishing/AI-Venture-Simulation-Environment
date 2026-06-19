@@ -139,6 +139,9 @@
         <img class="chart-img" id="img-episode_return" alt="Episode return">
       </div>
       <div class="panel"><h2>Academic capital per agent</h2><canvas id="agentChart"></canvas></div>
+      <div class="panel" id="panel-capital-by-group"><h2>Academic capital by agent type</h2><img class="chart-img" id="img-agent_capital_by_group" alt="Academic capital by agent type"></div>
+      <div class="panel" id="panel-talent-vs-ac"><h2>Portfolio accrual rate vs talent</h2><img class="chart-img" id="img-talent_vs_ac" alt="Portfolio accrual rate vs talent"></div>
+      <div class="panel" id="panel-effort-vs-ac"><h2>Mean review effort vs academic capital</h2><img class="chart-img" id="img-mean_review_effort_vs_ac" alt="Mean review effort vs academic capital"></div>
       <div class="panel"><h2>System aggregates</h2><canvas id="aggChart"></canvas></div>
       <div class="panel">
         <h2>Action mix over time</h2>
@@ -161,6 +164,11 @@
       </div>
       <div class="panel" id="panel-review"><h2>Review behavior</h2><img class="chart-img" id="img-review_behavior" alt="Review behavior"><canvas id="reviewChart"></canvas></div>
       <div class="panel" id="panel-marketplace"><h2>Review marketplace: supply, claims, and reviews completed</h2><img class="chart-img" id="img-marketplace_activity" alt="Review marketplace"><canvas id="marketplaceChart"></canvas></div>
+      <div class="panel" id="panel-marketplace-0-100"><h2>Marketplace supply (timesteps 0–100)</h2><img class="chart-img" id="img-marketplace_0_100" alt="Marketplace supply timesteps 0-100"></div>
+      <div class="panel" id="panel-marketplace-200-300"><h2>Marketplace supply (timesteps 200–300)</h2><img class="chart-img" id="img-marketplace_200_300" alt="Marketplace supply timesteps 200-300"></div>
+      <div class="panel" id="panel-marketplace-600-700"><h2>Marketplace supply (timesteps 600–700)</h2><img class="chart-img" id="img-marketplace_600_700" alt="Marketplace supply timesteps 600-700"></div>
+      <div class="panel" id="panel-marketplace-1800-1900"><h2>Marketplace supply (timesteps 1800–1900)</h2><img class="chart-img" id="img-marketplace_1800_1900" alt="Marketplace supply timesteps 1800-1900"></div>
+      <div class="panel" id="panel-review-price"><h2>Accepted review share (10-timestep bins)</h2><img class="chart-img" id="img-accepted_review_price_binned" alt="Accepted review share binned"></div>
       <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
       <div class="panel" id="panel-quality"><h2>Paper quality vs accrued capital</h2><img class="chart-img" id="img-paper_quality_vs_ac" alt="Paper quality vs accrued capital"><canvas id="qualityChart"></canvas></div>
       <div class="panel" id="panel-effort-rate"><h2>Writing effort vs accrual rate</h2><img class="chart-img" id="img-writing_effort_vs_rate" alt="Writing effort vs accrual rate"><canvas id="effortRateChart"></canvas></div>
@@ -943,9 +951,17 @@
     // maps to its PNG name + the canvas used only as a fallback for legacy runs
     // archived before charts were imaged.
     const STATIC_CHART_PANELS = [
+      { panel: "panel-capital-by-group", chart: "agent_capital_by_group", imgId: "img-agent_capital_by_group" },
+      { panel: "panel-talent-vs-ac", chart: "talent_vs_ac", imgId: "img-talent_vs_ac" },
+      { panel: "panel-effort-vs-ac", chart: "mean_review_effort_vs_ac", imgId: "img-mean_review_effort_vs_ac" },
       { panel: "panel-groups", chart: "agent_group_comparison", canvasId: "groupChart", imgId: "img-agent_group_comparison" },
       { panel: "panel-review", chart: "review_behavior", canvasId: "reviewChart", imgId: "img-review_behavior" },
       { panel: "panel-marketplace", chart: "marketplace_activity", canvasId: "marketplaceChart", imgId: "img-marketplace_activity" },
+      { panel: "panel-marketplace-0-100", chart: "marketplace_0_100", imgId: "img-marketplace_0_100" },
+      { panel: "panel-marketplace-200-300", chart: "marketplace_200_300", imgId: "img-marketplace_200_300" },
+      { panel: "panel-marketplace-600-700", chart: "marketplace_600_700", imgId: "img-marketplace_600_700" },
+      { panel: "panel-marketplace-1800-1900", chart: "marketplace_1800_1900", imgId: "img-marketplace_1800_1900" },
+      { panel: "panel-review-price", chart: "accepted_review_price_binned", imgId: "img-accepted_review_price_binned" },
       { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
       { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
       { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },
@@ -965,7 +981,7 @@
       const have = new Set(data.charts || []);
       for (const { panel, chart, canvasId, imgId } of STATIC_CHART_PANELS) {
         const img = document.getElementById(imgId);
-        const canvas = document.getElementById(canvasId);
+        const canvas = canvasId ? document.getElementById(canvasId) : null;
         const present = have.has(chart);
         if (canvas) canvas.style.display = "none";
         if (img) {
@@ -986,7 +1002,7 @@
     function hideStaticImages() {
       for (const { canvasId, imgId } of STATIC_CHART_PANELS) {
         const img = document.getElementById(imgId);
-        const canvas = document.getElementById(canvasId);
+        const canvas = canvasId ? document.getElementById(canvasId) : null;
         if (img) { img.style.display = "none"; img.removeAttribute("src"); }
         if (canvas) canvas.style.display = "";
       }

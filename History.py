@@ -115,6 +115,59 @@ def _mean_author_price_multiplier(env: "Environment") -> float:
     return sum(values) / len(values) if values else 1.0
 
 
+def _review_benefit_components(env: "Environment") -> dict[str, float]:
+    """Good/bad-faith surplus split of every completed review, in AC units.
+
+    For each reviewed paper, a review is a trade: the reviewer takes a ``share``
+    of the *whole* paper (past and future AC), while the author gains an accrual
+    bump (``epsilon``) on the paper's *future* accrual only. Relative to the
+    no-review counterfactual:
+
+        reviewer_benefit = share * final_ac
+        value_created    = (final_ac - A0) * epsilon / (1 + epsilon)
+        author_net       = value_created - reviewer_benefit   # < 0 => exploited
+
+    where ``A0`` (``current_ac_at_review``) is the paper's AC at the instant the
+    review finished, so ``final_ac - A0`` is exactly the post-review accrual (all
+    at the bumped rate) and ``epsilon / (1 + epsilon)`` is the fraction of it the
+    bump created. Sums are split by the review's good/bad-faith classification.
+    """
+    totals = {
+        "reviewer_benefit_good": 0.0,
+        "reviewer_benefit_bad": 0.0,
+        "author_net_good": 0.0,
+        "author_net_bad": 0.0,
+        "value_created_good": 0.0,
+        "value_created_bad": 0.0,
+    }
+    for paper in env.papers:
+        records = getattr(paper, "review_records", None)
+        if not records:
+            continue
+        final_ac = float(getattr(paper, "current_ac", 0.0))
+        for record in records:
+            share = float(record.get("share", 0.0))
+            if share <= 0.0:
+                # Sub-threshold reviews transfer no share and create no value.
+                continue
+            epsilon = float(record.get("epsilon", 0.0))
+            a0 = float(record.get("current_ac_at_review", final_ac))
+            reviewer_benefit = share * final_ac
+            value_created = (
+                max(0.0, final_ac - a0) * epsilon / (1.0 + epsilon)
+                if epsilon > 0.0
+                else 0.0
+            )
+            author_net = value_created - reviewer_benefit
+            suffix = (
+                "good" if record.get("review_kind") == GOOD_FAITH_REVIEW else "bad"
+            )
+            totals[f"reviewer_benefit_{suffix}"] += reviewer_benefit
+            totals[f"value_created_{suffix}"] += value_created
+            totals[f"author_net_{suffix}"] += author_net
+    return totals
+
+
 def default_metrics() -> dict[str, MetricFn]:
     """Scalar, per-timestep metrics recorded by default (aggregates + review behavior)."""
     return {
@@ -172,6 +225,26 @@ def default_metrics() -> dict[str, MetricFn]:
             getattr(env, "fair_market_price", 0.0)
         ),
         "mean_author_price_multiplier": _mean_author_price_multiplier,
+        # Reviewer-vs-author benefit split (AC), by good/bad faith. See
+        # ``_review_benefit_components`` for the surplus decomposition.
+        "reviewer_benefit_good": (
+            lambda env: _review_benefit_components(env)["reviewer_benefit_good"]
+        ),
+        "reviewer_benefit_bad": (
+            lambda env: _review_benefit_components(env)["reviewer_benefit_bad"]
+        ),
+        "author_net_good": (
+            lambda env: _review_benefit_components(env)["author_net_good"]
+        ),
+        "author_net_bad": (
+            lambda env: _review_benefit_components(env)["author_net_bad"]
+        ),
+        "value_created_good": (
+            lambda env: _review_benefit_components(env)["value_created_good"]
+        ),
+        "value_created_bad": (
+            lambda env: _review_benefit_components(env)["value_created_bad"]
+        ),
     }
 
 
@@ -693,8 +766,13 @@ class History:
             "days": list(self.timesteps),
             "scalars": {k: list(v) for k, v in self.scalars.items()},
             "agent_capital": {k: list(v) for k, v in self.agent_capital.items()},
+            "agent_accrual_rate": {k: list(v) for k, v in self.agent_accrual_rate.items()},
             "agent_groups": dict(self.agent_groups),
             "agent_talent": dict(self.agent_talent),
+            "accepted_review_claims": [
+                {"timestep": d, "day": d, "price": p}
+                for (d, p) in self.accepted_review_claims
+            ],
             "agent_group_summary": self.agent_group_summary(),
             "agent_outcome_summary": self.agent_outcome_summary(),
             "action_counts": dict(self.action_counts),
