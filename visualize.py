@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import Paper as paper_mod
@@ -995,6 +996,192 @@ def plot_accepted_review_price_binned(
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_accepted_review_price_binned(ax, history)
     ax.set_title("Mean accepted peer review price (10-timestep bins)")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+REVIEW_FAITH_SHARE_PRICE_BINS = 8
+
+
+def _paper_claim_share_prices(history: "History") -> dict[str, float]:
+    """Map each reviewed paper to its agreed reviewer share at claim time."""
+    claims_by_day: dict[int, list[float]] = defaultdict(list)
+    for day, price in getattr(history, "accepted_review_claims", None) or []:
+        claims_by_day[int(day)].append(float(price))
+
+    started_by_day: dict[int, list[str]] = defaultdict(list)
+    for day, _, kind, paper in history.actions:
+        if kind == "review_started" and paper:
+            started_by_day[int(day)].append(str(paper))
+
+    paper_prices: dict[str, float] = {}
+    for day in set(claims_by_day) | set(started_by_day):
+        for paper, price in zip(started_by_day[day], claims_by_day[day]):
+            paper_prices[paper] = price
+    return paper_prices
+
+
+def _review_faith_share_price_points(
+    history: "History",
+) -> list[tuple[float, str]]:
+    """Return (share price, review_kind) for completed reviews with known price."""
+    paper_prices = _paper_claim_share_prices(history)
+    points: list[tuple[float, str]] = []
+    for _, _, paper_label, _, review_kind in history.completed_reviews:
+        if not paper_label or review_kind not in (GOOD_FAITH_REVIEW, BAD_FAITH_REVIEW):
+            continue
+        price = paper_prices.get(paper_label)
+        if price is not None and price > 0.0:
+            points.append((price, review_kind))
+    return points
+
+
+def _share_price_bin_edges(
+    prices: list[float], *, n_bins: int
+) -> tuple[list[float], int]:
+    """Return bin edges and the effective bin count for share-price histograms."""
+    p_min, p_max = min(prices), max(prices)
+    if math.isclose(p_min, p_max):
+        return [p_min - 0.0005, p_max + 0.0005], 1
+    width = (p_max - p_min) / n_bins
+    return [p_min + i * width for i in range(n_bins + 1)], n_bins
+
+
+def _share_price_bin_index(price: float, edges: list[float], n_bins: int) -> int:
+    if price >= edges[-1]:
+        return n_bins - 1
+    span = edges[-1] - edges[0]
+    if span <= 0.0:
+        return 0
+    return min(n_bins - 1, max(0, int((price - edges[0]) / span * n_bins)))
+
+
+def _draw_review_faith_by_share_price(
+    ax_pct,
+    ax_counts,
+    history: "History",
+    *,
+    n_bins: int = REVIEW_FAITH_SHARE_PRICE_BINS,
+) -> bool:
+    """Good- vs bad-faith share by agreed review price bin."""
+    points = _review_faith_share_price_points(history)
+    if not points:
+        for ax in (ax_pct, ax_counts):
+            ax.text(
+                0.5,
+                0.5,
+                "No completed reviews with share prices",
+                ha="center",
+                va="center",
+            )
+            ax.set_axis_off()
+        return False
+
+    good_color, bad_color = "#16a34a", "#f87171"
+    prices = [p for p, _ in points]
+    edges, n_bins = _share_price_bin_edges(prices, n_bins=n_bins)
+    good_counts = [0] * n_bins
+    bad_counts = [0] * n_bins
+    for price, kind in points:
+        idx = _share_price_bin_index(price, edges, n_bins)
+        if kind == GOOD_FAITH_REVIEW:
+            good_counts[idx] += 1
+        else:
+            bad_counts[idx] += 1
+
+    centers = [(edges[i] + edges[i + 1]) / 2 for i in range(n_bins)]
+    width = (edges[-1] - edges[0]) / max(n_bins, 1) * 0.85
+    totals = [g + b for g, b in zip(good_counts, bad_counts)]
+    good_pct = [100.0 * g / t if t else 0.0 for g, t in zip(good_counts, totals)]
+    bad_pct = [100.0 * b / t if t else 0.0 for b, t in zip(bad_counts, totals)]
+
+    ax_pct.bar(
+        centers,
+        good_pct,
+        width=width,
+        color=good_color,
+        label="good faith",
+        edgecolor="#14532d",
+    )
+    ax_pct.bar(
+        centers,
+        bad_pct,
+        width=width,
+        bottom=good_pct,
+        color=bad_color,
+        label="bad faith",
+        edgecolor="#991b1b",
+    )
+    ax_pct.set_ylim(0, 100)
+    ax_pct.set_xlabel("Agreed review share (bin center)")
+    ax_pct.set_ylabel("Share of completed reviews (%)")
+    ax_pct.set_title("Good vs bad faith by share price")
+    ax_pct.legend(fontsize=8, loc="upper right")
+
+    for center, good, bad, total in zip(centers, good_counts, bad_counts, totals):
+        if total <= 0:
+            continue
+        ax_pct.text(
+            center,
+            102,
+            f"n={total}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            color="#8b98a5",
+        )
+
+    ax_counts.bar(
+        centers,
+        good_counts,
+        width=width,
+        color=good_color,
+        label="good faith",
+        edgecolor="#14532d",
+    )
+    ax_counts.bar(
+        centers,
+        bad_counts,
+        width=width,
+        bottom=good_counts,
+        color=bad_color,
+        label="bad faith",
+        edgecolor="#991b1b",
+    )
+    ax_counts.set_xlabel("Agreed review share (bin center)")
+    ax_counts.set_ylabel("Completed reviews")
+    ax_counts.set_title("Review counts by share-price bin")
+    ax_counts.legend(fontsize=8, loc="upper left")
+
+    total_good = sum(good_counts)
+    total_bad = sum(bad_counts)
+    total_reviews = total_good + total_bad
+    if total_reviews:
+        ax_counts.text(
+            0.98,
+            0.97,
+            f"overall: {100.0 * total_good / total_reviews:.1f}% good, "
+            f"{100.0 * total_bad / total_reviews:.1f}% bad (n={total_reviews})",
+            transform=ax_counts.transAxes,
+            ha="right",
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
+        )
+    return True
+
+
+def plot_review_faith_by_share_price(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Percentage of good- vs bad-faith reviews at different agreed share prices."""
+    fig, (ax_pct, ax_counts) = plt.subplots(1, 2, figsize=(13, 5.5))
+    _draw_review_faith_by_share_price(ax_pct, ax_counts, history)
+    fig.suptitle(
+        "Review faith vs agreed share price",
+        fontweight="bold",
+        y=1.02,
+    )
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -2487,6 +2674,10 @@ def _has_accepted_review_price(history: "History") -> bool:
     return bool(getattr(history, "accepted_review_claims", None))
 
 
+def _has_review_faith_by_share_price(history: "History") -> bool:
+    return bool(_review_faith_share_price_points(history))
+
+
 def _has_market_pricing_scalars(history: "History") -> bool:
     return bool(history.scalars.get("fair_market_price"))
 
@@ -2532,6 +2723,7 @@ _GALLERY_CHARTS = (
     ("review_benefit", _has_review_benefit, plot_review_benefit),
     ("review_surplus_aggregate", _has_review_benefit, plot_review_surplus_aggregate),
     ("accepted_review_price_binned", _has_accepted_review_price, plot_accepted_review_price_binned),
+    ("review_faith_by_share_price", _has_review_faith_by_share_price, plot_review_faith_by_share_price),
     ("market_pricing_dynamics", _has_market_pricing_scalars, plot_market_pricing_dynamics),
     ("review_reward_curve", lambda h: True, plot_review_reward_curve),
 )
@@ -2628,6 +2820,11 @@ def plot_all(
         "accepted_review_price_binned": plot_accepted_review_price_binned(
             history,
             os.path.join(outdir, "accepted_review_price_binned.png"),
+            show=show,
+        ),
+        "review_faith_by_share_price": plot_review_faith_by_share_price(
+            history,
+            os.path.join(outdir, "review_faith_by_share_price.png"),
             show=show,
         ),
         "market_pricing_dynamics": plot_market_pricing_dynamics(

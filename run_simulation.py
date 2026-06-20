@@ -15,6 +15,8 @@ from config import (
     TRAIN_DQN,
     default_discrete_policy_path,
     default_dqn_policy_path,
+    default_low_talent_discrete_policy_path,
+    default_low_talent_policy_path,
     default_policy_path,
 )
 import config as config_module
@@ -23,8 +25,12 @@ from HeuristicAgent import HeuristicAgent
 from History import History
 from Paper import Paper
 from DQNAgent import DQNAgent, make_dqn_backend
-from DiscreteQLearningAgent import DiscreteQLearningAgent, make_discrete_backend
-from QLearningAgent import QLearningAgent, make_backend
+from DiscreteQLearningAgent import (
+    DiscreteQLearningAgent,
+    LowTalentDiscreteQLearningAgent,
+    make_discrete_backend,
+)
+from QLearningAgent import QLearningAgent, LowTalentQLearningAgent, make_backend
 from RandomAgent import ProbabilisticDiscreteAgent, RandomAgent
 
 # Defaults come from config.py; CLI flags override them at runtime.
@@ -35,6 +41,7 @@ NUM_RL_AGENTS = SIM.num_rl_agents
 NUM_DQN_AGENTS = SIM.num_dqn_agents
 NUM_RANDOM_AGENTS = SIM.num_random_agents
 NUM_PROBABILISTIC_AGENTS = SIM.num_probabilistic_agents
+NUM_LOW_TALENT_RL_AGENTS = SIM.num_low_talent_rl_agents
 OUTPUT_DIR = SIM.output_dir
 
 
@@ -351,6 +358,7 @@ CHART_DESCRIPTIONS = {
     "system_aggregates": "Total/mean/max capital with the inequality (Gini) index",
     "review_behavior": "Cumulative good- vs bad-faith reviews and paper count over time",
     "accepted_review_price_binned": "Mean agreed review share per 10-timestep bin (one dot per bin)",
+    "review_faith_by_share_price": "Good vs bad faith review percentage and counts by agreed share price",
     "market_pricing_dynamics": "Review share pricing over timesteps: fair-market baseline, scarcity, pressure, and claim prices",
     "marketplace_activity": "Papers on market, listings/claims, and cumulative reviews completed",
     "marketplace_0_100": "Marketplace supply zoom: timesteps 0–100",
@@ -549,6 +557,110 @@ def build_rl_agents(
     return agents
 
 
+def build_low_talent_rl_agents(
+    count: int,
+    *,
+    backend_kind: str,
+    policy_path: str | None,
+    freeze: bool,
+    low_talent_value: float = SIM.low_talent_value,
+) -> list[LowTalentQLearningAgent]:
+    """Create low-talent RL agents with a fixed intrinsic talent and separate policy."""
+    if count <= 0:
+        return []
+
+    loaded = bool(policy_path) and os.path.exists(policy_path)
+    if policy_path and not loaded:
+        print(f"Low-talent RL: policy {policy_path} not found; starting from scratch.")
+
+    agents: list[LowTalentQLearningAgent] = []
+    for i in range(count):
+        backend = make_backend(backend_kind)
+        if loaded:
+            try:
+                backend.load(policy_path)
+            except (ValueError, EOFError, OSError, KeyError):
+                if i == 0:
+                    print(
+                        f"Low-talent RL: policy {policy_path} is incompatible; "
+                        "using scratch."
+                    )
+                loaded = False
+                backend = make_backend(backend_kind)
+        agents.append(
+            LowTalentQLearningAgent(
+                intrinsic_talent=low_talent_value,
+                forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
+                name=f"Low-talent RL Agent {i + 1}",
+                backend=backend,
+                epsilon=0.0 if freeze else SIM.rl_epsilon,
+                learning=not freeze,
+            )
+        )
+
+    source = (
+        f"loaded baseline {policy_path}" if loaded else "starting from scratch"
+    )
+    mode = "frozen (greedy)" if freeze else "learning online"
+    print(
+        f"Low-talent RL: {count} independent {backend_kind} agents "
+        f"(talent={low_talent_value:g}), {source}, {mode}."
+    )
+    return agents
+
+
+def build_low_talent_discrete_rl_agents(
+    count: int,
+    *,
+    backend_kind: str,
+    policy_path: str | None,
+    freeze: bool,
+    low_talent_value: float = SIM.low_talent_value,
+) -> list[LowTalentDiscreteQLearningAgent]:
+    """Create low-talent discrete RL agents with fixed talent and separate policy."""
+    if count <= 0:
+        return []
+
+    loaded = bool(policy_path) and os.path.exists(policy_path)
+    if policy_path and not loaded:
+        print(f"Low-talent discrete RL: policy {policy_path} not found; starting from scratch.")
+
+    agents: list[LowTalentDiscreteQLearningAgent] = []
+    for i in range(count):
+        backend = make_discrete_backend(backend_kind)
+        if loaded:
+            try:
+                backend.load(policy_path)
+            except (ValueError, EOFError, OSError, KeyError):
+                if i == 0:
+                    print(
+                        f"Low-talent discrete RL: policy {policy_path} is incompatible; "
+                        "using scratch."
+                    )
+                loaded = False
+                backend = make_discrete_backend(backend_kind)
+        agents.append(
+            LowTalentDiscreteQLearningAgent(
+                intrinsic_talent=low_talent_value,
+                forecast_horizon_timesteps=SIM.forecast_horizon_timesteps,
+                name=f"Low-talent RL Agent {i + 1}",
+                backend=backend,
+                epsilon=0.0 if freeze else SIM.rl_epsilon,
+                learning=not freeze,
+            )
+        )
+
+    source = (
+        f"loaded baseline {policy_path}" if loaded else "starting from scratch"
+    )
+    mode = "frozen (greedy)" if freeze else "learning online"
+    print(
+        f"Low-talent discrete RL: {count} independent {backend_kind} agents "
+        f"(talent={low_talent_value:g}), {source}, {mode}."
+    )
+    return agents
+
+
 def build_dqn_agents(
     count: int,
     *,
@@ -653,9 +765,11 @@ def build_simulation(
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
+    low_talent_rl_agents: int = NUM_LOW_TALENT_RL_AGENTS,
     rl_backend: str = SIM.rl_backend,
     rl_policy_path: str | None = None,
     rl_freeze: bool = False,
+    low_talent_rl_policy_path: str | None = None,
     dqn_policy_path: str | None = None,
     dqn_freeze: bool = False,
     review_paradigm: str = SIM.review_paradigm,
@@ -667,6 +781,7 @@ def build_simulation(
     paper_effort_max: float = SIM.paper_effort_max,
     talent_min: float = SIM.talent_min,
     talent_max: float = SIM.talent_max,
+    low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
     use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
@@ -729,6 +844,26 @@ def build_simulation(
                 freeze=rl_freeze,
                 talent_min=talent_min,
                 talent_max=talent_max,
+            )
+        )
+    if review_paradigm == "discrete":
+        agents.extend(
+            build_low_talent_discrete_rl_agents(
+                low_talent_rl_agents,
+                backend_kind=rl_backend,
+                policy_path=low_talent_rl_policy_path,
+                freeze=rl_freeze,
+                low_talent_value=low_talent_value,
+            )
+        )
+    else:
+        agents.extend(
+            build_low_talent_rl_agents(
+                low_talent_rl_agents,
+                backend_kind=rl_backend,
+                policy_path=low_talent_rl_policy_path,
+                freeze=rl_freeze,
+                low_talent_value=low_talent_value,
             )
         )
     agents.extend(
@@ -838,6 +973,11 @@ def parse_args(argv=None):
         help="Number of discrete-only probability agents.",
     )
     parser.add_argument(
+        "--low-talent-rl-agents", dest="low_talent_rl_agents", type=int,
+        default=NUM_LOW_TALENT_RL_AGENTS, metavar="N",
+        help="Number of low-talent RL agents (separate trained policy).",
+    )
+    parser.add_argument(
         "--review-paradigm", dest="review_paradigm",
         choices=["continuous", "discrete"], default=SIM.review_paradigm,
         help="Review action paradigm for the whole simulation run.",
@@ -883,6 +1023,11 @@ def parse_args(argv=None):
         "--talent-max", dest="talent_max",
         type=float, default=SIM.talent_max, metavar="X",
         help="Maximum intrinsic talent assigned within each agent type.",
+    )
+    parser.add_argument(
+        "--low-talent-value", dest="low_talent_value",
+        type=float, default=SIM.low_talent_value, metavar="X",
+        help="Fixed intrinsic talent for low-talent RL agents.",
     )
     parser.add_argument(
         "--pricing-policy", dest="pricing_policy",
@@ -980,6 +1125,16 @@ def parse_args(argv=None):
         help="Run RL agents greedily with no online learning.",
     )
     parser.add_argument(
+        "--low-talent-rl-from-scratch", dest="low_talent_rl_from_scratch",
+        action="store_true",
+        help="Start low-talent RL agents from a blank policy.",
+    )
+    parser.add_argument(
+        "--low-talent-rl-policy", dest="low_talent_rl_policy", metavar="PATH",
+        default=None,
+        help="Explicit low-talent RL policy path (overrides default baseline).",
+    )
+    parser.add_argument(
         "--dqn-from-scratch", dest="dqn_from_scratch", action="store_true",
         help="Start DQN agents from a blank network instead of the saved baseline.",
     )
@@ -1003,6 +1158,7 @@ def build_run_config(
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
+    low_talent_rl_agents: int = NUM_LOW_TALENT_RL_AGENTS,
     rl_backend: str = SIM.rl_backend,
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
@@ -1013,6 +1169,7 @@ def build_run_config(
     paper_effort_max: float = SIM.paper_effort_max,
     talent_min: float = SIM.talent_min,
     talent_max: float = SIM.talent_max,
+    low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
     use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
@@ -1044,6 +1201,7 @@ def build_run_config(
     config["num_dqn_agents"] = dqn_agents
     config["num_random_agents"] = random_agents
     config["num_probabilistic_agents"] = probabilistic_agents
+    config["num_low_talent_rl_agents"] = low_talent_rl_agents
     config["rl_backend"] = rl_backend
     config["review_paradigm"] = review_paradigm
     config["continuous_publishing"] = continuous_publishing
@@ -1054,6 +1212,7 @@ def build_run_config(
     config["paper_effort_max"] = paper_effort_max
     config["talent_min"] = talent_min
     config["talent_max"] = talent_max
+    config["low_talent_value"] = low_talent_value
     config["pricing_policy"] = pricing_policy
     config["use_adaptive_author_pricing"] = use_adaptive_author_pricing
     config["use_competition_adjusted_forecast"] = use_competition_adjusted_forecast
@@ -1082,6 +1241,8 @@ def build_run_config(
     config["train_num_heuristic"] = TRAIN.num_heuristic
     config["train_eps_start"] = TRAIN.eps_start
     config["train_eps_end"] = TRAIN.eps_end
+    config["train_low_talent"] = TRAIN.low_talent
+    config["train_low_talent_value"] = TRAIN.low_talent_value
     config["train_dqn_episodes"] = TRAIN_DQN.episodes
     config["train_dqn_timesteps"] = TRAIN_DQN.timesteps
     config["train_dqn_num_dqn"] = TRAIN_DQN.num_dqn
@@ -1102,6 +1263,7 @@ def archive_run(
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
+    low_talent_rl_agents: int = NUM_LOW_TALENT_RL_AGENTS,
     rl_backend: str = SIM.rl_backend,
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
@@ -1112,6 +1274,7 @@ def archive_run(
     paper_effort_max: float = SIM.paper_effort_max,
     talent_min: float = SIM.talent_min,
     talent_max: float = SIM.talent_max,
+    low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
     use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
@@ -1136,6 +1299,7 @@ def archive_run(
             dqn_agents=dqn_agents,
             random_agents=random_agents,
             probabilistic_agents=probabilistic_agents,
+            low_talent_rl_agents=low_talent_rl_agents,
             rl_backend=rl_backend,
             review_paradigm=review_paradigm,
             continuous_publishing=continuous_publishing,
@@ -1146,6 +1310,7 @@ def archive_run(
             paper_effort_max=paper_effort_max,
             talent_min=talent_min,
             talent_max=talent_max,
+            low_talent_value=low_talent_value,
             pricing_policy=pricing_policy,
             use_adaptive_author_pricing=use_adaptive_author_pricing,
             use_competition_adjusted_forecast=use_competition_adjusted_forecast,
@@ -1175,6 +1340,7 @@ def prompt_and_archive(
     dqn_agents: int = NUM_DQN_AGENTS,
     random_agents: int = NUM_RANDOM_AGENTS,
     probabilistic_agents: int = NUM_PROBABILISTIC_AGENTS,
+    low_talent_rl_agents: int = NUM_LOW_TALENT_RL_AGENTS,
     rl_backend: str = SIM.rl_backend,
     review_paradigm: str = SIM.review_paradigm,
     continuous_publishing: str = SIM.continuous_publishing,
@@ -1185,6 +1351,7 @@ def prompt_and_archive(
     paper_effort_max: float = SIM.paper_effort_max,
     talent_min: float = SIM.talent_min,
     talent_max: float = SIM.talent_max,
+    low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
     use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
@@ -1222,6 +1389,7 @@ def prompt_and_archive(
         dqn_agents=dqn_agents,
         random_agents=random_agents,
         probabilistic_agents=probabilistic_agents,
+        low_talent_rl_agents=low_talent_rl_agents,
         rl_backend=rl_backend,
         review_paradigm=review_paradigm,
         continuous_publishing=continuous_publishing,
@@ -1232,6 +1400,7 @@ def prompt_and_archive(
         paper_effort_max=paper_effort_max,
         talent_min=talent_min,
         talent_max=talent_max,
+        low_talent_value=low_talent_value,
         pricing_policy=pricing_policy,
         use_adaptive_author_pricing=use_adaptive_author_pricing,
         use_competition_adjusted_forecast=use_competition_adjusted_forecast,
@@ -1246,7 +1415,7 @@ def prompt_and_archive(
     )
 
 
-def _policy_paths(args) -> tuple[str | None, str | None]:
+def _policy_paths(args) -> tuple[str | None, str | None, str | None]:
     rl_policy_path = args.rl_policy
     if rl_policy_path is None and not args.rl_from_scratch and SIM.rl_autoload_policy:
         if args.review_paradigm == "discrete":
@@ -1254,16 +1423,30 @@ def _policy_paths(args) -> tuple[str | None, str | None]:
         else:
             rl_policy_path = default_policy_path(args.rl_backend)
 
+    low_talent_rl_policy_path = args.low_talent_rl_policy
+    if (
+        low_talent_rl_policy_path is None
+        and not args.low_talent_rl_from_scratch
+        and args.low_talent_rl_agents > 0
+        and SIM.rl_low_talent_autoload_policy
+    ):
+        if args.review_paradigm == "discrete":
+            low_talent_rl_policy_path = default_low_talent_discrete_policy_path(
+                args.rl_backend
+            )
+        else:
+            low_talent_rl_policy_path = default_low_talent_policy_path(args.rl_backend)
+
     dqn_policy_path = args.dqn_policy
     if (dqn_policy_path is None and not args.dqn_from_scratch
             and SIM.dqn_autoload_policy):
         dqn_policy_path = default_dqn_policy_path()
-    return rl_policy_path, dqn_policy_path
+    return rl_policy_path, low_talent_rl_policy_path, dqn_policy_path
 
 
 def _run_once(args, *, seed: int, title: str | None = None) -> dict:
     _apply_review_bump_config(args)
-    rl_policy_path, dqn_policy_path = _policy_paths(args)
+    rl_policy_path, low_talent_rl_policy_path, dqn_policy_path = _policy_paths(args)
 
     history = History()
     env = build_simulation(
@@ -1274,9 +1457,11 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
         dqn_agents=args.dqn_agents,
         random_agents=args.random_agents,
         probabilistic_agents=args.probabilistic_agents,
+        low_talent_rl_agents=args.low_talent_rl_agents,
         rl_backend=args.rl_backend,
         rl_policy_path=rl_policy_path,
         rl_freeze=args.rl_freeze,
+        low_talent_rl_policy_path=low_talent_rl_policy_path,
         dqn_policy_path=dqn_policy_path,
         dqn_freeze=args.dqn_freeze,
         review_paradigm=args.review_paradigm,
@@ -1288,6 +1473,7 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
         paper_effort_max=args.paper_effort_max,
         talent_min=args.talent_min,
         talent_max=args.talent_max,
+        low_talent_value=args.low_talent_value,
         pricing_policy=args.pricing_policy,
         use_adaptive_author_pricing=args.use_adaptive_author_pricing,
         use_competition_adjusted_forecast=args.use_competition_adjusted_forecast,
@@ -1326,6 +1512,7 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             dqn_agents=args.dqn_agents,
             random_agents=args.random_agents,
             probabilistic_agents=args.probabilistic_agents,
+            low_talent_rl_agents=args.low_talent_rl_agents,
             rl_backend=args.rl_backend,
             review_paradigm=args.review_paradigm,
             continuous_publishing=args.continuous_publishing,
@@ -1336,6 +1523,7 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             paper_effort_max=args.paper_effort_max,
             talent_min=args.talent_min,
             talent_max=args.talent_max,
+            low_talent_value=args.low_talent_value,
             pricing_policy=args.pricing_policy,
             use_adaptive_author_pricing=args.use_adaptive_author_pricing,
             use_competition_adjusted_forecast=args.use_competition_adjusted_forecast,
@@ -1358,6 +1546,7 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             dqn_agents=args.dqn_agents,
             random_agents=args.random_agents,
             probabilistic_agents=args.probabilistic_agents,
+            low_talent_rl_agents=args.low_talent_rl_agents,
             rl_backend=args.rl_backend,
             review_paradigm=args.review_paradigm,
             continuous_publishing=args.continuous_publishing,
@@ -1368,6 +1557,7 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             paper_effort_max=args.paper_effort_max,
             talent_min=args.talent_min,
             talent_max=args.talent_max,
+            low_talent_value=args.low_talent_value,
             pricing_policy=args.pricing_policy,
             use_adaptive_author_pricing=args.use_adaptive_author_pricing,
             use_competition_adjusted_forecast=args.use_competition_adjusted_forecast,

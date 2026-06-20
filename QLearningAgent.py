@@ -399,3 +399,7 @@ class QLearningAgent(HeuristicAgent):
             dtype=np.float64,
         )
         return features
+
+
+class LowTalentQLearningAgent(QLearningAgent):
+    """RL agent trained/evaluated at low intrinsic talent; grouped separately in History."""

@@ -27,10 +27,11 @@ class SimConfig:
 
     # --- World -----------------------------------------------------------
     num_heuristic_agents: int = 10
-    num_rl_agents: int = 100
+    num_rl_agents: int = 50
     num_dqn_agents: int = 0
     num_random_agents: int = 10
     num_probabilistic_agents: int = 0
+    num_low_talent_rl_agents: int = 50
     num_timesteps: int = 2000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
@@ -146,8 +147,10 @@ class SimConfig:
     rl_reward_rank_weight: float = 100.0   # weight on Δ AC percentile rank (0..1)
     rl_reward_accrual_weight: float = 0.5  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
+    rl_low_talent_autoload_policy: bool = True  # auto-load low-talent RL policy
     talent_min: float = 0.6         # default talent spread; CLI can widen/narrow it
     talent_max: float = 1.4
+    low_talent_value: float = 0.3   # fixed intrinsic talent for low-talent RL agents
     policies_dir: str = "policies"
 
     # --- Export / gallery limits -----------------------------------------
@@ -179,6 +182,8 @@ class TrainConfig:
     num_heuristic: int = 0
     eps_start: float = 1.0
     eps_end: float = 0.05
+    low_talent: bool = True
+    low_talent_value: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -203,6 +208,8 @@ class TrainDiscreteConfig:
     num_heuristic: int = 0
     eps_start: float = 1.0
     eps_end: float = 0.05
+    low_talent: bool = False
+    low_talent_value: float = 0.3
 
 
 SIM = SimConfig()
@@ -229,3 +236,14 @@ def default_dqn_policy_path() -> str:
 def default_discrete_policy_path(backend_kind: str) -> str:
     """Canonical path for a discrete 3-action Q policy (``train_discrete_rl.py``)."""
     return os.path.join(SIM.policies_dir, f"policy_{backend_kind}_discrete.pkl")
+
+
+def default_low_talent_policy_path(backend_kind: str) -> str:
+    """Canonical path for a low-talent continuous RL policy."""
+    ext = ".pkl" if backend_kind == "tabular" else ".npy"
+    return os.path.join(SIM.policies_dir, f"policy_{backend_kind}_low_talent{ext}")
+
+
+def default_low_talent_discrete_policy_path(backend_kind: str) -> str:
+    """Canonical path for a low-talent discrete RL policy."""
+    return os.path.join(SIM.policies_dir, f"policy_{backend_kind}_discrete_low_talent.pkl")

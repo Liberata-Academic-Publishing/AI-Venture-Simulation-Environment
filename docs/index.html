@@ -175,6 +175,7 @@
       <div class="panel" id="panel-marketplace-600-700"><h2>Marketplace supply (timesteps 600–700)</h2><img class="chart-img" id="img-marketplace_600_700" alt="Marketplace supply timesteps 600-700"></div>
       <div class="panel" id="panel-marketplace-1800-1900"><h2>Marketplace supply (timesteps 1800–1900)</h2><img class="chart-img" id="img-marketplace_1800_1900" alt="Marketplace supply timesteps 1800-1900"></div>
       <div class="panel" id="panel-review-price"><h2>Accepted review share (10-timestep bins)</h2><img class="chart-img" id="img-accepted_review_price_binned" alt="Accepted review share binned"></div>
+      <div class="panel" id="panel-faith-share-price"><h2>Review faith vs agreed share price</h2><img class="chart-img" id="img-review_faith_by_share_price" alt="Good vs bad faith review percentage by share price"></div>
       <div class="panel" id="panel-market-pricing"><h2>Dynamic review pricing during the run</h2><img class="chart-img" id="img-market_pricing_dynamics" alt="Dynamic review pricing during the run"></div>
       <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
       <div class="panel" id="panel-reputation-vs-ac"><h2>Reviewer reputation vs final academic capital</h2><img class="chart-img" id="img-reputation_vs_ac" alt="Reviewer reputation vs final academic capital"></div>
@@ -241,7 +242,10 @@
     // Friendly labels for agent classes (from agent_groups in History).
     const KIND_LABELS = {
       HeuristicAgent: "Heuristic", QLearningAgent: "RL",
-      DiscreteQLearningAgent: "Discrete RL", DQNAgent: "DQN",
+      LowTalentQLearningAgent: "Low-talent RL",
+      DiscreteQLearningAgent: "Discrete RL",
+      LowTalentDiscreteQLearningAgent: "Low-talent discrete RL",
+      DQNAgent: "DQN",
       RandomAgent: "Random", ProbabilisticDiscreteAgent: "Probabilistic",
     };
     const kindLabel = (cls) =>
@@ -296,6 +300,7 @@
       ["World", [
         ["num_heuristic_agents", "Heuristic agents"],
         ["num_rl_agents", "RL agents"],
+        ["num_low_talent_rl_agents", "Low-talent RL agents"],
         ["num_random_agents", "Random agents"],
         ["num_probabilistic_agents", "Probabilistic agents"],
         ["num_days", "Timesteps"],
@@ -374,6 +379,8 @@
         ["rl_gamma", "Gamma"],
         ["talent_min", "Talent min"],
         ["talent_max", "Talent max"],
+        ["low_talent_value", "Low-talent value"],
+        ["rl_low_talent_autoload_policy", "Auto-load low-talent RL policy"],
         ["policies_dir", "Policies dir"],
       ]],
       ["Export", [
@@ -386,6 +393,8 @@
         ["train_num_heuristic", "Heuristic agents (training)"],
         ["train_eps_start", "Epsilon start"],
         ["train_eps_end", "Epsilon end"],
+        ["train_low_talent", "Low-talent training"],
+        ["train_low_talent_value", "Low-talent training value"],
       ]],
     ];
     const TRAINING_CONFIG_GROUPS = [
@@ -400,6 +409,8 @@
         ["gamma", "Gamma"],
         ["eps_start", "Epsilon start"],
         ["eps_end", "Epsilon end"],
+        ["low_talent", "Low-talent training"],
+        ["low_talent_value", "Low-talent value"],
         ["horizon", "Forecast horizon"],
         ["seed", "Seed"],
       ]],
@@ -980,6 +991,7 @@
       { panel: "panel-marketplace-600-700", chart: "marketplace_600_700", imgId: "img-marketplace_600_700" },
       { panel: "panel-marketplace-1800-1900", chart: "marketplace_1800_1900", imgId: "img-marketplace_1800_1900" },
       { panel: "panel-review-price", chart: "accepted_review_price_binned", imgId: "img-accepted_review_price_binned" },
+      { panel: "panel-faith-share-price", chart: "review_faith_by_share_price", imgId: "img-review_faith_by_share_price" },
       { panel: "panel-market-pricing", chart: "market_pricing_dynamics", imgId: "img-market_pricing_dynamics" },
       { panel: "panel-ac-source", chart: "ac_source", canvasId: null, imgId: "img-ac_source" },
       { panel: "panel-review-benefit", chart: "review_benefit", imgId: "img-review_benefit" },
@@ -1234,7 +1246,7 @@
           : ((stats.agent_count || 0)
               ? (stats.bad_faith_reviews || 0) / stats.agent_count
               : 0);
-        return `<tr><td>${group}</td>` +
+        return `<tr><td>${kindLabel(group)}</td>` +
           `<td>${stats.agent_count || 0}</td>` +
           `<td>${fmt(stats.mean_final_capital)}</td>` +
           `<td>${stats.papers_authored || 0}</td>` +
@@ -1251,7 +1263,7 @@
       groupChart = new Chart(document.getElementById("groupChart"), {
         type: "bar",
         data: {
-          labels: entries.map(([group]) => group),
+          labels: entries.map(([group]) => kindLabel(group)),
           datasets: [{
             label: "mean final AC",
             data: entries.map(([, stats]) => stats.mean_final_capital || 0),
@@ -1663,6 +1675,7 @@
         if (c.backend) parts.push(c.backend);
         if (run.num_episodes != null) parts.push(`${run.num_episodes} episodes`);
         if (c.num_rl != null) parts.push(`${c.num_rl} RL`);
+        if (c.low_talent) parts.push(`low-talent=${c.low_talent_value ?? "?"}`);
         return parts.length ? `${run.title} (${parts.join(", ")})` : run.title;
       }
       const c = run.config || {};
@@ -1670,6 +1683,12 @@
       const heuristic = c.num_heuristic_agents != null ? c.num_heuristic_agents : c.num_agents;
       if (heuristic != null) parts.push(`${heuristic} heuristic`);
       if (c.num_rl_agents != null) parts.push(`${c.num_rl_agents} RL`);
+      if (c.num_low_talent_rl_agents != null && c.num_low_talent_rl_agents > 0) {
+        parts.push(`${c.num_low_talent_rl_agents} low-talent RL`);
+      }
+      if (c.num_dqn_agents != null && c.num_dqn_agents > 0) {
+        parts.push(`${c.num_dqn_agents} DQN`);
+      }
       if (c.num_random_agents != null) parts.push(`${c.num_random_agents} random`);
       if (c.num_probabilistic_agents != null) parts.push(`${c.num_probabilistic_agents} probabilistic`);
       const runLen = run.num_timesteps != null ? run.num_timesteps : run.num_days;

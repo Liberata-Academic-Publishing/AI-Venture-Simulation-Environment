@@ -46,11 +46,13 @@ CLI flags for one-off overrides.
   reviewer epsilon history and capped at `default_max_reviewer_share`.
 - **Results display**: `History.to_dict()` exports `agent_group_summary`, and
   both `run_simulation.py` and the static `docs/` gallery compare heuristic,
-  random, probabilistic, and RL agent outcomes.
+  random, probabilistic, RL, and low-talent RL agent outcomes.
 - **RL settings** live in `SimConfig` too (`rl_backend`, `rl_epsilon`,
   `rl_gamma`, reward weights). Continuous tabular/linear RL uses `train_rl.py`;
   discrete 3-action RL (write / bad claim / good claim) uses
-  `train_discrete_rl.py` and `DiscreteQLearningAgent`.
+  `train_discrete_rl.py` and `DiscreteQLearningAgent`. Low-talent RL agents
+  (`LowTalentQLearningAgent`) load a separate policy trained with
+  `train_rl.py --low-talent` (saved to `policies/policy_<backend>_low_talent`).
 - **DQN settings** are separate (`num_dqn_agents`, `dqn_*` hyperparameters);
   train with `train_dqn.py`, policies saved to `policies/policy_dqn.pkl`.
 
@@ -90,6 +92,7 @@ python run_simulation.py --seeds 1,2,3,4,5 --timesteps 10000 --heuristic-agents 
 python train_rl.py
 python train_rl.py --backend linear --episodes 300
 python train_rl.py --load policies/policy_tabular.pkl --episodes 0   # eval only
+python train_rl.py --low-talent --no-archive                       # low-talent policy
 
 # Train discrete RL (3-action: write / bad claim / good claim)
 python train_discrete_rl.py
@@ -147,7 +150,15 @@ tabular backend. Policy auto-saves to `policies/policy_tabular.pkl` (or
 `--name "training: <experiment>"` to archive training metrics to the gallery.
 
 `run_simulation.py` auto-loads the saved policy when `rl_autoload_policy=True`
-(default) and `review_paradigm=continuous`.
+(default) and `review_paradigm=continuous`. Low-talent RL policies auto-load
+from `policies/policy_<backend>_low_talent` when `num_low_talent_rl_agents > 0`
+and `rl_low_talent_autoload_policy=True` (default).
+
+Train a low-talent baseline:
+
+```bash
+python train_rl.py --low-talent --no-archive
+```
 
 ### Step 3 — Run simulation (full comparison)
 
@@ -155,6 +166,7 @@ tabular backend. Policy auto-saves to `policies/policy_tabular.pkl` (or
 python run_simulation.py \
   --heuristic-agents 20 \
   --rl-agents 20 \
+  --low-talent-rl-agents 20 \
   --random-agents 20 \
   --probabilistic-agents 20 \
   --name "<descriptive experiment name>"

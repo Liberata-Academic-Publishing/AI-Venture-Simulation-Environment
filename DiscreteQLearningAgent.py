@@ -357,3 +357,7 @@ class DiscreteQLearningAgent(HeuristicAgent):
             ],
             dtype=np.float64,
         )
+
+
+class LowTalentDiscreteQLearningAgent(DiscreteQLearningAgent):
+    """Discrete RL agent at low intrinsic talent; grouped separately in History."""

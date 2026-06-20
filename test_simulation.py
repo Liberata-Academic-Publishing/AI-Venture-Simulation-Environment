@@ -1183,6 +1183,49 @@ class QLearningRewardTest(unittest.TestCase):
         )
 
 
+class LowTalentRLAgentsTest(unittest.TestCase):
+    def test_low_talent_rl_agents_grouped_separately(self):
+        from QLearningAgent import LowTalentQLearningAgent
+        from run_simulation import build_simulation
+
+        history = History()
+        env = build_simulation(
+            history,
+            num_agents=0,
+            rl_agents=2,
+            low_talent_rl_agents=2,
+            random_agents=0,
+            probabilistic_agents=0,
+            rl_policy_path=None,
+            low_talent_rl_policy_path=None,
+        )
+        env.run(5)
+
+        groups = set(history.agent_groups.values())
+        self.assertIn("QLearningAgent", groups)
+        self.assertIn("LowTalentQLearningAgent", groups)
+
+        summary = history.agent_group_summary()
+        self.assertIn("QLearningAgent", summary)
+        self.assertIn("LowTalentQLearningAgent", summary)
+        self.assertEqual(summary["LowTalentQLearningAgent"]["agent_count"], 2)
+
+        low_talent_agents = [
+            a for a in env.agents if isinstance(a, LowTalentQLearningAgent)
+        ]
+        self.assertEqual(len(low_talent_agents), 2)
+        for agent in low_talent_agents:
+            self.assertAlmostEqual(agent.intrinsic_talent, 0.3)
+
+    def test_build_run_config_includes_low_talent_fields(self):
+        from run_simulation import build_run_config
+
+        config = build_run_config(low_talent_rl_agents=5, low_talent_value=0.25)
+        self.assertEqual(config["num_low_talent_rl_agents"], 5)
+        self.assertEqual(config["low_talent_value"], 0.25)
+        self.assertIn("train_low_talent", config)
+
+
 class BuildRunConfigTest(unittest.TestCase):
     def test_reflects_runtime_sim_replace(self):
         """Gallery config must snapshot live config.SIM after runtime patches."""
@@ -1280,6 +1323,28 @@ class UtilityTest(unittest.TestCase):
             [(2, 0.015)],
         )
         self.assertTrue(visualize._has_market_pricing_scalars(history))
+
+    @unittest.skipUnless(_HAS_MPL, "matplotlib not installed")
+    def test_review_faith_share_price_helpers(self):
+        import visualize
+
+        history = History()
+        history.actions = [
+            (2, "Agent 1", "review_started", "Paper 1"),
+            (3, "Agent 2", "review_started", "Paper 2"),
+        ]
+        history.accepted_review_claims = [(2, 0.02), (3, 0.04)]
+        history.completed_reviews = [
+            (5, "Agent 1", "Paper 1", 5.0, GOOD_FAITH_REVIEW),
+            (6, "Agent 2", "Paper 2", 1.0, BAD_FAITH_REVIEW),
+        ]
+
+        prices = visualize._paper_claim_share_prices(history)
+        self.assertAlmostEqual(prices["Paper 1"], 0.02)
+        self.assertAlmostEqual(prices["Paper 2"], 0.04)
+        points = visualize._review_faith_share_price_points(history)
+        self.assertEqual(len(points), 2)
+        self.assertTrue(visualize._has_review_faith_by_share_price(history))
 
     @unittest.skipUnless(_HAS_MPL, "matplotlib not installed")
     def test_visualize_writes_pngs(self):

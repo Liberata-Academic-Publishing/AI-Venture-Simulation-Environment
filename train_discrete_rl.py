@@ -20,7 +20,12 @@ import sys
 from typing import Any
 
 from Agent import Agent
-from config import SIM, TRAIN_DISCRETE, default_discrete_policy_path
+from config import (
+    SIM,
+    TRAIN_DISCRETE,
+    default_discrete_policy_path,
+    default_low_talent_discrete_policy_path,
+)
 from DiscreteQLearningAgent import DiscreteQLearningAgent, make_discrete_backend
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
@@ -71,13 +76,14 @@ def build_env(
     seed: int,
     gamma: float = 0.95,
     history: History | None = None,
+    intrinsic_talent: float = 1.0,
 ) -> tuple[Environment, list[DiscreteQLearningAgent], list[HeuristicAgent]]:
     rng = random.Random(seed)
     Agent.all_papers = []
 
     rl_agents = [
         DiscreteQLearningAgent(
-            intrinsic_talent=1.0,
+            intrinsic_talent=intrinsic_talent,
             forecast_horizon_timesteps=horizon,
             name=f"Discrete RL {i}",
             backend=backend,
@@ -135,6 +141,8 @@ def build_train_config(args) -> dict[str, Any]:
         "eps_start": args.eps_start,
         "eps_end": args.eps_end,
         "seed": args.seed,
+        "low_talent": args.low_talent,
+        "low_talent_value": args.low_talent_value,
     }
 
 
@@ -231,11 +239,13 @@ def train(args) -> None:
     training_log: list[dict[str, Any]] = []
 
     if args.episodes:
+        talent_note = f" low_talent={args.low_talent_value}" if args.low_talent else ""
         print(
             f"Training discrete RL: backend={args.backend} "
             f"episodes={args.episodes} timesteps={args.timesteps} "
-            f"rl={args.num_rl} heuristic={args.num_heuristic}"
+            f"rl={args.num_rl} heuristic={args.num_heuristic}{talent_note}"
         )
+    rl_talent = args.low_talent_value if args.low_talent else 1.0
     for episode in range(args.episodes):
         frac = episode / max(1, args.episodes - 1)
         epsilon = args.eps_start + frac * (args.eps_end - args.eps_start)
@@ -251,6 +261,7 @@ def train(args) -> None:
             seed=args.seed + episode,
             gamma=args.gamma,
             history=history,
+            intrinsic_talent=rl_talent,
         )
         env.run(args.timesteps)
         for agent in rl_agents:
@@ -275,7 +286,12 @@ def train(args) -> None:
         save_training_outputs(training_log, open_chart_flag=args.open)
 
     if args.episodes and not args.no_save:
-        save_path = args.save or default_discrete_policy_path(args.backend)
+        if args.save:
+            save_path = args.save
+        elif args.low_talent:
+            save_path = default_low_talent_discrete_policy_path(args.backend)
+        else:
+            save_path = default_discrete_policy_path(args.backend)
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         backend.save(save_path)
         print(f"Saved discrete policy to {save_path}")
@@ -292,6 +308,7 @@ def train(args) -> None:
 
 
 def evaluate(backend, args) -> None:
+    rl_talent = args.low_talent_value if args.low_talent else 1.0
     env, rl_agents, heuristics = build_env(
         backend=backend,
         epsilon=0.0,
@@ -300,6 +317,7 @@ def evaluate(backend, args) -> None:
         num_heuristic=args.num_heuristic,
         horizon=args.horizon,
         seed=args.seed + 10_000,
+        intrinsic_talent=rl_talent,
     )
     env.run(args.timesteps)
 
@@ -342,6 +360,21 @@ def parse_args(argv=None):
     p.add_argument("--name", default=None, help="Gallery title; skips prompt")
     p.add_argument("--no-archive", action="store_true")
     p.add_argument("--open", action="store_true")
+    p.add_argument(
+        "--low-talent",
+        dest="low_talent",
+        action="store_true",
+        default=TRAIN_DISCRETE.low_talent,
+        help="Train RL agents at low intrinsic talent (separate policy path).",
+    )
+    p.add_argument(
+        "--low-talent-value",
+        dest="low_talent_value",
+        type=float,
+        default=TRAIN_DISCRETE.low_talent_value,
+        metavar="X",
+        help="Intrinsic talent when --low-talent is set.",
+    )
     args = p.parse_args(argv)
     if args.alpha is None:
         args.alpha = 0.1 if args.backend == "tabular" else 0.01

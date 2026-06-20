@@ -30,7 +30,7 @@ import sys
 from typing import Any
 
 from Agent import Agent
-from config import SIM, TRAIN, default_policy_path
+from config import SIM, TRAIN, default_policy_path, default_low_talent_policy_path
 from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History
@@ -84,6 +84,7 @@ def build_env(
     review_paradigm: str = SIM.review_paradigm,
     gamma: float = 0.95,
     history: History | None = None,
+    intrinsic_talent: float = 1.0,
 ) -> tuple[Environment, list[QLearningAgent], list[HeuristicAgent]]:
     """Fresh env: shared-backend RL agents vs. heuristic opponents."""
     rng = random.Random(seed)
@@ -91,7 +92,7 @@ def build_env(
 
     rl_agents = [
         QLearningAgent(
-            intrinsic_talent=1.0,
+            intrinsic_talent=intrinsic_talent,
             forecast_horizon_timesteps=horizon,
             name=f"RL {i}",
             backend=backend,
@@ -145,6 +146,8 @@ def build_train_config(args) -> dict[str, Any]:
         "eps_start": args.eps_start,
         "eps_end": args.eps_end,
         "seed": args.seed,
+        "low_talent": args.low_talent,
+        "low_talent_value": args.low_talent_value,
     }
 
 
@@ -247,9 +250,11 @@ def train(args) -> None:
     training_log: list[dict[str, Any]] = []
 
     if args.episodes:
+        talent_note = f" low_talent={args.low_talent_value}" if args.low_talent else ""
         print(f"Training: paradigm={args.review_paradigm} backend={args.backend} "
               f"episodes={args.episodes} timesteps={args.timesteps} "
-              f"rl={args.num_rl} heuristic={args.num_heuristic}")
+              f"rl={args.num_rl} heuristic={args.num_heuristic}{talent_note}")
+    rl_talent = args.low_talent_value if args.low_talent else 1.0
     for episode in range(args.episodes):
         # Linear ε decay from eps_start to eps_end.
         frac = episode / max(1, args.episodes - 1)
@@ -261,7 +266,7 @@ def train(args) -> None:
             num_rl=args.num_rl, num_heuristic=args.num_heuristic,
             horizon=args.horizon, seed=args.seed + episode,
             review_paradigm=args.review_paradigm, gamma=args.gamma,
-            history=history,
+            history=history, intrinsic_talent=rl_talent,
         )
         env.run(args.timesteps)
         for agent in rl_agents:
@@ -285,7 +290,12 @@ def train(args) -> None:
 
     # Persist the trained policy unless told not to (nothing new if no training).
     if args.episodes and not args.no_save:
-        save_path = args.save or default_policy_path(args.backend)
+        if args.save:
+            save_path = args.save
+        elif args.low_talent:
+            save_path = default_low_talent_policy_path(args.backend)
+        else:
+            save_path = default_policy_path(args.backend)
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         backend.save(save_path)
         print(f"Saved policy to {save_path}")
@@ -303,11 +313,13 @@ def train(args) -> None:
 
 def evaluate(backend, args) -> None:
     """Greedy (ε=0, no learning) RL agents vs. heuristics on a fresh seed."""
+    rl_talent = args.low_talent_value if args.low_talent else 1.0
     env, rl_agents, heuristics = build_env(
         backend=backend, epsilon=0.0, learning=False,
         num_rl=args.num_rl, num_heuristic=args.num_heuristic,
         horizon=args.horizon, seed=args.seed + 10_000,
         review_paradigm=args.review_paradigm,
+        intrinsic_talent=rl_talent,
     )
     env.run(args.timesteps)
 
@@ -362,6 +374,21 @@ def parse_args(argv=None):
         "--open",
         action="store_true",
         help="Open the episode return chart after training.",
+    )
+    p.add_argument(
+        "--low-talent",
+        dest="low_talent",
+        action="store_true",
+        default=TRAIN.low_talent,
+        help="Train RL agents at low intrinsic talent (separate policy path).",
+    )
+    p.add_argument(
+        "--low-talent-value",
+        dest="low_talent_value",
+        type=float,
+        default=TRAIN.low_talent_value,
+        metavar="X",
+        help="Intrinsic talent when --low-talent is set.",
     )
     args = p.parse_args(argv)
     if args.alpha is None:
