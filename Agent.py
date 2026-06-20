@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from config import SIM
 from Paper import (
+    ADAPTIVE_PRICING_BINNED,
+    ADAPTIVE_PRICING_GLOBAL,
     DISCRETE_WRITING_EFFORT_PER_TIMESTEP,
     GOOD_FAITH_REVIEW,
     QUALITY_SIGMA,
@@ -16,9 +18,12 @@ from Paper import (
     Paper,
     fixed_review_effort,
     quality_multiplier,
+    reputation_bin_name,
     review_action_kind,
     review_kind_from_effort,
+    validate_adaptive_pricing_mode,
     validate_pricing_policy,
+    validate_reputation_bin_config,
     validate_review_paradigm,
 )
 
@@ -39,6 +44,7 @@ VALID_CONTINUOUS_PUBLISHING = frozenset({
     CONTINUOUS_PUBLISHING_CHOICE,
     CONTINUOUS_PUBLISHING_THRESHOLD,
 })
+_UNSET = object()
 
 # Continuous-mode merged decision: one of these per agent per timestep.
 CONTINUOUS_CLAIM = "claim"
@@ -122,11 +128,31 @@ class Agent(ABC):
         self.paper_effort_max = float(SIM.paper_effort_max)
         self.current_timestep: int | None = None
 
-        # Author-side pricing state. The static policy leaves this multiplier at
-        # 1.0; the adaptive policy nudges it when an author's papers are claimed
-        # faster/slower than the target wait.
+        # Author-side pricing state. The static policy leaves multipliers at
+        # 1.0; the adaptive policy nudges them when an author's papers are claimed
+        # faster/slower than the target wait (globally or per reputation bin).
         self.pricing_policy = validate_pricing_policy(SIM.pricing_policy)
-        self.review_offer_multiplier = 1.0
+        self.adaptive_pricing_mode = validate_adaptive_pricing_mode(
+            SIM.adaptive_pricing_mode
+        )
+        self.reputation_bin_edges, self.reputation_bin_names = (
+            validate_reputation_bin_config(
+                SIM.reputation_bin_edges,
+                SIM.reputation_bin_names,
+            )
+        )
+        self.adaptive_raise_bins = frozenset(
+            str(name).strip().lower() for name in SIM.adaptive_raise_bins
+        )
+        self.adaptive_lower_bins = frozenset(
+            str(name).strip().lower() for name in SIM.adaptive_lower_bins
+        )
+        self.adaptive_slow_raise_bins = frozenset(
+            str(name).strip().lower() for name in SIM.adaptive_slow_raise_bins
+        )
+        self.fast_claim_max_wait = SIM.fast_claim_max_wait
+        self._global_review_offer_multiplier = 1.0
+        self.review_offer_multipliers = self._default_bin_multipliers()
         self.target_market_wait_timesteps = float(SIM.target_market_wait_timesteps)
         self.adaptive_pricing_learning_rate = float(
             SIM.adaptive_pricing_learning_rate
@@ -251,10 +277,18 @@ class Agent(ABC):
         self,
         pricing_policy: str | None = None,
         *,
+        adaptive_pricing_mode: str | None = None,
         target_market_wait_timesteps: float | None = None,
         learning_rate: float | None = None,
         min_multiplier: float | None = None,
         max_multiplier: float | None = None,
+        reputation_bin_edges: tuple[float, ...] | list[float] | None = None,
+        reputation_bin_names: tuple[str, ...] | list[str] | None = None,
+        adaptive_raise_bins: tuple[str, ...] | list[str] | None = None,
+        adaptive_lower_bins: tuple[str, ...] | list[str] | None = None,
+        adaptive_slow_raise_bins: tuple[str, ...] | list[str] | None = None,
+        fast_claim_max_wait: float | None | object = _UNSET,
+        reset_multipliers: bool = False,
     ) -> None:
         """Configure optional author-side adaptive offer behavior.
 
@@ -263,6 +297,42 @@ class Agent(ABC):
         """
         if pricing_policy is not None:
             self.pricing_policy = validate_pricing_policy(pricing_policy)
+        if adaptive_pricing_mode is not None:
+            self.adaptive_pricing_mode = validate_adaptive_pricing_mode(
+                adaptive_pricing_mode
+            )
+        if reputation_bin_edges is not None or reputation_bin_names is not None:
+            edges = (
+                self.reputation_bin_edges
+                if reputation_bin_edges is None
+                else reputation_bin_edges
+            )
+            names = (
+                self.reputation_bin_names
+                if reputation_bin_names is None
+                else reputation_bin_names
+            )
+            self.reputation_bin_edges, self.reputation_bin_names = (
+                validate_reputation_bin_config(edges, names)
+            )
+        if adaptive_raise_bins is not None:
+            self.adaptive_raise_bins = frozenset(
+                str(name).strip().lower() for name in adaptive_raise_bins
+            )
+        if adaptive_lower_bins is not None:
+            self.adaptive_lower_bins = frozenset(
+                str(name).strip().lower() for name in adaptive_lower_bins
+            )
+        if adaptive_slow_raise_bins is not None:
+            self.adaptive_slow_raise_bins = frozenset(
+                str(name).strip().lower() for name in adaptive_slow_raise_bins
+            )
+        if fast_claim_max_wait is not _UNSET:
+            self.fast_claim_max_wait = (
+                None
+                if fast_claim_max_wait is None
+                else max(0.0, float(fast_claim_max_wait))
+            )
         if target_market_wait_timesteps is not None:
             self.target_market_wait_timesteps = max(
                 0.0,
@@ -279,9 +349,64 @@ class Agent(ABC):
                 self.max_author_price_multiplier,
                 self.min_author_price_multiplier,
             )
-        self.review_offer_multiplier = self._clamp_offer_multiplier(
-            self.review_offer_multiplier
+        # fast_claim_max_wait uses a sentinel: only update when explicitly passed.
+        # Environment passes it via keyword when configuring agents.
+        if reset_multipliers:
+            self._global_review_offer_multiplier = 1.0
+            self.review_offer_multipliers = self._default_bin_multipliers()
+        self._global_review_offer_multiplier = self._clamp_offer_multiplier(
+            self._global_review_offer_multiplier
         )
+        for bin_name in self.reputation_bin_names:
+            self.review_offer_multipliers[bin_name] = self._clamp_offer_multiplier(
+                self.review_offer_multipliers.get(bin_name, 1.0)
+            )
+
+    @property
+    def review_offer_multiplier(self) -> float:
+        """Mean multiplier across bins (or the global multiplier in legacy mode)."""
+        if self.adaptive_pricing_mode == ADAPTIVE_PRICING_GLOBAL:
+            return self._global_review_offer_multiplier
+        values = [
+            float(self.review_offer_multipliers.get(name, 1.0))
+            for name in self.reputation_bin_names
+        ]
+        return sum(values) / len(values) if values else 1.0
+
+    @review_offer_multiplier.setter
+    def review_offer_multiplier(self, value: float) -> None:
+        clamped = self._clamp_offer_multiplier(value)
+        if self.adaptive_pricing_mode == ADAPTIVE_PRICING_GLOBAL:
+            self._global_review_offer_multiplier = clamped
+            return
+        for bin_name in self.reputation_bin_names:
+            self.review_offer_multipliers[bin_name] = clamped
+
+    def review_offer_multiplier_for(self, reviewer: "Agent") -> float:
+        """Author-side adaptive multiplier for a specific reviewer."""
+        if self.pricing_policy != PRICING_POLICY_ADAPTIVE:
+            return 1.0
+        if self.adaptive_pricing_mode == ADAPTIVE_PRICING_GLOBAL:
+            return self._global_review_offer_multiplier
+        epsilon = getattr(
+            reviewer,
+            "peer_review_epsilon_history",
+            SIM.prior_review_epsilon,
+        )
+        bin_name = reputation_bin_name(
+            epsilon,
+            self.reputation_bin_edges,
+            self.reputation_bin_names,
+        )
+        return self.review_offer_multipliers.get(bin_name, 1.0)
+
+    def _default_bin_multipliers(self) -> dict[str, float]:
+        return {name: 1.0 for name in self.reputation_bin_names}
+
+    def _fast_claim_threshold(self) -> float:
+        if self.fast_claim_max_wait is not None:
+            return max(0.0, float(self.fast_claim_max_wait))
+        return max(0.0, self.target_market_wait_timesteps)
 
     def configure_market_economics(
         self,
@@ -300,13 +425,18 @@ class Agent(ABC):
         if use_merit_market_clearing is not None:
             self.use_merit_market_clearing = bool(use_merit_market_clearing)
 
-    def record_review_claim_feedback(self, time_on_market: int | None) -> None:
-        """Update future author offers from observed claim speed.
+    def record_review_claim_feedback(
+        self,
+        time_on_market: int | None,
+        *,
+        claimer: "Agent | None" = None,
+    ) -> None:
+        """Update future author offers from observed claim speed and claimer tier.
 
-        Immediate claims imply reviewer demand is high at the current price, so
-        the author can lower future reviewer shares. Slow claims imply the
-        offer may be too low, so the author raises future shares. This is a
-        lightweight adaptive pricing experiment, not the default behavior.
+        In binned mode, fast claims by reviewers in ``adaptive_raise_bins``
+        raise that bin's multiplier; fast claims in ``adaptive_lower_bins`` lower
+        it. Slow claims can raise bins listed in ``adaptive_slow_raise_bins``.
+        Global mode preserves the legacy single-multiplier behavior.
         """
         if self.pricing_policy != PRICING_POLICY_ADAPTIVE:
             return
@@ -319,6 +449,44 @@ class Agent(ABC):
         if lr == 0.0:
             return
 
+        if self.adaptive_pricing_mode == ADAPTIVE_PRICING_GLOBAL:
+            self._apply_global_adaptive_feedback(wait, target, lr)
+            return
+
+        if claimer is None:
+            return
+
+        epsilon = getattr(
+            claimer,
+            "peer_review_epsilon_history",
+            SIM.prior_review_epsilon,
+        )
+        bin_name = reputation_bin_name(
+            epsilon,
+            self.reputation_bin_edges,
+            self.reputation_bin_names,
+        )
+        fast_threshold = self._fast_claim_threshold()
+        if wait <= fast_threshold:
+            pressure = self._fast_claim_pressure(wait, fast_threshold)
+            if bin_name in self.adaptive_raise_bins:
+                self._update_bin_multiplier(bin_name, 1.0 + lr * pressure)
+            elif bin_name in self.adaptive_lower_bins:
+                self._update_bin_multiplier(bin_name, 1.0 - lr * pressure)
+            return
+
+        if bin_name not in self.adaptive_slow_raise_bins:
+            return
+        denom = target if target > 0.0 else 1.0
+        pressure = min(2.0, (wait - target) / denom)
+        self._update_bin_multiplier(bin_name, 1.0 + lr * max(0.0, pressure))
+
+    def _apply_global_adaptive_feedback(
+        self,
+        wait: float,
+        target: float,
+        lr: float,
+    ) -> None:
         if wait <= target:
             denom = target if target > 0.0 else 1.0
             pressure = 1.0 if target == 0.0 else (target - wait) / denom
@@ -328,8 +496,21 @@ class Agent(ABC):
             pressure = min(2.0, (wait - target) / denom)
             factor = 1.0 + lr * max(0.0, pressure)
 
-        self.review_offer_multiplier = self._clamp_offer_multiplier(
-            self.review_offer_multiplier * factor
+        self._global_review_offer_multiplier = self._clamp_offer_multiplier(
+            self._global_review_offer_multiplier * factor
+        )
+        self.review_offer_multiplier_updates += 1
+
+    def _fast_claim_pressure(self, wait: float, fast_threshold: float) -> float:
+        if fast_threshold == 0.0:
+            return 1.0 if wait <= 0.0 else 0.0
+        denom = fast_threshold
+        return max(0.0, min(1.0, (fast_threshold - wait) / denom))
+
+    def _update_bin_multiplier(self, bin_name: str, factor: float) -> None:
+        current = float(self.review_offer_multipliers.get(bin_name, 1.0))
+        self.review_offer_multipliers[bin_name] = self._clamp_offer_multiplier(
+            current * factor
         )
         self.review_offer_multiplier_updates += 1
 

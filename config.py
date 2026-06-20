@@ -59,10 +59,23 @@ class SimConfig:
     # base, then lets authors raise/lower future offers based on how quickly
     # their papers are claimed from the marketplace.
     pricing_policy: str = "adaptive_multiplier"  # "static_fair_market" | "adaptive_multiplier"
+    # ``global``: one author multiplier (legacy). ``binned``: per reputation tier.
+    adaptive_pricing_mode: str = "binned"  # "global" | "binned"
     target_market_wait_timesteps: float = 1.0
     adaptive_pricing_learning_rate: float = 0.03
     min_author_price_multiplier: float = 0.25
     max_author_price_multiplier: float = 2.0
+    # Reputation bins for binned adaptive pricing (len(names) == len(edges) + 1).
+    reputation_bin_edges: tuple[float, ...] = (0.08, 0.15)
+    reputation_bin_names: tuple[str, ...] = ("low", "mid", "high")
+    # Fast claim (wait <= fast_claim_max_wait) in ``adaptive_raise_bins`` raises
+    # that bin's multiplier; fast claim in ``adaptive_lower_bins`` lowers it.
+    adaptive_raise_bins: tuple[str, ...] = ("high",)
+    adaptive_lower_bins: tuple[str, ...] = ("low", "mid")
+    # Slow claims (wait > fast_claim_max_wait) can raise bins in this set.
+    adaptive_slow_raise_bins: tuple[str, ...] = ("low", "mid", "high")
+    # None uses ``target_market_wait_timesteps``; 0 means instant claim only.
+    fast_claim_max_wait: float | None = 0.0
     # Reviewer's fraction of incremental review surplus in fair-market offers
     # (author keeps ``1 - reviewer_surplus_share`` of the bump-created value).
     reviewer_surplus_share: float = 0.5

@@ -12,6 +12,8 @@ from Environment import Environment
 from HeuristicAgent import HeuristicAgent
 from History import History, gini
 from Paper import (
+    ADAPTIVE_PRICING_BINNED,
+    ADAPTIVE_PRICING_GLOBAL,
     BAD_FAITH_REVIEW,
     BAD_REVIEW_TIMESTEPS,
     GOOD_FAITH_REVIEW,
@@ -27,8 +29,10 @@ from Paper import (
     fair_market_offer_share,
     fair_market_price_from_epsilons,
     projected_paper_ac,
+    reputation_bin_name,
     review_accrual_bump,
     review_bump_factor_at_age,
+    validate_reputation_bin_config,
 )
 import config
 from dataclasses import replace
@@ -478,6 +482,83 @@ class MarketEconomicsTest(unittest.TestCase):
         env = Environment(agents=[author], pricing_policy="static_fair_market")
 
         self.assertEqual(env.pricing_policy, "static_fair_market")
+
+    def test_reputation_bin_name_mapping(self):
+        edges, names = validate_reputation_bin_config((0.08, 0.15), ("low", "mid", "high"))
+        self.assertEqual(reputation_bin_name(0.02, edges, names), "low")
+        self.assertEqual(reputation_bin_name(0.10, edges, names), "mid")
+        self.assertEqual(reputation_bin_name(0.20, edges, names), "high")
+
+    def test_binned_fast_high_rep_raises_high_bin_only(self):
+        author = ScriptAgent("author")
+        author.configure_pricing_policy(
+            "adaptive_multiplier",
+            adaptive_pricing_mode=ADAPTIVE_PRICING_BINNED,
+            learning_rate=0.03,
+        )
+        veteran = ScriptAgent("veteran")
+        veteran.peer_review_epsilon_history = 0.20
+
+        author.record_review_claim_feedback(0, claimer=veteran)
+
+        self.assertAlmostEqual(author.review_offer_multipliers["high"], 1.03)
+        self.assertAlmostEqual(author.review_offer_multipliers["mid"], 1.0)
+        self.assertAlmostEqual(author.review_offer_multipliers["low"], 1.0)
+
+    def test_binned_fast_low_rep_lowers_low_bin_only(self):
+        author = ScriptAgent("author")
+        author.configure_pricing_policy(
+            "adaptive_multiplier",
+            adaptive_pricing_mode=ADAPTIVE_PRICING_BINNED,
+            learning_rate=0.03,
+        )
+        rookie = ScriptAgent("rookie")
+        rookie.peer_review_epsilon_history = 0.02
+
+        author.record_review_claim_feedback(0, claimer=rookie)
+
+        self.assertAlmostEqual(author.review_offer_multipliers["low"], 0.97)
+        self.assertAlmostEqual(author.review_offer_multipliers["mid"], 1.0)
+        self.assertAlmostEqual(author.review_offer_multipliers["high"], 1.0)
+
+    def test_global_adaptive_feedback_preserves_legacy_behavior(self):
+        author = ScriptAgent("author")
+        author.configure_pricing_policy(
+            "adaptive_multiplier",
+            adaptive_pricing_mode=ADAPTIVE_PRICING_GLOBAL,
+            learning_rate=0.03,
+        )
+
+        author.record_review_claim_feedback(0)
+
+        self.assertAlmostEqual(author.review_offer_multiplier, 0.97)
+
+    def test_binned_multiplier_applies_per_reviewer_in_price_table(self):
+        author = ScriptAgent("author")
+        author.configure_pricing_policy(
+            "adaptive_multiplier",
+            adaptive_pricing_mode=ADAPTIVE_PRICING_BINNED,
+        )
+        author.review_offer_multipliers["high"] = 1.2
+        author.review_offer_multipliers["low"] = 0.8
+        rookie = ScriptAgent("rookie")
+        veteran = ScriptAgent("veteran")
+        rookie.peer_review_epsilon_history = 0.02
+        veteran.peer_review_epsilon_history = 0.20
+        paper = _listed_paper(author, quality=1.0)
+
+        paper.update_price_table(
+            [rookie, veteran],
+            market_median_quality=1.0,
+            mean_peer_review_epsilon=0.11,
+            pricing_policy="adaptive_multiplier",
+        )
+
+        rookie_offer = paper.offered_share(rookie)
+        veteran_offer = paper.offered_share(veteran)
+        self.assertGreater(veteran_offer, rookie_offer)
+        ratio = veteran_offer / rookie_offer
+        self.assertGreater(ratio, 1.2)
 
     def test_legacy_heuristic_claim_unchanged_when_flags_off(self):
         agent = HeuristicAgent(intrinsic_talent=1.0)

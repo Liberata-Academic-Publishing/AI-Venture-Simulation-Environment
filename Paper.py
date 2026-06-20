@@ -69,6 +69,53 @@ VALID_PRICING_POLICIES = frozenset({
     PRICING_POLICY_ADAPTIVE,
 })
 
+ADAPTIVE_PRICING_GLOBAL = "global"
+ADAPTIVE_PRICING_BINNED = "binned"
+VALID_ADAPTIVE_PRICING_MODES = frozenset({
+    ADAPTIVE_PRICING_GLOBAL,
+    ADAPTIVE_PRICING_BINNED,
+})
+
+
+def validate_adaptive_pricing_mode(mode: str) -> str:
+    value = str(mode).strip().lower()
+    if value not in VALID_ADAPTIVE_PRICING_MODES:
+        allowed = ", ".join(sorted(VALID_ADAPTIVE_PRICING_MODES))
+        raise ValueError(f"adaptive_pricing_mode must be one of: {allowed}")
+    return value
+
+
+def validate_reputation_bin_config(
+    edges: tuple[float, ...] | list[float],
+    names: tuple[str, ...] | list[str],
+) -> tuple[tuple[float, ...], tuple[str, ...]]:
+    """Return sorted edges and names with one name per bin (``len(edges) + 1``)."""
+    edge_values = tuple(sorted(max(0.0, float(edge)) for edge in edges))
+    name_values = tuple(str(name).strip().lower() for name in names)
+    if len(name_values) != len(edge_values) + 1:
+        raise ValueError(
+            "reputation_bin_names must contain exactly one more entry than "
+            "reputation_bin_edges"
+        )
+    if not name_values or any(not name for name in name_values):
+        raise ValueError("reputation_bin_names must be non-empty strings")
+    if len(set(name_values)) != len(name_values):
+        raise ValueError("reputation_bin_names must be unique")
+    return edge_values, name_values
+
+
+def reputation_bin_name(
+    epsilon: float,
+    edges: tuple[float, ...] | list[float],
+    names: tuple[str, ...] | list[str],
+) -> str:
+    """Map a reviewer's epsilon history into a configured reputation bin."""
+    _, name_values = validate_reputation_bin_config(edges, names)
+    value = max(0.0, float(epsilon))
+    for index, edge in enumerate(sorted(float(edge) for edge in edges)):
+        if value < edge:
+            return name_values[index]
+    return name_values[-1]
 
 def validate_review_paradigm(paradigm: str) -> str:
     value = str(paradigm).strip().lower()
@@ -459,16 +506,9 @@ class Paper:
         if fair_market_price is None:
             fair_market_price = fair_market_price_from_epsilons([PRIOR_REVIEW_EPSILON])
         policy = validate_pricing_policy(pricing_policy)
-        author_multiplier = 1.0
+        multiplier_fn = None
         if policy == PRICING_POLICY_ADAPTIVE:
-            author_multiplier = getattr(self.author, "review_offer_multiplier", 1.0)
-            try:
-                author_multiplier = float(author_multiplier)
-            except (TypeError, ValueError):
-                author_multiplier = 1.0
-            if math.isnan(author_multiplier) or math.isinf(author_multiplier):
-                author_multiplier = 1.0
-            author_multiplier = max(0.0, author_multiplier)
+            multiplier_fn = getattr(self.author, "review_offer_multiplier_for", None)
         try:
             market_scarcity = float(scarcity_multiplier)
         except (TypeError, ValueError):
@@ -480,6 +520,22 @@ class Paper:
         for agent in reviewers:
             if agent is self.author:
                 continue
+            author_multiplier = 1.0
+            if multiplier_fn is not None:
+                author_multiplier = multiplier_fn(agent)
+            elif policy == PRICING_POLICY_ADAPTIVE:
+                author_multiplier = getattr(
+                    self.author,
+                    "review_offer_multiplier",
+                    1.0,
+                )
+            try:
+                author_multiplier = float(author_multiplier)
+            except (TypeError, ValueError):
+                author_multiplier = 1.0
+            if math.isnan(author_multiplier) or math.isinf(author_multiplier):
+                author_multiplier = 1.0
+            author_multiplier = max(0.0, author_multiplier)
             quality_factor = math.exp(
                 -QUALITY_PRICE_SCALE * (self.quality - market_median_quality)
             )
@@ -553,7 +609,7 @@ class Paper:
                 )
             feedback = getattr(self.author, "record_review_claim_feedback", None)
             if feedback is not None:
-                feedback(self.time_on_market_timesteps)
+                feedback(self.time_on_market_timesteps, claimer=agent)
         return True
 
     def finish_review(

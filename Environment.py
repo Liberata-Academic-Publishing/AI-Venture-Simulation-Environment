@@ -59,6 +59,13 @@ class Environment:
         adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
         min_author_price_multiplier: float = SIM.min_author_price_multiplier,
         max_author_price_multiplier: float = SIM.max_author_price_multiplier,
+        adaptive_pricing_mode: str = SIM.adaptive_pricing_mode,
+        reputation_bin_edges: tuple[float, ...] = SIM.reputation_bin_edges,
+        reputation_bin_names: tuple[str, ...] = SIM.reputation_bin_names,
+        adaptive_raise_bins: tuple[str, ...] = SIM.adaptive_raise_bins,
+        adaptive_lower_bins: tuple[str, ...] = SIM.adaptive_lower_bins,
+        adaptive_slow_raise_bins: tuple[str, ...] = SIM.adaptive_slow_raise_bins,
+        fast_claim_max_wait: float | None = SIM.fast_claim_max_wait,
         history: "History | None" = None,
     ):
         if agents is not None and num_agents is not None:
@@ -85,6 +92,13 @@ class Environment:
         self.adaptive_pricing_learning_rate = float(adaptive_pricing_learning_rate)
         self.min_author_price_multiplier = float(min_author_price_multiplier)
         self.max_author_price_multiplier = float(max_author_price_multiplier)
+        self.adaptive_pricing_mode = adaptive_pricing_mode
+        self.reputation_bin_edges = reputation_bin_edges
+        self.reputation_bin_names = reputation_bin_names
+        self.adaptive_raise_bins = adaptive_raise_bins
+        self.adaptive_lower_bins = adaptive_lower_bins
+        self.adaptive_slow_raise_bins = adaptive_slow_raise_bins
+        self.fast_claim_max_wait = fast_claim_max_wait
         self.history = history
         self.timestep = 0
         self.fair_market_price = fair_market_price_from_epsilons(
@@ -369,10 +383,17 @@ class Environment:
             if hasattr(agent, "configure_pricing_policy"):
                 agent.configure_pricing_policy(
                     self.pricing_policy,
+                    adaptive_pricing_mode=self.adaptive_pricing_mode,
                     target_market_wait_timesteps=self.target_market_wait_timesteps,
                     learning_rate=self.adaptive_pricing_learning_rate,
                     min_multiplier=self.min_author_price_multiplier,
                     max_multiplier=self.max_author_price_multiplier,
+                    reputation_bin_edges=self.reputation_bin_edges,
+                    reputation_bin_names=self.reputation_bin_names,
+                    adaptive_raise_bins=self.adaptive_raise_bins,
+                    adaptive_lower_bins=self.adaptive_lower_bins,
+                    adaptive_slow_raise_bins=self.adaptive_slow_raise_bins,
+                    fast_claim_max_wait=self.fast_claim_max_wait,
                 )
             if hasattr(agent, "configure_market_economics"):
                 agent.configure_market_economics(

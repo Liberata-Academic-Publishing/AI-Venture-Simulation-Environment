@@ -794,6 +794,7 @@ def build_simulation(
     use_merit_market_clearing: bool = SIM.use_merit_market_clearing,
     target_market_wait_timesteps: float = SIM.target_market_wait_timesteps,
     adaptive_pricing_learning_rate: float = SIM.adaptive_pricing_learning_rate,
+    adaptive_pricing_mode: str = SIM.adaptive_pricing_mode,
     min_author_price_multiplier: float = SIM.min_author_price_multiplier,
     max_author_price_multiplier: float = SIM.max_author_price_multiplier,
 ) -> Environment:
@@ -900,6 +901,7 @@ def build_simulation(
         use_merit_market_clearing=use_merit_market_clearing,
         target_market_wait_timesteps=target_market_wait_timesteps,
         adaptive_pricing_learning_rate=adaptive_pricing_learning_rate,
+        adaptive_pricing_mode=adaptive_pricing_mode,
         min_author_price_multiplier=min_author_price_multiplier,
         max_author_price_multiplier=max_author_price_multiplier,
         history=history,
@@ -1048,6 +1050,12 @@ def parse_args(argv=None):
         "--adaptive-pricing-learning-rate", dest="adaptive_pricing_learning_rate",
         type=float, default=SIM.adaptive_pricing_learning_rate, metavar="X",
         help="Adaptive pricing multiplier update rate.",
+    )
+    parser.add_argument(
+        "--adaptive-pricing-mode", dest="adaptive_pricing_mode",
+        choices=["global", "binned"],
+        default=SIM.adaptive_pricing_mode,
+        help="Adaptive pricing scope: one global author multiplier or per reputation bin.",
     )
     parser.add_argument(
         "--min-author-price-multiplier", dest="min_author_price_multiplier",
@@ -1477,6 +1485,7 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
         use_merit_market_clearing=args.use_merit_market_clearing,
         target_market_wait_timesteps=args.target_market_wait_timesteps,
         adaptive_pricing_learning_rate=args.adaptive_pricing_learning_rate,
+        adaptive_pricing_mode=args.adaptive_pricing_mode,
         min_author_price_multiplier=args.min_author_price_multiplier,
         max_author_price_multiplier=args.max_author_price_multiplier,
     )
