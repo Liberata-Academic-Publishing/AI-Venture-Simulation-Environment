@@ -15,7 +15,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 import Paper as paper_mod
-from Paper import MIN_REVIEW_EFFORT_THRESHOLD
+from Paper import BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW, MIN_REVIEW_EFFORT_THRESHOLD
 from config import SIM
 
 if TYPE_CHECKING:
@@ -1189,6 +1189,122 @@ def plot_paper_quality_vs_ac(
     return _finish(fig, path, show)
 
 
+def _paper_quality_review_faith_points(
+    history: "History",
+) -> list[tuple[float, float, str]]:
+    """Return (paper quality, review effort, review_kind) for completed reviews."""
+    qualities = getattr(history, "paper_quality", {})
+    points: list[tuple[float, float, str]] = []
+    for _, _, paper_label, effort, review_kind in history.completed_reviews:
+        if paper_label not in qualities or review_kind is None:
+            continue
+        points.append((float(qualities[paper_label]), float(effort), str(review_kind)))
+    return points
+
+
+def _draw_paper_quality_vs_review_faith(
+    ax_scatter, ax_bins, history: "History", *, threshold: float
+) -> bool:
+    """Paper quality vs review faith: scatter by effort and binned good/bad counts."""
+    points = _paper_quality_review_faith_points(history)
+    if not points:
+        for ax in (ax_scatter, ax_bins):
+            ax.text(0.5, 0.5, "No completed reviews with paper quality", ha="center", va="center")
+            ax.set_axis_off()
+        return False
+
+    good_color, bad_color = "#16a34a", "#f87171"
+    good = [(q, e) for q, e, k in points if k == GOOD_FAITH_REVIEW]
+    bad = [(q, e) for q, e, k in points if k == BAD_FAITH_REVIEW]
+
+    if bad:
+        qs, es = zip(*bad)
+        ax_scatter.scatter(
+            qs, es, s=22, alpha=0.55, color=bad_color,
+            edgecolors="#991b1b", label="bad faith",
+        )
+    if good:
+        qs, es = zip(*good)
+        ax_scatter.scatter(
+            qs, es, s=28, alpha=0.7, color=good_color,
+            edgecolors="#14532d", label="good faith",
+        )
+    ax_scatter.axhline(
+        threshold, color="#6b7280", linestyle="--", linewidth=1.0,
+        label=f"good-faith threshold ({threshold:g})",
+    )
+    ax_scatter.set_xlabel("Paper quality")
+    ax_scatter.set_ylabel("Review effort (timesteps)")
+    ax_scatter.set_title("Each completed review")
+    ax_scatter.legend(fontsize=8, loc="best")
+
+    qualities = [q for q, _, _ in points]
+    q_min, q_max = min(qualities), max(qualities)
+    n_bins = 8
+    if math.isclose(q_min, q_max):
+        edges = [q_min - 0.05, q_max + 0.05]
+        n_bins = 1
+    else:
+        width = (q_max - q_min) / n_bins
+        edges = [q_min + i * width for i in range(n_bins + 1)]
+
+    good_counts = [0] * n_bins
+    bad_counts = [0] * n_bins
+    for quality, _, kind in points:
+        idx = n_bins - 1 if quality >= edges[-1] else min(
+            n_bins - 1, max(0, int((quality - edges[0]) / (edges[-1] - edges[0]) * n_bins))
+        )
+        if kind == GOOD_FAITH_REVIEW:
+            good_counts[idx] += 1
+        elif kind == BAD_FAITH_REVIEW:
+            bad_counts[idx] += 1
+
+    centers = [(edges[i] + edges[i + 1]) / 2 for i in range(n_bins)]
+    width = (edges[-1] - edges[0]) / max(n_bins, 1) * 0.85
+    ax_bins.bar(
+        centers, good_counts, width=width, color=good_color,
+        label="good faith", edgecolor="#14532d",
+    )
+    ax_bins.bar(
+        centers, bad_counts, width=width, bottom=good_counts, color=bad_color,
+        label="bad faith", edgecolor="#991b1b",
+    )
+    ax_bins.set_xlabel("Paper quality (bin center)")
+    ax_bins.set_ylabel("Completed reviews")
+    ax_bins.set_title("Review counts by paper-quality bin")
+    ax_bins.legend(fontsize=8, loc="upper left")
+
+    if good and bad:
+        mean_good_q = sum(q for q, _ in good) / len(good)
+        mean_bad_q = sum(q for q, _ in bad) / len(bad)
+        ax_bins.text(
+            0.98, 0.97,
+            f"mean quality: good={mean_good_q:.2f}, bad={mean_bad_q:.2f}",
+            transform=ax_bins.transAxes, ha="right", va="top", fontsize=9,
+            bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
+        )
+    return True
+
+
+def plot_paper_quality_vs_review_faith(
+    history: "History",
+    path: str | None = None,
+    show: bool = False,
+    *,
+    threshold: float = MIN_REVIEW_EFFORT_THRESHOLD,
+):
+    """Do higher-quality papers attract good-faith or bad-faith reviews?"""
+    fig, (ax_scatter, ax_bins) = plt.subplots(1, 2, figsize=(13, 5.5))
+    _draw_paper_quality_vs_review_faith(ax_scatter, ax_bins, history, threshold=threshold)
+    fig.suptitle(
+        "Paper quality vs review faith",
+        fontweight="bold",
+        y=1.02,
+    )
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _draw_writing_effort_vs_rate(ax, history: "History") -> None:
     """How much authors invested in each paper vs the base accrual rate it earned.
 
@@ -2170,6 +2286,9 @@ _GALLERY_CHARTS = (
     ("reputation_vs_review_ac", _has_reputation_vs_review_ac, plot_reputation_vs_review_ac),
     ("paper_quality_vs_ac",
      lambda h: bool(_paper_quality_ac_points(h)), plot_paper_quality_vs_ac),
+    ("paper_quality_vs_review_faith",
+     lambda h: bool(_paper_quality_review_faith_points(h)),
+     plot_paper_quality_vs_review_faith),
     ("writing_effort_vs_rate",
      lambda h: any(l in h.paper_accrual_rate for l in h.paper_writing_effort),
      plot_writing_effort_vs_rate),
@@ -2201,7 +2320,11 @@ _GALLERY_CHARTS = (
 
 # Charts whose reward-threshold line must use the run's own configured value
 # rather than the current global default.
-_THRESHOLD_CHARTS = frozenset({"review_effort_histogram", "review_effort_scatter"})
+_THRESHOLD_CHARTS = frozenset({
+    "review_effort_histogram",
+    "review_effort_scatter",
+    "paper_quality_vs_review_faith",
+})
 
 
 def render_gallery_charts(
@@ -2298,6 +2421,11 @@ def plot_all(
         ),
         "paper_quality_vs_ac": plot_paper_quality_vs_ac(
             history, os.path.join(outdir, "paper_quality_vs_ac.png"), show=show
+        ),
+        "paper_quality_vs_review_faith": plot_paper_quality_vs_review_faith(
+            history,
+            os.path.join(outdir, "paper_quality_vs_review_faith.png"),
+            show=show,
         ),
         "writing_effort_vs_rate": plot_writing_effort_vs_rate(
             history, os.path.join(outdir, "writing_effort_vs_rate.png"), show=show
