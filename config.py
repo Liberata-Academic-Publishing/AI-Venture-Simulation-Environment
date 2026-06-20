@@ -32,7 +32,7 @@ class SimConfig:
     num_random_agents: int = 10
     num_probabilistic_agents: int = 0
     num_low_talent_rl_agents: int = 0
-    num_timesteps: int = 20000
+    num_timesteps: int = 10000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
     output_dir: str = "runs"
