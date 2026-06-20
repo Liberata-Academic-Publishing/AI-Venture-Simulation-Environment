@@ -357,6 +357,7 @@ CHART_DESCRIPTIONS = {
     "paper_writing_effort_over_time": "Paper-writing effort at publication over time",
     "review_reputation": "Reviewer reputation (AC earned per review) over time",
     "reputation_vs_ac": "Final academic capital vs peer-review reputation (by agent type)",
+    "reputation_vs_review_ac": "Peer-review AC held vs reputation (by agent type)",
     "action_mix": "What every agent did each timestep (stacked bars)",
     "choice_breakdown": "Agent decisions (write / review / finish)",
     "review_effort_histogram": "Completed peer reviews by effort level",

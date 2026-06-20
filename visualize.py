@@ -1373,6 +1373,34 @@ def _reputation_vs_ac_points(
     return points
 
 
+def _reputation_vs_review_ac_points(
+    history: "History",
+) -> list[tuple[float, float, str]]:
+    """Return (reputation, ac_from_reviewing, group) for each agent."""
+    cached = getattr(history, "_agent_outcome_summary", None)
+    if cached:
+        return [
+            (
+                float(row["peer_review_history"]),
+                float(row.get("ac_from_reviewing", 0.0)),
+                row.get("group", "Agent"),
+            )
+            for row in cached
+        ]
+
+    if history.agent_review_history or history.paper_reviewer:
+        return [
+            (
+                float(row["peer_review_history"]),
+                float(row["ac_from_reviewing"]),
+                row.get("group", "Agent"),
+            )
+            for row in history.agent_outcome_summary()
+        ]
+
+    return []
+
+
 def _pearson(xs: list[float], ys: list[float]) -> float:
     n = len(xs)
     if n < 2:
@@ -1437,6 +1465,56 @@ def _draw_reputation_vs_ac(ax, history: "History") -> bool:
     return True
 
 
+def _draw_reputation_vs_review_ac(ax, history: "History") -> bool:
+    """Scatter peer-review reputation vs AC held via reviewer shares."""
+    points = _reputation_vs_review_ac_points(history)
+    if not points:
+        ax.text(0.5, 0.5, "No review-capital data recorded", ha="center", va="center")
+        ax.set_axis_off()
+        return False
+
+    by_group: dict[str, list[tuple[float, float]]] = {}
+    for reputation, review_ac, group in points:
+        by_group.setdefault(group, []).append((reputation, review_ac))
+
+    cmap = plt.get_cmap("tab10")
+    ordered_groups = sorted(by_group)
+    color_for = {group: cmap(i % 10) for i, group in enumerate(ordered_groups)}
+    for group in ordered_groups:
+        xs, ys = zip(*by_group[group])
+        ax.scatter(
+            xs,
+            ys,
+            s=28,
+            alpha=0.75,
+            color=color_for[group],
+            edgecolors="#1e293b",
+            linewidths=0.4,
+            label=group,
+        )
+
+    reputations = [p[0] for p in points]
+    review_acs = [p[1] for p in points]
+    corr = _pearson(reputations, review_acs)
+    if not math.isnan(corr):
+        ax.text(
+            0.03,
+            0.97,
+            f"Pearson r = {corr:.3f}  (n = {len(points)})",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
+        )
+
+    ax.set_xlabel("Peer-review reputation (AC earned per review)")
+    ax.set_ylabel("Academic capital from peer review")
+    if len(ordered_groups) > 1:
+        ax.legend(fontsize=8, loc="lower right")
+    return True
+
+
 def plot_reputation_vs_ac(
     history: "History", path: str | None = None, show: bool = False
 ):
@@ -1444,6 +1522,17 @@ def plot_reputation_vs_ac(
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_reputation_vs_ac(ax, history)
     ax.set_title("Reviewer reputation vs final academic capital")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_reputation_vs_review_ac(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """AC earned via reviewer shares vs peer-review reputation, by agent type."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_reputation_vs_review_ac(ax, history)
+    ax.set_title("Reviewer reputation vs peer-review academic capital")
     fig.tight_layout()
     return _finish(fig, path, show)
 
@@ -2039,6 +2128,11 @@ def _has_reputation_vs_ac(history: "History") -> bool:
     return bool(_reputation_vs_ac_points(history))
 
 
+def _has_reputation_vs_review_ac(history: "History") -> bool:
+    points = _reputation_vs_review_ac_points(history)
+    return bool(points) and any(review_ac > 0.0 for _, review_ac, _ in points)
+
+
 def _has_groups(history: "History") -> bool:
     return bool(history.agent_group_summary())
 
@@ -2073,6 +2167,7 @@ _GALLERY_CHARTS = (
     ("marketplace_activity", _has_marketplace, plot_marketplace_activity),
     ("review_reputation", _has_reputation, plot_review_reputation),
     ("reputation_vs_ac", _has_reputation_vs_ac, plot_reputation_vs_ac),
+    ("reputation_vs_review_ac", _has_reputation_vs_review_ac, plot_reputation_vs_review_ac),
     ("paper_quality_vs_ac",
      lambda h: bool(_paper_quality_ac_points(h)), plot_paper_quality_vs_ac),
     ("writing_effort_vs_rate",
@@ -2217,6 +2312,9 @@ def plot_all(
         ),
         "reputation_vs_ac": plot_reputation_vs_ac(
             history, os.path.join(outdir, "reputation_vs_ac.png"), show=show
+        ),
+        "reputation_vs_review_ac": plot_reputation_vs_review_ac(
+            history, os.path.join(outdir, "reputation_vs_review_ac.png"), show=show
         ),
         "action_mix": plot_action_mix_over_time(
             history, os.path.join(outdir, "action_mix.png"), show=show
