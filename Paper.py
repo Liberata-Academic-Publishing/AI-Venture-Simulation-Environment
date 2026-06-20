@@ -26,6 +26,7 @@ MIN_REVIEW_ACCRUAL_BUMP = SIM.min_review_accrual_bump
 MAX_REVIEW_ACCRUAL_BUMP = SIM.max_review_accrual_bump
 REVIEW_SIGMOID_MIDPOINT = SIM.review_sigmoid_midpoint
 REVIEW_SIGMOID_STEEPNESS = SIM.review_sigmoid_steepness
+REVIEW_SIGMOID_SATURATION_EFFORT = SIM.review_sigmoid_saturation_effort
 REVIEW_JUMP_THRESHOLD = SIM.review_jump_threshold
 REVIEW_JUMP_BUMP = SIM.review_jump_bump
 REVIEW_JUMP_WIDTH = SIM.review_jump_width
@@ -177,9 +178,9 @@ def fair_market_price_from_epsilons(
 
 
 def _normalized_sigmoid(effort: float) -> float:
-    """Map effort into [0, 1] between one timestep and the long-review target."""
+    """Map effort into [0, 1] between min effort and long-review saturation."""
     lower = MIN_REVIEW_EFFORT_THRESHOLD
-    upper = max(lower + 1e-9, GOOD_REVIEW_TIMESTEPS)
+    upper = max(lower + 1e-9, REVIEW_SIGMOID_SATURATION_EFFORT)
     steepness = max(1e-9, REVIEW_SIGMOID_STEEPNESS)
     midpoint = REVIEW_SIGMOID_MIDPOINT
 

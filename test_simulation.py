@@ -183,11 +183,14 @@ class EconomicsTest(unittest.TestCase):
             b1 = review_accrual_bump(at_threshold)
             b2 = review_accrual_bump(at_threshold + 1.0)
             b5 = review_accrual_bump(GOOD_REVIEW_TIMESTEPS)
-            b20 = review_accrual_bump(GOOD_REVIEW_TIMESTEPS + 18.0)
+            sat = review_accrual_bump(paper_mod.REVIEW_SIGMOID_SATURATION_EFFORT)
+            past_sat = review_accrual_bump(
+                paper_mod.REVIEW_SIGMOID_SATURATION_EFFORT + 5.0
+            )
         self.assertGreater(b1, 0.0)
         self.assertGreater(b2, b1)
         self.assertGreater(b5, b2)
-        self.assertAlmostEqual(b20, b5)
+        self.assertAlmostEqual(past_sat, sat)
 
     def test_fair_market_price_uses_empirical_epsilon_distribution(self):
         epsilons = [0.0, 0.05, 0.20]
@@ -794,6 +797,11 @@ class EnvironmentTest(unittest.TestCase):
             summary["ReviewKindScriptAgent"]["completed_reviews"],
             1,
         )
+        group_stats = summary["ReviewKindScriptAgent"]
+        self.assertIn("average_review_effort", group_stats)
+        self.assertIn("good_faith_review_rate", group_stats)
+        self.assertIn("mean_good_faith_reviews", group_stats)
+        self.assertIn("mean_bad_faith_reviews", group_stats)
 
     def test_full_run_produces_reviews(self):
         from run_simulation import build_simulation

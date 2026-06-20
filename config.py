@@ -84,15 +84,16 @@ class SimConfig:
     review_paradigm: str = "continuous"       # "continuous" | "discrete"
     review_effort_per_timestep: float = 1.0     # effort added per review timestep
     writing_effort_per_timestep: float = 1.0    # continuous writing effort per timestep
-    min_review_effort_threshold: float = 3.0    # minimum valid review/share effort
-    good_faith_review_threshold: float = 2.0    # continuous-mode classification
+    min_review_effort_threshold: float = 0.0    # minimum valid review/share effort
+    good_faith_review_threshold: float = 3.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
     good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
     review_effort_curve: str = "sigmoid"        # "sigmoid" | "log" | "jump"
-    min_review_accrual_bump: float = 0.15       # sigmoid bump at one timestep
+    min_review_accrual_bump: float = 0.0       # sigmoid bump at one timestep
     max_review_accrual_bump: float = 0.60       # sigmoid saturation near a long review
     review_sigmoid_midpoint: float = 3.0        # review length where impact accelerates
-    review_sigmoid_steepness: float = 1.0
+    review_sigmoid_steepness: float = 0.5        # slope: lower = gentler (0.35–0.6 stretched)
+    review_sigmoid_saturation_effort: float = 25.0  # effort where bump ~saturates
     review_jump_threshold: float = 15.0          #f optional jump-mode high-effort cutoff
     review_jump_bump: float = 0.50               # optional extra bump after the cutoff
     review_jump_width: float = 0.75              # softness of the jump-mode transition

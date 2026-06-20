@@ -361,17 +361,18 @@ def plot_agent_group_comparison(
 ):
     """Executive summary by agent type: mean capital and review behavior."""
     summary = history.agent_group_summary()
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     if not summary:
-        axes[0].text(0.5, 0.5, "No agent group data", ha="center", va="center")
-        axes[0].set_axis_off()
-        axes[1].set_axis_off()
+        for ax in axes:
+            ax.text(0.5, 0.5, "No agent group data", ha="center", va="center")
+            ax.set_axis_off()
         return _finish(fig, path, show)
 
     groups = sorted(summary)
     mean_capital = [summary[g]["mean_final_capital"] for g in groups]
     good = [summary[g]["good_faith_reviews"] for g in groups]
     bad = [summary[g]["bad_faith_reviews"] for g in groups]
+    avg_effort = [summary[g].get("average_review_effort", 0.0) for g in groups]
     x = range(len(groups))
 
     axes[0].bar(x, mean_capital, color="#60a5fa", edgecolor="#1e3a5f")
@@ -387,6 +388,27 @@ def plot_agent_group_comparison(
     axes[1].set_ylabel("Completed reviews")
     axes[1].set_title("Review outcomes by agent type")
     axes[1].legend(fontsize=8)
+
+    axes[2].bar(x, avg_effort, color="#7c3aed", edgecolor="#4c1d95")
+    axes[2].axhline(
+        MIN_REVIEW_EFFORT_THRESHOLD,
+        color="#dc2626",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"min effort ({MIN_REVIEW_EFFORT_THRESHOLD:g})",
+    )
+    axes[2].axhline(
+        SIM.good_faith_review_threshold,
+        color="#16a34a",
+        linestyle=":",
+        linewidth=1.2,
+        label=f"good faith ({SIM.good_faith_review_threshold:g})",
+    )
+    axes[2].set_xticks(list(x))
+    axes[2].set_xticklabels(groups, rotation=20, ha="right")
+    axes[2].set_ylabel("Mean review effort (timesteps)")
+    axes[2].set_title("Average completed review effort")
+    axes[2].legend(fontsize=8, loc="best")
 
     fig.tight_layout()
     return _finish(fig, path, show)
@@ -1653,6 +1675,190 @@ def plot_reputation_vs_review_ac(
     return _finish(fig, path, show)
 
 
+def _talent_vs_final_ac_points(
+    history: "History",
+) -> list[tuple[float, float, str]]:
+    """Return (talent, final_capital, group) for each agent."""
+    cached = getattr(history, "_agent_outcome_summary", None)
+    if cached:
+        points: list[tuple[float, float, str]] = []
+        for row in cached:
+            agent = row.get("agent", "")
+            talent = row.get("talent")
+            if talent is None:
+                talent = history.agent_talent.get(agent)
+            if talent is None:
+                continue
+            points.append(
+                (
+                    float(talent),
+                    float(row["final_capital"]),
+                    row.get("group", "Agent"),
+                )
+            )
+        if points:
+            return points
+
+    if history.agent_talent:
+        return [
+            (
+                float(row["talent"]),
+                float(row["final_capital"]),
+                row.get("group", "Agent"),
+            )
+            for row in history.agent_outcome_summary()
+        ]
+
+    points = []
+    for label, cap_series in history.agent_capital.items():
+        if not cap_series:
+            continue
+        points.append(
+            (
+                float(history.agent_talent.get(label, 0.0)),
+                float(cap_series[-1]),
+                history.agent_groups.get(label, "Agent"),
+            )
+        )
+    return points
+
+
+def _talent_vs_review_ac_points(
+    history: "History",
+) -> list[tuple[float, float, str]]:
+    """Return (talent, ac_from_reviewing, group) for each agent."""
+    cached = getattr(history, "_agent_outcome_summary", None)
+    if cached:
+        points: list[tuple[float, float, str]] = []
+        for row in cached:
+            agent = row.get("agent", "")
+            talent = row.get("talent")
+            if talent is None:
+                talent = history.agent_talent.get(agent)
+            if talent is None:
+                continue
+            points.append(
+                (
+                    float(talent),
+                    float(row.get("ac_from_reviewing", 0.0)),
+                    row.get("group", "Agent"),
+                )
+            )
+        if points:
+            return points
+
+    if history.agent_talent or history.agent_review_history or history.paper_reviewer:
+        return [
+            (
+                float(row["talent"]),
+                float(row["ac_from_reviewing"]),
+                row.get("group", "Agent"),
+            )
+            for row in history.agent_outcome_summary()
+        ]
+
+    return []
+
+
+def _draw_talent_scatter(
+    ax,
+    points: list[tuple[float, float, str]],
+    *,
+    xlabel: str,
+    ylabel: str,
+    empty_message: str,
+) -> bool:
+    if not points:
+        ax.text(0.5, 0.5, empty_message, ha="center", va="center")
+        ax.set_axis_off()
+        return False
+
+    by_group: dict[str, list[tuple[float, float]]] = {}
+    for x_val, y_val, group in points:
+        by_group.setdefault(group, []).append((x_val, y_val))
+
+    cmap = plt.get_cmap("tab10")
+    ordered_groups = sorted(by_group)
+    color_for = {group: cmap(i % 10) for i, group in enumerate(ordered_groups)}
+    for group in ordered_groups:
+        xs, ys = zip(*by_group[group])
+        ax.scatter(
+            xs,
+            ys,
+            s=28,
+            alpha=0.75,
+            color=color_for[group],
+            edgecolors="#1e293b",
+            linewidths=0.4,
+            label=group,
+        )
+
+    xs_all = [p[0] for p in points]
+    ys_all = [p[1] for p in points]
+    corr = _pearson(xs_all, ys_all)
+    if not math.isnan(corr):
+        ax.text(
+            0.03,
+            0.97,
+            f"Pearson r = {corr:.3f}  (n = {len(points)})",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
+        )
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if len(ordered_groups) > 1:
+        ax.legend(fontsize=8, loc="lower right")
+    return True
+
+
+def _draw_talent_vs_final_ac(ax, history: "History") -> bool:
+    """Scatter intrinsic talent vs total academic capital by agent."""
+    return _draw_talent_scatter(
+        ax,
+        _talent_vs_final_ac_points(history),
+        xlabel="Intrinsic talent",
+        ylabel="Final academic capital",
+        empty_message="No talent data recorded",
+    )
+
+
+def _draw_talent_vs_review_ac(ax, history: "History") -> bool:
+    """Scatter intrinsic talent vs AC held via reviewer shares."""
+    return _draw_talent_scatter(
+        ax,
+        _talent_vs_review_ac_points(history),
+        xlabel="Intrinsic talent",
+        ylabel="Academic capital from peer review",
+        empty_message="No review-capital data recorded",
+    )
+
+
+def plot_talent_vs_final_ac(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Final academic capital vs intrinsic talent, colored by agent type."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_talent_vs_final_ac(ax, history)
+    ax.set_title("Intrinsic talent vs final academic capital")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
+def plot_talent_vs_review_ac(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Peer-review AC held vs intrinsic talent, colored by agent type."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    _draw_talent_vs_review_ac(ax, history)
+    ax.set_title("Intrinsic talent vs peer-review academic capital")
+    fig.tight_layout()
+    return _finish(fig, path, show)
+
+
 def _daily_action_counts(history: "History") -> dict[str, list[int]]:
     """Per-day counts for each raw action kind."""
     kinds = sorted({kind for _, _, kind, _ in history.actions})
@@ -1791,13 +1997,14 @@ def plot_review_effort_scatter(
 def _reward_curve_max_effort(sim=SIM) -> float:
     """Upper x-axis bound for the review reward curve (matches gallery JS)."""
     threshold = float(sim.min_review_effort_threshold)
+    saturation = float(sim.review_sigmoid_saturation_effort)
     good_ts = float(sim.good_review_timesteps)
     curve = str(sim.review_effort_curve).strip().lower()
     if curve == "log":
         return max(good_ts * 4, threshold + 15, 20)
     if curve == "jump":
         return max(good_ts * 2.5, float(sim.review_jump_threshold) + 5)
-    return max(good_ts * 2.5, threshold + 8)
+    return max(saturation * 1.15, threshold + 8)
 
 
 def _reward_curve_label(sim=SIM) -> str:
@@ -2249,6 +2456,16 @@ def _has_reputation_vs_review_ac(history: "History") -> bool:
     return bool(points) and any(review_ac > 0.0 for _, review_ac, _ in points)
 
 
+def _has_talent_vs_final_ac(history: "History") -> bool:
+    points = _talent_vs_final_ac_points(history)
+    return bool(points) and len({p[0] for p in points}) > 1
+
+
+def _has_talent_vs_review_ac(history: "History") -> bool:
+    points = _talent_vs_review_ac_points(history)
+    return bool(points) and any(review_ac > 0.0 for _, review_ac, _ in points)
+
+
 def _has_groups(history: "History") -> bool:
     return bool(history.agent_group_summary())
 
@@ -2284,6 +2501,8 @@ _GALLERY_CHARTS = (
     ("review_reputation", _has_reputation, plot_review_reputation),
     ("reputation_vs_ac", _has_reputation_vs_ac, plot_reputation_vs_ac),
     ("reputation_vs_review_ac", _has_reputation_vs_review_ac, plot_reputation_vs_review_ac),
+    ("talent_vs_final_ac", _has_talent_vs_final_ac, plot_talent_vs_final_ac),
+    ("talent_vs_review_ac", _has_talent_vs_review_ac, plot_talent_vs_review_ac),
     ("paper_quality_vs_ac",
      lambda h: bool(_paper_quality_ac_points(h)), plot_paper_quality_vs_ac),
     ("paper_quality_vs_review_faith",
@@ -2443,6 +2662,12 @@ def plot_all(
         ),
         "reputation_vs_review_ac": plot_reputation_vs_review_ac(
             history, os.path.join(outdir, "reputation_vs_review_ac.png"), show=show
+        ),
+        "talent_vs_final_ac": plot_talent_vs_final_ac(
+            history, os.path.join(outdir, "talent_vs_final_ac.png"), show=show
+        ),
+        "talent_vs_review_ac": plot_talent_vs_review_ac(
+            history, os.path.join(outdir, "talent_vs_review_ac.png"), show=show
         ),
         "action_mix": plot_action_mix_over_time(
             history, os.path.join(outdir, "action_mix.png"), show=show

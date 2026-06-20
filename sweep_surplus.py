@@ -58,7 +58,8 @@ class BumpParams:
     review_bump_decay_rate: float = 0.05
     review_bump_decay_cap_timesteps: float | None = 100.0
     default_max_reviewer_share: float = 0.10
-    review_sigmoid_midpoint: float = 2.0
+    review_sigmoid_saturation_effort: float = 18.0
+    review_sigmoid_midpoint: float = 3.0
     history_price_scale: float = 0.5
     quality_price_scale: float = 1.0
 
@@ -75,6 +76,7 @@ def bump_params_from_config() -> BumpParams:
         review_bump_decay_rate=SIM.review_bump_decay_rate,
         review_bump_decay_cap_timesteps=SIM.review_bump_decay_cap_timesteps,
         default_max_reviewer_share=SIM.default_max_reviewer_share,
+        review_sigmoid_saturation_effort=SIM.review_sigmoid_saturation_effort,
         review_sigmoid_midpoint=SIM.review_sigmoid_midpoint,
         history_price_scale=SIM.history_price_scale,
         quality_price_scale=SIM.quality_price_scale,
@@ -97,6 +99,7 @@ def apply_sim_overrides(
         review_bump_decay_rate=params.review_bump_decay_rate,
         review_bump_decay_cap_timesteps=params.review_bump_decay_cap_timesteps,
         default_max_reviewer_share=params.default_max_reviewer_share,
+        review_sigmoid_saturation_effort=params.review_sigmoid_saturation_effort,
         review_sigmoid_midpoint=params.review_sigmoid_midpoint,
         history_price_scale=params.history_price_scale,
         quality_price_scale=params.quality_price_scale,
@@ -108,6 +111,7 @@ def apply_sim_overrides(
     Paper.MIN_REVIEW_ACCRUAL_BUMP = sim.min_review_accrual_bump
     Paper.MAX_REVIEW_ACCRUAL_BUMP = sim.max_review_accrual_bump
     Paper.DEFAULT_MAX_REVIEWER_SHARE = sim.default_max_reviewer_share
+    Paper.REVIEW_SIGMOID_SATURATION_EFFORT = sim.review_sigmoid_saturation_effort
     Paper.REVIEW_SIGMOID_MIDPOINT = sim.review_sigmoid_midpoint
     Paper.HISTORY_PRICE_SCALE = sim.history_price_scale
     Paper.QUALITY_PRICE_SCALE = sim.quality_price_scale
@@ -336,6 +340,7 @@ def _csv_fieldnames() -> list[str]:
         "review_bump_decay_cap_timesteps",
         "default_max_reviewer_share",
         "review_sigmoid_midpoint",
+        "review_sigmoid_saturation_effort",
         "history_price_scale",
         "quality_price_scale",
         "rl_reward_ac_weight",
@@ -443,6 +448,7 @@ def main(argv: list[str] | None = None) -> int:
             f"decay_cap={params.review_bump_decay_cap_timesteps} "
             f"max_share={params.default_max_reviewer_share:.3f} "
             f"sigmoid_mid={params.review_sigmoid_midpoint:.1f} "
+            f"sat_effort={params.review_sigmoid_saturation_effort:.1f} "
             f"hist_price={params.history_price_scale:.2f} "
             f"qual_price={params.quality_price_scale:.2f}"
         )

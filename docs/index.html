@@ -158,7 +158,8 @@
           <thead>
             <tr>
               <th>Type</th><th>Agents</th><th>Mean AC</th><th>Papers</th>
-              <th>Reviews</th><th>Good</th><th>Bad</th><th>Mean epsilon</th>
+              <th>Reviews</th><th>Avg effort</th><th>Good/agent</th><th>Bad/agent</th>
+              <th>Good %</th><th>Mean epsilon</th>
             </tr>
           </thead>
           <tbody id="groupSummary"></tbody>
@@ -178,6 +179,8 @@
       <div class="panel" id="panel-reputation"><h2>Reviewer reputation over time</h2><img class="chart-img" id="img-review_reputation" alt="Reviewer reputation over time"><canvas id="reputationChart"></canvas></div>
       <div class="panel" id="panel-reputation-vs-ac"><h2>Reviewer reputation vs final academic capital</h2><img class="chart-img" id="img-reputation_vs_ac" alt="Reviewer reputation vs final academic capital"></div>
       <div class="panel" id="panel-reputation-vs-review-ac"><h2>Reviewer reputation vs peer-review academic capital</h2><img class="chart-img" id="img-reputation_vs_review_ac" alt="Reviewer reputation vs peer-review academic capital"></div>
+      <div class="panel" id="panel-talent-vs-final-ac"><h2>Intrinsic talent vs final academic capital</h2><img class="chart-img" id="img-talent_vs_final_ac" alt="Intrinsic talent vs final academic capital"></div>
+      <div class="panel" id="panel-talent-vs-review-ac"><h2>Intrinsic talent vs peer-review academic capital</h2><img class="chart-img" id="img-talent_vs_review_ac" alt="Intrinsic talent vs peer-review academic capital"></div>
       <div class="panel" id="panel-quality"><h2>Paper quality vs accrued capital</h2><img class="chart-img" id="img-paper_quality_vs_ac" alt="Paper quality vs accrued capital"><canvas id="qualityChart"></canvas></div>
       <div class="panel" id="panel-quality-faith"><h2>Paper quality vs review faith</h2><img class="chart-img" id="img-paper_quality_vs_review_faith" alt="Paper quality vs good or bad faith reviews"></div>
       <div class="panel" id="panel-effort-rate"><h2>Writing effort vs accrual rate</h2><img class="chart-img" id="img-writing_effort_vs_rate" alt="Writing effort vs accrual rate"><canvas id="effortRateChart"></canvas></div>
@@ -338,6 +341,7 @@
         ["max_review_accrual_bump", "Max review bump"],
         ["review_sigmoid_midpoint", "Sigmoid midpoint"],
         ["review_sigmoid_steepness", "Sigmoid steepness"],
+        ["review_sigmoid_saturation_effort", "Sigmoid saturation effort"],
         ["review_jump_threshold", "Jump threshold"],
         ["review_jump_bump", "Jump bump"],
         ["review_jump_width", "Jump width"],
@@ -444,9 +448,13 @@
     }
     function normalizedSigmoid(effort, config) {
       const lower = cfgNum(config, "min_review_effort_threshold", 2.0);
-      const upper = Math.max(lower + 1e-9, cfgNum(config, "good_review_timesteps", 5.0));
-      const steepness = Math.max(1e-9, cfgNum(config, "review_sigmoid_steepness", 1.4));
-      const midpoint = cfgNum(config, "review_sigmoid_midpoint", 2.5);
+      const upper = Math.max(
+        lower + 1e-9,
+        cfgNum(config, "review_sigmoid_saturation_effort",
+          cfgNum(config, "good_review_timesteps", 5.0) * 3.6),
+      );
+      const steepness = Math.max(1e-9, cfgNum(config, "review_sigmoid_steepness", 1.0));
+      const midpoint = cfgNum(config, "review_sigmoid_midpoint", 3.0);
       const sig = (x) => 1.0 / (1.0 + Math.exp(-steepness * (x - midpoint)));
       const lo = sig(lower), hi = sig(upper);
       if (Math.abs(hi - lo) < 1e-12) return effort >= upper ? 1.0 : 0.0;
@@ -477,13 +485,14 @@
     }
     function rewardCurveMaxEffort(config) {
       const threshold = cfgNum(config, "min_review_effort_threshold", 2.0);
+      const saturation = cfgNum(config, "review_sigmoid_saturation_effort", 18.0);
       const goodTs = cfgNum(config, "good_review_timesteps", 5.0);
       const curve = cfgStr(config, "review_effort_curve", "log").trim().toLowerCase();
       if (curve === "log") return Math.max(goodTs * 4, threshold + 15, 20);
       if (curve === "jump") {
         return Math.max(goodTs * 2.5, cfgNum(config, "review_jump_threshold", 15.0) + 5);
       }
-      return Math.max(goodTs * 2.5, threshold + 8);
+      return Math.max(saturation * 1.15, threshold + 8);
     }
     function rewardCurvePoints(config) {
       const xmax = rewardCurveMaxEffort(config);
@@ -978,6 +987,8 @@
       { panel: "panel-reputation", chart: "review_reputation", canvasId: "reputationChart", imgId: "img-review_reputation" },
       { panel: "panel-reputation-vs-ac", chart: "reputation_vs_ac", imgId: "img-reputation_vs_ac" },
       { panel: "panel-reputation-vs-review-ac", chart: "reputation_vs_review_ac", imgId: "img-reputation_vs_review_ac" },
+      { panel: "panel-talent-vs-final-ac", chart: "talent_vs_final_ac", imgId: "img-talent_vs_final_ac" },
+      { panel: "panel-talent-vs-review-ac", chart: "talent_vs_review_ac", imgId: "img-talent_vs_review_ac" },
       { panel: "panel-quality", chart: "paper_quality_vs_ac", canvasId: "qualityChart", imgId: "img-paper_quality_vs_ac" },
       { panel: "panel-quality-faith", chart: "paper_quality_vs_review_faith", imgId: "img-paper_quality_vs_review_faith" },
       { panel: "panel-effort-rate", chart: "writing_effort_vs_rate", canvasId: "effortRateChart", imgId: "img-writing_effort_vs_rate" },
@@ -1207,16 +1218,33 @@
       }
 
       const fmt = (value, digits = 2) => Number(value || 0).toFixed(digits);
-      groupSummaryEl.innerHTML = entries.map(([group, stats]) =>
-        `<tr><td>${group}</td>` +
-        `<td>${stats.agent_count || 0}</td>` +
-        `<td>${fmt(stats.mean_final_capital)}</td>` +
-        `<td>${stats.papers_authored || 0}</td>` +
-        `<td>${stats.completed_reviews || 0}</td>` +
-        `<td>${stats.good_faith_reviews || 0}</td>` +
-        `<td>${stats.bad_faith_reviews || 0}</td>` +
-        `<td>${fmt(stats.mean_peer_review_epsilon, 3)}</td></tr>`
-      ).join("");
+      groupSummaryEl.innerHTML = entries.map(([group, stats]) => {
+        const goodRate = stats.good_faith_review_rate != null
+          ? stats.good_faith_review_rate
+          : ((stats.completed_reviews || 0)
+              ? (stats.good_faith_reviews || 0) / stats.completed_reviews
+              : 0);
+        const meanGood = stats.mean_good_faith_reviews != null
+          ? stats.mean_good_faith_reviews
+          : ((stats.agent_count || 0)
+              ? (stats.good_faith_reviews || 0) / stats.agent_count
+              : 0);
+        const meanBad = stats.mean_bad_faith_reviews != null
+          ? stats.mean_bad_faith_reviews
+          : ((stats.agent_count || 0)
+              ? (stats.bad_faith_reviews || 0) / stats.agent_count
+              : 0);
+        return `<tr><td>${group}</td>` +
+          `<td>${stats.agent_count || 0}</td>` +
+          `<td>${fmt(stats.mean_final_capital)}</td>` +
+          `<td>${stats.papers_authored || 0}</td>` +
+          `<td>${stats.completed_reviews || 0}</td>` +
+          `<td>${fmt(stats.average_review_effort)}</td>` +
+          `<td>${fmt(meanGood, 1)}</td>` +
+          `<td>${fmt(meanBad, 1)}</td>` +
+          `<td>${fmt(100 * goodRate, 1)}%</td>` +
+          `<td>${fmt(stats.mean_peer_review_epsilon, 3)}</td></tr>`;
+      }).join("");
 
       if (groupChart) { groupChart.destroy(); groupChart = null; }
       if (pngMode) return;  // the comparison chart is shown as a PNG image

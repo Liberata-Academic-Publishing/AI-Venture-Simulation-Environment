@@ -723,6 +723,15 @@ class History:
             summary["average_review_effort"] = (
                 stats["total_review_effort"] / reviews if reviews else 0.0
             )
+            summary["good_faith_review_rate"] = (
+                stats["good_faith_reviews"] / reviews if reviews else 0.0
+            )
+            summary["mean_good_faith_reviews"] = (
+                stats["good_faith_reviews"] / count if count else 0.0
+            )
+            summary["mean_bad_faith_reviews"] = (
+                stats["bad_faith_reviews"] / count if count else 0.0
+            )
             summary["actions"] = dict(stats["actions"])
             if summary["min_final_capital"] is None:
                 summary["min_final_capital"] = 0.0

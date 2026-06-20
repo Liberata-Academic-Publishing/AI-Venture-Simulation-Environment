@@ -257,10 +257,15 @@ def print_agent_group_summary(history: History):
         mean_reputation = float(stats.get("mean_peer_review_history", 0.0))
         mean_epsilon = float(stats.get("mean_peer_review_epsilon", 0.0))
         avg_effort = float(stats.get("average_review_effort", 0.0))
+        good_rate = float(stats.get("good_faith_review_rate", 0.0))
+        mean_good = float(stats.get("mean_good_faith_reviews", 0.0))
+        mean_bad = float(stats.get("mean_bad_faith_reviews", 0.0))
         print(
             f"- {group}: agents={count}, mean AC={mean_capital:.2f}, "
             f"papers={papers}, reviews={reviews} "
-            f"(good={good}, bad={bad}), avg effort={avg_effort:.2f}, "
+            f"(good={good}, bad={bad}, good%={100.0 * good_rate:.1f}), "
+            f"avg effort={avg_effort:.2f}, good/agent={mean_good:.1f}, "
+            f"bad/agent={mean_bad:.1f}, "
             f"mean reputation={mean_reputation:.2f}, mean epsilon={mean_epsilon:.3f}"
         )
 
@@ -359,6 +364,8 @@ CHART_DESCRIPTIONS = {
     "review_reputation": "Reviewer reputation (AC earned per review) over time",
     "reputation_vs_ac": "Final academic capital vs peer-review reputation (by agent type)",
     "reputation_vs_review_ac": "Peer-review AC held vs reputation (by agent type)",
+    "talent_vs_final_ac": "Final academic capital vs intrinsic talent (by agent type)",
+    "talent_vs_review_ac": "Peer-review AC held vs intrinsic talent (by agent type)",
     "action_mix": "What every agent did each timestep (stacked bars)",
     "choice_breakdown": "Agent decisions (write / review / finish)",
     "review_effort_histogram": "Completed peer reviews by effort level",
