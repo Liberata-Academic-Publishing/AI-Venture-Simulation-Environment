@@ -17,7 +17,13 @@ from typing import TYPE_CHECKING, Any
 
 from Agent import portfolio_accrual_rate
 from config import SIM
-from Paper import BAD_FAITH_REVIEW, GOOD_FAITH_REVIEW, REVIEW_BUMP_DECAY, validate_review_bump_duration
+from Paper import (
+    BAD_FAITH_REVIEW,
+    GOOD_FAITH_REVIEW,
+    REVIEW_BUMP_DECAY,
+    forecast_decayed_accrual_gain,
+    validate_review_bump_duration,
+)
 
 if TYPE_CHECKING:
     from Agent import ActionRecord
@@ -114,6 +120,53 @@ def _mean_author_price_multiplier(env: "Environment") -> float:
         for agent in env.agents
     ]
     return sum(values) / len(values) if values else 1.0
+
+
+def review_benefit_at_completion(
+    review_record: dict[str, Any],
+    *,
+    horizon_timesteps: float | None = None,
+) -> dict[str, float] | None:
+    """Per-review surplus at settlement using the agent forecast horizon.
+
+    Unlike the cumulative ``author_net_*`` scalars (which re-value every past
+    review with each paper's *current* AC), this freezes the trade at completion:
+    incremental bump value minus the reviewer's share of forecast paper AC over
+    ``horizon_timesteps`` (default ``SIM.forecast_horizon_timesteps``).
+    """
+    share = float(review_record.get("share", 0.0))
+    if share <= 0.0:
+        return None
+
+    horizon = max(
+        0.0,
+        float(
+            horizon_timesteps
+            if horizon_timesteps is not None
+            else SIM.forecast_horizon_timesteps
+        ),
+    )
+    epsilon = float(review_record.get("epsilon", 0.0))
+    a0 = float(review_record.get("current_ac_at_review", 0.0))
+    base_rate_raw = review_record.get("base_accrual_rate")
+    if base_rate_raw is not None:
+        base_rate = float(base_rate_raw)
+    else:
+        accrual_rate = float(review_record.get("accrual_rate", 0.0))
+        base_rate = (
+            accrual_rate / (1.0 + epsilon) if epsilon > 0.0 else accrual_rate
+        )
+
+    baseline_ac = a0 + base_rate * horizon
+    bumped_ac = a0 + forecast_decayed_accrual_gain(base_rate, epsilon, horizon)
+    value_created = max(0.0, bumped_ac - baseline_ac)
+    reviewer_benefit = share * bumped_ac
+    author_net = value_created - reviewer_benefit
+    return {
+        "author_net": author_net,
+        "reviewer_benefit": reviewer_benefit,
+        "value_created": value_created,
+    }
 
 
 def _review_benefit_components(env: "Environment") -> dict[str, float]:
@@ -364,6 +417,11 @@ class History:
         self.writing_efforts: list[tuple[int, str, float, bool]] = []
         # (timestep, agreed reviewer share) for each accepted marketplace claim.
         self.accepted_review_claims: list[tuple[int, float]] = []
+        # Per completed review: (timestep, faith suffix, author_net, reviewer_benefit,
+        # value_created, share). Settlement uses ``review_benefit_at_completion``.
+        self.review_benefit_events: list[
+            tuple[int, str, float, float, float, float]
+        ] = []
         self.action_counts: Counter[str] = Counter()
         self.agent_actions: dict[str, list[str]] = {}
 
@@ -481,6 +539,28 @@ class History:
                 self.completed_reviews.append(
                     (timestep, agent_label, paper_label, effort, review_kind)
                 )
+                if record.paper is not None:
+                    records = getattr(record.paper, "review_records", None)
+                    if records:
+                        latest = records[-1]
+                        benefit = review_benefit_at_completion(latest)
+                        if benefit is not None:
+                            kind = review_kind or latest.get("review_kind")
+                            faith = (
+                                "good"
+                                if kind == GOOD_FAITH_REVIEW
+                                else "bad"
+                            )
+                            self.review_benefit_events.append(
+                                (
+                                    timestep,
+                                    faith,
+                                    benefit["author_net"],
+                                    benefit["reviewer_benefit"],
+                                    benefit["value_created"],
+                                    float(latest.get("share", 0.0)),
+                                )
+                            )
         if record.writing_effort is not None:
             self.writing_efforts.append(
                 (
@@ -615,6 +695,25 @@ class History:
             "accepted_review_claims": [
                 {"timestep": d, "day": d, "price": p}
                 for (d, p) in self.accepted_review_claims
+            ],
+            "review_benefit_events": [
+                {
+                    "timestep": d,
+                    "day": d,
+                    "faith": faith,
+                    "author_net": author_net,
+                    "reviewer_benefit": reviewer_benefit,
+                    "value_created": value_created,
+                    "share": share,
+                }
+                for (
+                    d,
+                    faith,
+                    author_net,
+                    reviewer_benefit,
+                    value_created,
+                    share,
+                ) in self.review_benefit_events
             ],
             "action_counts": dict(self.action_counts),
             "action_counts_by_timestep": self.action_counts_by_timestep(),
@@ -1013,6 +1112,17 @@ class History:
             (_ts(r), float(r.get("price", 0.0)))
             for r in (data.get("accepted_review_claims") or [])
             if float(r.get("price", 0.0)) > 0.0
+        ]
+        history.review_benefit_events = [
+            (
+                _ts(r),
+                str(r.get("faith", "bad")),
+                float(r.get("author_net", 0.0)),
+                float(r.get("reviewer_benefit", 0.0)),
+                float(r.get("value_created", 0.0)),
+                float(r.get("share", 0.0)),
+            )
+            for r in (data.get("review_benefit_events") or [])
         ]
 
         counts = data.get("action_counts")

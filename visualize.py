@@ -652,6 +652,158 @@ def plot_review_surplus_aggregate(
     return _finish(fig, path, show)
 
 
+REVIEW_SURPLUS_BIN_SIZE = 10
+
+
+def _review_surplus_binned_series(
+    history: "History",
+    *,
+    bin_size: int = REVIEW_SURPLUS_BIN_SIZE,
+) -> dict[str, tuple[list[float], list[float]]]:
+    """Mean per-review surplus in each ``bin_size``-timestep window, by faith."""
+    events = getattr(history, "review_benefit_events", None) or []
+    max_t = max(history.timesteps) if history.timesteps else 0
+    if max_t <= 0 or not events:
+        return {}
+
+    num_bins = (max_t - 1) // bin_size + 1
+    author_good = [0.0] * num_bins
+    author_bad = [0.0] * num_bins
+    reviewer_good = [0.0] * num_bins
+    reviewer_bad = [0.0] * num_bins
+    counts_good = [0] * num_bins
+    counts_bad = [0] * num_bins
+
+    for timestep, faith, author_net, reviewer_benefit, _, _ in events:
+        t = int(timestep)
+        if t <= 0:
+            continue
+        b = (t - 1) // bin_size
+        if not (0 <= b < num_bins):
+            continue
+        if faith == "good":
+            author_good[b] += author_net
+            reviewer_good[b] += reviewer_benefit
+            counts_good[b] += 1
+        else:
+            author_bad[b] += author_net
+            reviewer_bad[b] += reviewer_benefit
+            counts_bad[b] += 1
+
+    midpoint = bin_size / 2.0
+    xs: list[float] = []
+    series: dict[str, list[float]] = {
+        "author_good": [],
+        "author_bad": [],
+        "reviewer_good": [],
+        "reviewer_bad": [],
+    }
+    for b in range(num_bins):
+        if counts_good[b] == 0 and counts_bad[b] == 0:
+            continue
+        xs.append(b * bin_size + midpoint)
+        for key, totals, counts in (
+            ("author_good", author_good, counts_good),
+            ("author_bad", author_bad, counts_bad),
+            ("reviewer_good", reviewer_good, counts_good),
+            ("reviewer_bad", reviewer_bad, counts_bad),
+        ):
+            series[key].append(totals[b] / counts[b] if counts[b] else float("nan"))
+
+    return {key: (xs, values) for key, values in series.items()}
+
+
+def _draw_review_surplus_by_period(
+    ax_left,
+    ax_right,
+    history: "History",
+    *,
+    bin_size: int = REVIEW_SURPLUS_BIN_SIZE,
+) -> None:
+    """Mean per-review surplus by time window (not cumulative)."""
+    series = _review_surplus_binned_series(history, bin_size=bin_size)
+    if not series.get("author_good", ([], []))[0]:
+        for ax in (ax_left, ax_right):
+            ax.text(
+                0.5,
+                0.5,
+                "No per-review surplus recorded\n(re-run simulation to populate)",
+                ha="center",
+                va="center",
+            )
+            ax.set_axis_off()
+        return
+
+    xs = series["author_good"][0]
+    good_color, bad_color = "#16a34a", "#f87171"
+    horizon = int(SIM.forecast_horizon_timesteps)
+
+    ax_left.axhline(0.0, color="#6b7280", linestyle="--", linewidth=1.0)
+    ax_left.plot(
+        xs,
+        series["author_good"][1],
+        color=good_color,
+        linewidth=2.0,
+        marker="o",
+        markersize=4,
+        label="good faith",
+    )
+    ax_left.plot(
+        xs,
+        series["author_bad"][1],
+        color=bad_color,
+        linewidth=2.0,
+        marker="o",
+        markersize=4,
+        label="bad faith",
+    )
+    ax_left.set_xlabel(f"Timestep ({bin_size}-step bin midpoint)")
+    ax_left.set_ylabel(f"Mean author net gain per review (AC, {horizon}-step horizon)")
+    ax_left.set_title("Do authors gain from reviews in each period?")
+    ax_left.legend(fontsize=8, loc="best")
+
+    ax_right.plot(
+        xs,
+        series["reviewer_good"][1],
+        color=good_color,
+        linewidth=2.0,
+        marker="o",
+        markersize=4,
+        label="good faith",
+    )
+    ax_right.plot(
+        xs,
+        series["reviewer_bad"][1],
+        color=bad_color,
+        linewidth=2.0,
+        marker="o",
+        markersize=4,
+        label="bad faith",
+    )
+    ax_right.set_xlabel(f"Timestep ({bin_size}-step bin midpoint)")
+    ax_right.set_ylabel(f"Mean reviewer capture per review (AC, {horizon}-step horizon)")
+    ax_right.set_title("What reviewers earn per review in each period")
+    ax_right.legend(fontsize=8, loc="best")
+
+
+def _has_review_surplus_by_period(history: "History") -> bool:
+    return bool(getattr(history, "review_benefit_events", None))
+
+
+def plot_review_surplus_by_period(
+    history: "History", path: str | None = None, show: bool = False
+):
+    """Mean per-review author/reviewer surplus in time bins (not cumulative)."""
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14, 5))
+    _draw_review_surplus_by_period(ax_left, ax_right, history)
+    fig.suptitle(
+        "Review surplus by period (per review, not cumulative)",
+        fontweight="bold",
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return _finish(fig, path, show)
+
+
 def _draw_ac_source(ax_left, ax_right, history: "History") -> None:
     """Where academic capital comes from: writing papers vs peer review.
 
@@ -2722,6 +2874,7 @@ _GALLERY_CHARTS = (
      plot_ac_source),
     ("review_benefit", _has_review_benefit, plot_review_benefit),
     ("review_surplus_aggregate", _has_review_benefit, plot_review_surplus_aggregate),
+    ("review_surplus_by_period", _has_review_surplus_by_period, plot_review_surplus_by_period),
     ("accepted_review_price_binned", _has_accepted_review_price, plot_accepted_review_price_binned),
     ("review_faith_by_share_price", _has_review_faith_by_share_price, plot_review_faith_by_share_price),
     ("market_pricing_dynamics", _has_market_pricing_scalars, plot_market_pricing_dynamics),
@@ -2807,6 +2960,9 @@ def plot_all(
         ),
         "review_surplus_aggregate": plot_review_surplus_aggregate(
             history, os.path.join(outdir, "review_surplus_aggregate.png"), show=show
+        ),
+        "review_surplus_by_period": plot_review_surplus_by_period(
+            history, os.path.join(outdir, "review_surplus_by_period.png"), show=show
         ),
         "ac_source": plot_ac_source(
             history, os.path.join(outdir, "ac_source.png"), show=show

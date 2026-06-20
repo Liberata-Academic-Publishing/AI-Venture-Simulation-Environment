@@ -32,7 +32,7 @@ class SimConfig:
     num_random_agents: int = 10
     num_probabilistic_agents: int = 0
     num_low_talent_rl_agents: int = 0
-    num_timesteps: int = 2000
+    num_timesteps: int = 20000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
     output_dir: str = "runs"
@@ -58,7 +58,7 @@ class SimConfig:
     # fair-market formula. ``adaptive_multiplier`` keeps that formula as the
     # base, then lets authors raise/lower future offers based on how quickly
     # their papers are claimed from the marketplace.
-    pricing_policy: str = "static_fair_market"  # "static_fair_market" | "adaptive_multiplier"
+    pricing_policy: str = "adaptive_multiplier"  # "static_fair_market" | "adaptive_multiplier"
     target_market_wait_timesteps: float = 1.0
     adaptive_pricing_learning_rate: float = 0.03
     min_author_price_multiplier: float = 0.25
@@ -151,9 +151,9 @@ class SimConfig:
     rl_backend: str = "tabular"     # "tabular" | "linear"
     rl_epsilon: float = 0.1         # exploration when learning online
     rl_gamma: float = 0.95          # TD discount
-    rl_reward_ac_weight: float = 0.5       # weight on Δ academic capital
+    rl_reward_ac_weight: float = 0.0      # weight on Δ academic capital
     rl_reward_rank_weight: float = 100.0   # weight on Δ AC percentile rank (0..1)
-    rl_reward_accrual_weight: float = 0.5  # weight on Δ portfolio accrual rate
+    rl_reward_accrual_weight: float = 1.0  # weight on Δ portfolio accrual rate
     rl_autoload_policy: bool = True  # auto-load the saved baseline for RL agents
     rl_low_talent_autoload_policy: bool = True  # auto-load low-talent RL policy
     talent_min: float = 0.6         # default talent spread; CLI can widen/narrow it
