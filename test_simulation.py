@@ -24,7 +24,9 @@ from Paper import (
     accrual_rate_from_quality,
     decayed_accrual_rate,
     fair_market_component,
+    fair_market_offer_share,
     fair_market_price_from_epsilons,
+    projected_paper_ac,
     review_accrual_bump,
     review_bump_factor_at_age,
 )
@@ -231,21 +233,35 @@ class EconomicsTest(unittest.TestCase):
 
         self.assertGreater(low_q.offered_share(reviewer), high_q.offered_share(reviewer))
 
-    def test_price_table_uses_fair_market_price_base(self):
+    def test_price_table_uses_fair_market_offer_base(self):
         author = ScriptAgent("author")
         reviewer = ScriptAgent("reviewer")
         reviewer.peer_review_epsilon_history = 0.10
-        paper = _listed_paper(author, quality=1.0)
-        fair_price = fair_market_price_from_epsilons([0.10])
+        paper = _listed_paper(author, quality=1.0, current_ac=0.0, accrual_rate=1.0)
+        epsilon = 0.10
+        projected = projected_paper_ac(0.0, 1.0, epsilon)
+        expected = fair_market_offer_share(epsilon, 0.0, projected)
 
         paper.update_price_table(
             [author, reviewer],
             market_median_quality=1.0,
             mean_peer_review_epsilon=0.10,
-            fair_market_price=fair_price,
+            fair_market_price=fair_market_price_from_epsilons([0.10]),
         )
 
-        self.assertAlmostEqual(paper.offered_share(reviewer), fair_price)
+        self.assertAlmostEqual(paper.offered_share(reviewer), expected)
+
+    def test_fair_market_offer_scales_down_with_existing_ac(self):
+        author = ScriptAgent("author")
+        reviewer = ScriptAgent("reviewer")
+        reviewer.peer_review_epsilon_history = 0.10
+        fresh = _listed_paper(author, quality=1.0, current_ac=0.0, accrual_rate=1.0)
+        seasoned = _listed_paper(author, quality=1.0, current_ac=50.0, accrual_rate=1.0)
+
+        fresh.update_price_table([reviewer], 1.0, 0.10)
+        seasoned.update_price_table([reviewer], 1.0, 0.10)
+
+        self.assertGreater(fresh.offered_share(reviewer), seasoned.offered_share(reviewer))
 
     def test_price_rises_for_stronger_reviewer_epsilon_history(self):
         author = ScriptAgent("author")
@@ -446,11 +462,22 @@ class MarketEconomicsTest(unittest.TestCase):
         self.assertIsNone(rookie.market_claim_assignment)
         self.assertEqual(env.market_assignments, 1)
 
-    def test_adaptive_author_pricing_bool_enables_policy(self):
+    def test_adaptive_pricing_policy_disables_scarcity(self):
         author = ScriptAgent("author")
-        env = Environment(agents=[author], use_adaptive_author_pricing=True)
+        env = Environment(
+            agents=[author],
+            pricing_policy="adaptive_multiplier",
+            use_scarcity_pricing=True,
+        )
 
         self.assertEqual(env.pricing_policy, "adaptive_multiplier")
+        self.assertFalse(env.use_scarcity_pricing)
+
+    def test_static_pricing_policy_honored(self):
+        author = ScriptAgent("author")
+        env = Environment(agents=[author], pricing_policy="static_fair_market")
+
+        self.assertEqual(env.pricing_policy, "static_fair_market")
 
     def test_legacy_heuristic_claim_unchanged_when_flags_off(self):
         agent = HeuristicAgent(intrinsic_talent=1.0)
@@ -499,6 +526,28 @@ class ReviewerStateTest(unittest.TestCase):
         self.assertGreater(reviewer.peer_review_history, 0.0)
         self.assertGreater(reviewer.peer_review_epsilon_history, 0.0)
         self.assertIsNone(reviewer.active_review_paper)
+
+    def test_peer_review_history_uses_accrual_rate_not_ac(self):
+        reviewer = ScriptAgent("reviewer")
+        high_ac = Paper(
+            author=ScriptAgent("author_a"),
+            current_ac=500.0,
+            accrual_rate=1.2,
+        )
+        low_ac = Paper(
+            author=ScriptAgent("author_b"),
+            current_ac=10.0,
+            accrual_rate=2.0,
+        )
+        share = 0.25
+
+        reviewer._record_review_outcome(high_ac, share, 5.0, "good_faith")
+        self.assertAlmostEqual(reviewer.peer_review_history, share * 1.2)
+
+        reviewer._record_review_outcome(low_ac, share, 5.0, "good_faith")
+        expected = (share * 1.2 + share * 2.0) / 2
+        self.assertAlmostEqual(reviewer.peer_review_history, expected)
+        self.assertNotAlmostEqual(reviewer.peer_review_history, (share * 500.0 + share * 10.0) / 2)
 
     def test_grabbing_new_paper_finalizes_active_review(self):
         author = ScriptAgent("author")
@@ -583,7 +632,7 @@ class ReviewParadigmTest(unittest.TestCase):
         self.assertGreater(paper.review_records[-1]["epsilon"], 0.0)
         self.assertIn(reviewer, paper.share_distribution)
 
-    def test_discrete_good_faith_review_uses_fixed_five_timesteps(self):
+    def test_discrete_good_faith_review_tracks_continuous_threshold(self):
         author = ScriptAgent("author")
         reviewer = ReviewKindScriptAgent(
             GOOD_FAITH_REVIEW, name="reviewer", marketplace=[]

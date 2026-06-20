@@ -53,13 +53,17 @@ def _optional_timesteps(value: str) -> float | None:
 
 
 def _apply_review_bump_config(args) -> None:
-    """Patch runtime SIM review-bump settings from CLI flags."""
+    """Patch runtime SIM settings from CLI flags."""
+    import Paper as paper_module
+
     config_module.SIM = replace(
         config_module.SIM,
         review_bump_duration=args.review_bump_duration,
         review_bump_decay_rate=args.review_bump_decay_rate,
         review_bump_decay_cap_timesteps=args.review_bump_decay_cap_timesteps,
+        reviewer_surplus_share=args.reviewer_surplus_share,
     )
+    paper_module.SIM = config_module.SIM
 
 
 def _parse_seed_list(value: str | None) -> list[int]:
@@ -183,7 +187,7 @@ def print_summary(env: Environment, history: History):
         reverse=True,
     )
     if reviewers:
-        print("\nTop reviewers (by reputation = AC earned per review)")
+        print("\nTop reviewers (by reputation = share-weighted accrual rate per review)")
         for agent in reviewers[:5]:
             print(
                 f"- {agent.name}: reputation={agent.peer_review_history:.2f} "
@@ -369,7 +373,7 @@ CHART_DESCRIPTIONS = {
     "paper_quality_vs_review_faith": "Paper quality vs good/bad-faith review effort and counts",
     "writing_effort_vs_rate": "Writing effort invested vs base accrual rate (asymptote)",
     "paper_writing_effort_over_time": "Paper-writing effort at publication over time",
-    "review_reputation": "Reviewer reputation (AC earned per review) over time",
+    "review_reputation": "Reviewer reputation (share-weighted accrual rate per review) over time",
     "reputation_vs_ac": "Final academic capital vs peer-review reputation (by agent type)",
     "reputation_vs_review_ac": "Peer-review AC held vs reputation (by agent type)",
     "talent_vs_final_ac": "Final academic capital vs intrinsic talent (by agent type)",
@@ -783,7 +787,6 @@ def build_simulation(
     talent_max: float = SIM.talent_max,
     low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
-    use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
     use_scarcity_pricing: bool = SIM.use_scarcity_pricing,
     reviewer_pressure_exponent: float = SIM.reviewer_pressure_exponent,
@@ -890,7 +893,6 @@ def build_simulation(
         paper_effort_min=paper_effort_min,
         paper_effort_max=paper_effort_max,
         pricing_policy=pricing_policy,
-        use_adaptive_author_pricing=use_adaptive_author_pricing,
         use_competition_adjusted_forecast=use_competition_adjusted_forecast,
         use_scarcity_pricing=use_scarcity_pricing,
         reviewer_pressure_exponent=reviewer_pressure_exponent,
@@ -1098,10 +1100,9 @@ def parse_args(argv=None):
         help="Assign listed papers to highest-scoring eligible reviewers.",
     )
     parser.add_argument(
-        "--use-adaptive-author-pricing",
-        action=argparse.BooleanOptionalAction,
-        default=SIM.use_adaptive_author_pricing,
-        help="Enable author-side adaptive offer multiplier feedback.",
+        "--reviewer-surplus-share", dest="reviewer_surplus_share",
+        type=float, default=SIM.reviewer_surplus_share, metavar="X",
+        help="Reviewer's fraction of incremental review surplus in fair-market offers.",
     )
     parser.add_argument(
         "--gallery-action-limit", dest="gallery_action_limit",
@@ -1171,7 +1172,6 @@ def build_run_config(
     talent_max: float = SIM.talent_max,
     low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
-    use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
     use_scarcity_pricing: bool = SIM.use_scarcity_pricing,
     reviewer_pressure_exponent: float = SIM.reviewer_pressure_exponent,
@@ -1214,7 +1214,6 @@ def build_run_config(
     config["talent_max"] = talent_max
     config["low_talent_value"] = low_talent_value
     config["pricing_policy"] = pricing_policy
-    config["use_adaptive_author_pricing"] = use_adaptive_author_pricing
     config["use_competition_adjusted_forecast"] = use_competition_adjusted_forecast
     config["use_scarcity_pricing"] = use_scarcity_pricing
     config["reviewer_pressure_exponent"] = reviewer_pressure_exponent
@@ -1276,7 +1275,6 @@ def archive_run(
     talent_max: float = SIM.talent_max,
     low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
-    use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
     use_scarcity_pricing: bool = SIM.use_scarcity_pricing,
     reviewer_pressure_exponent: float = SIM.reviewer_pressure_exponent,
@@ -1312,7 +1310,6 @@ def archive_run(
             talent_max=talent_max,
             low_talent_value=low_talent_value,
             pricing_policy=pricing_policy,
-            use_adaptive_author_pricing=use_adaptive_author_pricing,
             use_competition_adjusted_forecast=use_competition_adjusted_forecast,
             use_scarcity_pricing=use_scarcity_pricing,
             reviewer_pressure_exponent=reviewer_pressure_exponent,
@@ -1353,7 +1350,6 @@ def prompt_and_archive(
     talent_max: float = SIM.talent_max,
     low_talent_value: float = SIM.low_talent_value,
     pricing_policy: str = SIM.pricing_policy,
-    use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
     use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
     use_scarcity_pricing: bool = SIM.use_scarcity_pricing,
     reviewer_pressure_exponent: float = SIM.reviewer_pressure_exponent,
@@ -1402,7 +1398,6 @@ def prompt_and_archive(
         talent_max=talent_max,
         low_talent_value=low_talent_value,
         pricing_policy=pricing_policy,
-        use_adaptive_author_pricing=use_adaptive_author_pricing,
         use_competition_adjusted_forecast=use_competition_adjusted_forecast,
         use_scarcity_pricing=use_scarcity_pricing,
         reviewer_pressure_exponent=reviewer_pressure_exponent,
@@ -1475,7 +1470,6 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
         talent_max=args.talent_max,
         low_talent_value=args.low_talent_value,
         pricing_policy=args.pricing_policy,
-        use_adaptive_author_pricing=args.use_adaptive_author_pricing,
         use_competition_adjusted_forecast=args.use_competition_adjusted_forecast,
         use_scarcity_pricing=args.use_scarcity_pricing,
         reviewer_pressure_exponent=args.reviewer_pressure_exponent,
@@ -1525,7 +1519,6 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             talent_max=args.talent_max,
             low_talent_value=args.low_talent_value,
             pricing_policy=args.pricing_policy,
-            use_adaptive_author_pricing=args.use_adaptive_author_pricing,
             use_competition_adjusted_forecast=args.use_competition_adjusted_forecast,
             use_scarcity_pricing=args.use_scarcity_pricing,
             reviewer_pressure_exponent=args.reviewer_pressure_exponent,
@@ -1559,7 +1552,6 @@ def _run_once(args, *, seed: int, title: str | None = None) -> dict:
             talent_max=args.talent_max,
             low_talent_value=args.low_talent_value,
             pricing_policy=args.pricing_policy,
-            use_adaptive_author_pricing=args.use_adaptive_author_pricing,
             use_competition_adjusted_forecast=args.use_competition_adjusted_forecast,
             use_scarcity_pricing=args.use_scarcity_pricing,
             reviewer_pressure_exponent=args.reviewer_pressure_exponent,

@@ -27,11 +27,11 @@ class SimConfig:
 
     # --- World -----------------------------------------------------------
     num_heuristic_agents: int = 10
-    num_rl_agents: int = 50
+    num_rl_agents: int = 100
     num_dqn_agents: int = 0
     num_random_agents: int = 10
     num_probabilistic_agents: int = 0
-    num_low_talent_rl_agents: int = 50
+    num_low_talent_rl_agents: int = 0
     num_timesteps: int = 2000
     seed: int = 7
     forecast_horizon_timesteps: int = 30
@@ -60,16 +60,20 @@ class SimConfig:
     # their papers are claimed from the marketplace.
     pricing_policy: str = "static_fair_market"  # "static_fair_market" | "adaptive_multiplier"
     target_market_wait_timesteps: float = 1.0
-    adaptive_pricing_learning_rate: float = 0.10
+    adaptive_pricing_learning_rate: float = 0.03
     min_author_price_multiplier: float = 0.25
     max_author_price_multiplier: float = 2.0
+    # Reviewer's fraction of incremental review surplus in fair-market offers
+    # (author keeps ``1 - reviewer_surplus_share`` of the bump-created value).
+    reviewer_surplus_share: float = 0.5
 
     # --- Market economics (optional; all off preserves legacy behavior) ----
     use_competition_adjusted_forecast: bool = True
+    # Fast supply/demand scaler; disabled automatically when ``pricing_policy``
+    # is ``adaptive_multiplier`` (adaptive author pricing already responds to demand).
     use_scarcity_pricing: bool = True
     reviewer_pressure_exponent: float = 0.5
     use_merit_market_clearing: bool = True
-    use_adaptive_author_pricing: bool = True
 
     # --- Paper quality ---------------------------------------------------
     # Each paper's quality is drawn from N(author talent, quality_sigma) and is
@@ -88,7 +92,9 @@ class SimConfig:
     min_review_effort_threshold: float = 0.0    # minimum valid review/share effort
     good_faith_review_threshold: float = 3.0    # continuous-mode classification
     bad_review_timesteps: float = 1.0           # discrete bad-faith duration (T_B)
-    good_review_timesteps: float = 5.0          # discrete good-faith duration (T_G)
+    # Fallback when continuous publishing is ``choice``; otherwise derived from
+    # ``good_faith_review_threshold`` (see ``discrete_good_review_timesteps``).
+    good_review_timesteps: float = 5.0
     review_effort_curve: str = "sigmoid"        # "sigmoid" | "log" | "jump"
     min_review_accrual_bump: float = 0.0       # sigmoid bump at one timestep
     max_review_accrual_bump: float = 0.60       # sigmoid saturation near a long review
@@ -113,7 +119,9 @@ class SimConfig:
     # = auto-publish after a fixed amount of writing effort (no early finish).
     continuous_publishing: str = "threshold"       # "choice" | "threshold"
     continuous_paper_timesteps: float = 50.0    # writing effort to auto-publish
-    discrete_paper_timesteps: float = 200.0      # discrete manuscript duration (T_M)
+    # Fallback when continuous publishing is ``choice``; otherwise derived from
+    # ``continuous_paper_timesteps`` (see ``discrete_manuscript_timesteps``).
+    discrete_paper_timesteps: float = 200.0
     discrete_writing_effort_per_timestep: float = 1.0
     # Paper effort target for each manuscript. ``fixed`` preserves the existing
     # thresholds above; ``uniform`` samples once per paper from the 50-150 band
@@ -216,6 +224,26 @@ SIM = SimConfig()
 TRAIN = TrainConfig()
 TRAIN_DQN = TrainDQNConfig()
 TRAIN_DISCRETE = TrainDiscreteConfig()
+
+
+def discrete_good_review_timesteps() -> float:
+    """Good-faith review length in discrete mode.
+
+    Tracks ``good_faith_review_threshold`` so discrete and continuous share the
+    same good/bad-faith cutoff without duplicating tunables.
+    """
+    return SIM.good_faith_review_threshold
+
+
+def discrete_manuscript_timesteps() -> float:
+    """Manuscript effort to publish in discrete mode.
+
+    When continuous mode uses threshold publishing, discrete writing matches
+    ``continuous_paper_timesteps``. Otherwise falls back to ``discrete_paper_timesteps``.
+    """
+    if SIM.continuous_publishing == "threshold":
+        return SIM.continuous_paper_timesteps
+    return SIM.discrete_paper_timesteps
 
 
 def default_policy_path(backend_kind: str) -> str:

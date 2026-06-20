@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from Agent import Agent
 
-from config import SIM
+from config import SIM, discrete_good_review_timesteps
 
 # Bound from SIM (config.py is the single source of truth); names kept for the
 # many internal references and default-argument signatures below.
@@ -18,7 +18,8 @@ MIN_REVIEW_EFFORT_THRESHOLD = SIM.min_review_effort_threshold
 GOOD_FAITH_REVIEW_THRESHOLD = SIM.good_faith_review_threshold
 REVIEW_EFFORT_PER_TIMESTEP = SIM.review_effort_per_timestep
 BAD_REVIEW_TIMESTEPS = SIM.bad_review_timesteps
-GOOD_REVIEW_TIMESTEPS = SIM.good_review_timesteps
+# Prefer ``discrete_good_review_timesteps()`` at runtime; this alias is import-time.
+GOOD_REVIEW_TIMESTEPS = discrete_good_review_timesteps()
 DISCRETE_PAPER_TIMESTEPS = SIM.discrete_paper_timesteps
 DISCRETE_WRITING_EFFORT_PER_TIMESTEP = SIM.discrete_writing_effort_per_timestep
 REVIEW_EFFORT_CURVE = SIM.review_effort_curve
@@ -40,6 +41,8 @@ QUALITY_PRICE_SCALE = SIM.quality_price_scale
 HISTORY_PRICE_SCALE = SIM.history_price_scale
 WRITING_SATURATION = SIM.writing_saturation
 PRICING_POLICY = SIM.pricing_policy
+FORECAST_HORIZON_TIMESTEPS = SIM.forecast_horizon_timesteps
+REVIEWER_SURPLUS_SHARE = SIM.reviewer_surplus_share
 
 REVIEW_BUMP_PERMANENT = "permanent"
 REVIEW_BUMP_DECAY = "decay"
@@ -112,7 +115,7 @@ def fixed_review_effort(review_kind: str) -> float:
     """Discrete-mode duration for a chosen review kind."""
     kind = normalize_review_kind(review_kind)
     if kind == GOOD_FAITH_REVIEW:
-        return GOOD_REVIEW_TIMESTEPS
+        return discrete_good_review_timesteps()
     return BAD_REVIEW_TIMESTEPS
 
 
@@ -146,9 +149,52 @@ def accrual_rate_from_effort(quality: float, writing_effort: float) -> float:
 
 
 def fair_market_component(epsilon: float) -> float:
-    """One reviewer's fair-market share term: epsilon / (1 + epsilon)."""
+    """Incremental surplus fraction from a review bump: epsilon / (1 + epsilon)."""
     value = max(0.0, float(epsilon))
     return value / (1.0 + value)
+
+
+def incremental_ac_fraction(current_ac: float, projected_final_ac: float) -> float:
+    """Share of projected paper value still to be created: (F - A0) / F."""
+    projected = max(0.0, float(projected_final_ac))
+    current = max(0.0, float(current_ac))
+    if projected <= 0.0:
+        return 0.0
+    return max(0.0, (projected - current) / projected)
+
+
+def projected_paper_ac(
+    current_ac: float,
+    accrual_rate: float,
+    expected_epsilon: float,
+    horizon_timesteps: float = FORECAST_HORIZON_TIMESTEPS,
+) -> float:
+    """Forecast total paper AC at review settlement using agent forecast horizon."""
+    current = max(0.0, float(current_ac))
+    rate = max(0.0, float(accrual_rate))
+    epsilon = max(0.0, float(expected_epsilon))
+    horizon = max(0.0, float(horizon_timesteps))
+    future = rate * (1.0 + epsilon) * horizon
+    return current + future
+
+
+def fair_market_offer_share(
+    epsilon: float,
+    current_ac: float,
+    projected_final_ac: float,
+    reviewer_surplus_share: float = REVIEWER_SURPLUS_SHARE,
+) -> float:
+    """Ownership share offer that splits incremental surplus between author and reviewer.
+
+    Settlement still grants ``share * paper.current_ac`` at review finish; this
+    only computes the posted offer so authors do not pay reviewers for AC they
+    already built (A0).
+    """
+    return (
+        fair_market_component(epsilon)
+        * incremental_ac_fraction(current_ac, projected_final_ac)
+        * max(0.0, float(reviewer_surplus_share))
+    )
 
 
 def fair_market_price_from_epsilons(
@@ -397,20 +443,21 @@ class Paper:
         fair_market_price: float | None = None,
         pricing_policy: str = PRICING_POLICY,
         scarcity_multiplier: float = 1.0,
+        forecast_horizon_timesteps: float = FORECAST_HORIZON_TIMESTEPS,
     ) -> None:
         """Recompute the per-reviewer share offer for this listed paper.
 
         Higher paper quality (relative to the market) lowers the offered share;
-        a stronger reviewer epsilon history raises it. The base price is the
-        diagram's fair-market expectation ``E[epsilon / (1 + epsilon)]`` unless
-        disabled in config. The result is clamped to ``[min_offer_share, author
-        share]`` and the single-review cap.
+        a stronger reviewer epsilon history raises it. Fair-market offers use
+        ``epsilon/(1+epsilon) * (F-A0)/F * reviewer_surplus_share`` so authors
+        pay for incremental bump value, not AC already on the paper. The result
+        is clamped to ``[min_offer_share, author share]`` and the single-review
+        cap. ``fair_market_price`` is retained for logging only.
         """
         author_share = self.share_distribution.get(self.author, 0.0)
         ceiling = min(self.max_reviewer_share, max(0.0, author_share))
         if fair_market_price is None:
             fair_market_price = fair_market_price_from_epsilons([PRIOR_REVIEW_EPSILON])
-        base_offer = fair_market_price if USE_FAIR_MARKET_PRICING else DEFAULT_REVIEW_SHARE
         policy = validate_pricing_policy(pricing_policy)
         author_multiplier = 1.0
         if policy == PRICING_POLICY_ADAPTIVE:
@@ -441,6 +488,21 @@ class Paper:
                 0.0,
                 1.0 + HISTORY_PRICE_SCALE * (history - mean_peer_review_epsilon),
             )
+            if USE_FAIR_MARKET_PRICING:
+                projected_final_ac = projected_paper_ac(
+                    self.current_ac,
+                    self.accrual_rate,
+                    history,
+                    forecast_horizon_timesteps,
+                )
+                base_offer = fair_market_offer_share(
+                    history,
+                    self.current_ac,
+                    projected_final_ac,
+                    SIM.reviewer_surplus_share,
+                )
+            else:
+                base_offer = DEFAULT_REVIEW_SHARE
             offer = (
                 base_offer
                 * author_multiplier

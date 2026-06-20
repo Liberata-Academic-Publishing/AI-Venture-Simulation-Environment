@@ -327,6 +327,7 @@
         ["adaptive_pricing_learning_rate", "Adaptive pricing LR"],
         ["min_author_price_multiplier", "Min price multiplier"],
         ["max_author_price_multiplier", "Max price multiplier"],
+        ["reviewer_surplus_share", "Reviewer surplus share"],
       ]],
       ["Paper quality", [
         ["quality_sigma", "Quality sigma"],
@@ -925,7 +926,7 @@
         ])},
         options: { ...baseOpts, plugins: { legend: { display: false } },
           scales: { ...baseOpts.scales,
-            y: { ...baseOpts.scales.y, title: axisTitle("AC earned per review") } } },
+            y: { ...baseOpts.scales.y, title: axisTitle("Share-weighted accrual rate per review") } } },
       });
     }
 
@@ -1309,7 +1310,7 @@
     }
 
     // Ranked agents table: AC descending, with kind and reliability
-    // (peer_review_history = review AC / number of reviews). Pass a day index
+    // (peer_review_history = mean share-weighted accrual rate per review). Pass a day index
     // `i` to rank by that timestep (used during replay); omit it for the final
     // standings.
     function renderRanking(data, i = null) {

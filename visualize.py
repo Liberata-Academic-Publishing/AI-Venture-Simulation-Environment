@@ -1643,14 +1643,14 @@ def _draw_review_reputation(ax, history: "History") -> None:
         ax.set_axis_off()
         return
     ax.set_xlabel("Timestep")
-    ax.set_ylabel("Peer-review reputation\n(AC earned per review)")
+    ax.set_ylabel("Peer-review reputation\n(share-weighted accrual rate per review)")
     ax.legend(fontsize=8, loc="upper left")
 
 
 def plot_review_reputation(
     history: "History", path: str | None = None, show: bool = False
 ):
-    """Reviewer reputation (AC earned per completed review) over time."""
+    """Reviewer reputation (share-weighted accrual rate per completed review) over time."""
     fig, ax = plt.subplots(figsize=(11, 6))
     _draw_review_reputation(ax, history)
     ax.set_title("Reviewer reputation over time")
@@ -1783,7 +1783,7 @@ def _draw_reputation_vs_ac(ax, history: "History") -> bool:
             bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
         )
 
-    ax.set_xlabel("Peer-review reputation (AC earned per review)")
+    ax.set_xlabel("Peer-review reputation (share-weighted accrual rate per review)")
     ax.set_ylabel("Final academic capital")
     if len(ordered_groups) > 1:
         ax.legend(fontsize=8, loc="lower right")
@@ -1833,7 +1833,7 @@ def _draw_reputation_vs_review_ac(ax, history: "History") -> bool:
             bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
         )
 
-    ax.set_xlabel("Peer-review reputation (AC earned per review)")
+    ax.set_xlabel("Peer-review reputation (share-weighted accrual rate per review)")
     ax.set_ylabel("Academic capital from peer review")
     if len(ordered_groups) > 1:
         ax.legend(fontsize=8, loc="lower right")

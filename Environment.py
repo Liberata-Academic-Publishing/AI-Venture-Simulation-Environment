@@ -11,6 +11,7 @@ from config import SIM
 from Paper import (
     REVIEW_PARADIGM_DISCRETE,
     REVIEW_BUMP_DECAY,
+    PRICING_POLICY_ADAPTIVE,
     Paper,
     fair_market_price_from_epsilons,
     validate_pricing_policy,
@@ -50,7 +51,6 @@ class Environment:
         paper_effort_max: float = SIM.paper_effort_max,
         discrete_paper_timesteps: float = SIM.discrete_paper_timesteps,
         pricing_policy: str = SIM.pricing_policy,
-        use_adaptive_author_pricing: bool = SIM.use_adaptive_author_pricing,
         use_competition_adjusted_forecast: bool = SIM.use_competition_adjusted_forecast,
         use_scarcity_pricing: bool = SIM.use_scarcity_pricing,
         reviewer_pressure_exponent: float = SIM.reviewer_pressure_exponent,
@@ -74,13 +74,11 @@ class Environment:
         self.paper_effort_min = float(paper_effort_min)
         self.paper_effort_max = float(paper_effort_max)
         self.discrete_paper_timesteps = float(discrete_paper_timesteps)
-        if use_adaptive_author_pricing:
-            self.pricing_policy = validate_pricing_policy("adaptive_multiplier")
-        else:
-            self.pricing_policy = validate_pricing_policy(pricing_policy)
-        self.use_adaptive_author_pricing = bool(use_adaptive_author_pricing)
+        self.pricing_policy = validate_pricing_policy(pricing_policy)
         self.use_competition_adjusted_forecast = bool(use_competition_adjusted_forecast)
         self.use_scarcity_pricing = bool(use_scarcity_pricing)
+        if self.pricing_policy == PRICING_POLICY_ADAPTIVE:
+            self.use_scarcity_pricing = False
         self.reviewer_pressure_exponent = float(reviewer_pressure_exponent)
         self.use_merit_market_clearing = bool(use_merit_market_clearing)
         self.target_market_wait_timesteps = float(target_market_wait_timesteps)
@@ -268,6 +266,7 @@ class Environment:
                 fair_market_price=self.fair_market_price,
                 pricing_policy=self.pricing_policy,
                 scarcity_multiplier=self.scarcity_multiplier,
+                forecast_horizon_timesteps=self.forecast_horizon_timesteps,
             )
 
     def _clear_review_market(self) -> None:

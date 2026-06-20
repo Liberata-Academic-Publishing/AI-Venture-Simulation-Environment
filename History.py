@@ -888,9 +888,9 @@ class History:
             "paper_claimed_timestep": dict(self.paper_claimed_timestep),
             "paper_time_on_market": dict(self.paper_time_on_market),
             "action_counts_by_timestep": self.action_counts_by_timestep(),
-            # One value per agent: the final peer-review reputation, so the
-            # ranking table keeps its "reliability" column without shipping the
-            # full per-timestep reputation series (that chart is now a PNG).
+            # One value per agent: final share-weighted accrual-rate reputation,
+            # so the ranking table keeps its "reliability" column without shipping
+            # the full per-timestep reputation series (that chart is now a PNG).
             "agent_final_reputation": {
                 label: (series[-1] if series else 0.0)
                 for label, series in self.agent_review_history.items()

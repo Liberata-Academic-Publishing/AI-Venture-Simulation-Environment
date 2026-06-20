@@ -146,9 +146,9 @@ class Agent(ABC):
         self.next_paper_quality: float | None = None
         self.next_paper_required_effort: float | None = None
 
-        # Public peer-review reputation: mean AC earned per completed review.
+        # Public peer-review reputation: mean share-weighted accrual rate per review.
         self.peer_review_history: float = 0.0
-        self.total_ac_from_reviews: float = 0.0
+        self.total_accrual_rate_from_reviews: float = 0.0
         self.peer_review_epsilon_history: float = SIM.prior_review_epsilon
         self.total_review_epsilon: float = 0.0
         self.completed_review_count: int = 0
@@ -577,9 +577,9 @@ class Agent(ABC):
     ) -> None:
         """Update public peer-review reputation and epsilon history on completion."""
         self.completed_review_count += 1
-        self.total_ac_from_reviews += share * paper.current_ac
+        self.total_accrual_rate_from_reviews += share * paper.accrual_rate
         self.peer_review_history = (
-            self.total_ac_from_reviews / self.completed_review_count
+            self.total_accrual_rate_from_reviews / self.completed_review_count
         )
         epsilon = 0.0
         if getattr(paper, "review_records", None):
@@ -669,10 +669,16 @@ class Agent(ABC):
         self.next_paper_quality = None
         self.next_paper_required_effort = None
 
+    def _discrete_manuscript_effort(self) -> float:
+        """Discrete publishing effort aligned with the active continuous settings."""
+        if self.continuous_publishing == CONTINUOUS_PUBLISHING_THRESHOLD:
+            return self.continuous_paper_timesteps
+        return self.discrete_paper_timesteps
+
     def _sample_required_writing_effort(self, quality: float) -> float:
         if self.paper_effort_mode == PAPER_EFFORT_MODE_FIXED:
             if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
-                return self.discrete_paper_timesteps
+                return self._discrete_manuscript_effort()
             if self.continuous_publish_by_threshold():
                 return self.continuous_paper_timesteps
             return PAPER_THRESHOLD
@@ -708,9 +714,14 @@ class Agent(ABC):
             return self.continuous_paper_timesteps
         self._ensure_next_paper_state()
         if self.next_paper_required_effort is not None:
+            if (
+                self.review_paradigm == REVIEW_PARADIGM_DISCRETE
+                and self.continuous_publishing == CONTINUOUS_PUBLISHING_THRESHOLD
+            ):
+                return self.continuous_paper_timesteps
             return self.next_paper_required_effort
         if self.review_paradigm == REVIEW_PARADIGM_DISCRETE:
-            return self.discrete_paper_timesteps
+            return self._discrete_manuscript_effort()
         return PAPER_THRESHOLD
 
     def _clear_last_review_result(self):

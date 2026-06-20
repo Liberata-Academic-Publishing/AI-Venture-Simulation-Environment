@@ -40,10 +40,13 @@ CLI flags for one-off overrides.
   region, and saturation for long reviews. Set it to `"log"` to use the older
   logarithmic curve, or `"jump"` to test the high-effort threshold experiment.
 - **Review-share economics**: a review grants ownership share on the reviewed
-  paper. The default base price is the schematic's fair-market formula,
-  `sum(epsilon / (1 + epsilon) * Probability(epsilon))`, using the empirical
-  distribution of reviewer epsilon histories, then adjusted by paper quality and
-  reviewer epsilon history and capped at `default_max_reviewer_share`.
+  paper. Fair-market offers use
+  `ε/(1+ε) × (F−A₀)/F × reviewer_surplus_share` (incremental surplus split;
+  default 50/50), estimated from reviewer epsilon history and forecast horizon,
+  then adjusted by quality/scarcity/adaptive multipliers and capped at
+  `default_max_reviewer_share`. Author adaptive pricing is controlled only by
+  `pricing_policy` (`static_fair_market` | `adaptive_multiplier`); scarcity
+  pricing is disabled automatically when adaptive pricing is active.
 - **Results display**: `History.to_dict()` exports `agent_group_summary`, and
   both `run_simulation.py` and the static `docs/` gallery compare heuristic,
   random, probabilistic, RL, and low-talent RL agent outcomes.
