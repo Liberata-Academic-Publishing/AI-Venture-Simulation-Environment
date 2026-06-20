@@ -489,19 +489,20 @@ class MarketEconomicsTest(unittest.TestCase):
         self.assertEqual(reputation_bin_name(0.10, edges, names), "mid")
         self.assertEqual(reputation_bin_name(0.20, edges, names), "high")
 
-    def test_binned_fast_high_rep_raises_high_bin_only(self):
+    def test_binned_fast_claim_lowers_claimer_bin_only(self):
         author = ScriptAgent("author")
         author.configure_pricing_policy(
             "adaptive_multiplier",
             adaptive_pricing_mode=ADAPTIVE_PRICING_BINNED,
             learning_rate=0.03,
+            target_market_wait_timesteps=1.0,
         )
         veteran = ScriptAgent("veteran")
         veteran.peer_review_epsilon_history = 0.20
 
         author.record_review_claim_feedback(0, claimer=veteran)
 
-        self.assertAlmostEqual(author.review_offer_multipliers["high"], 1.03)
+        self.assertAlmostEqual(author.review_offer_multipliers["high"], 0.97)
         self.assertAlmostEqual(author.review_offer_multipliers["mid"], 1.0)
         self.assertAlmostEqual(author.review_offer_multipliers["low"], 1.0)
 
@@ -511,6 +512,7 @@ class MarketEconomicsTest(unittest.TestCase):
             "adaptive_multiplier",
             adaptive_pricing_mode=ADAPTIVE_PRICING_BINNED,
             learning_rate=0.03,
+            target_market_wait_timesteps=1.0,
         )
         rookie = ScriptAgent("rookie")
         rookie.peer_review_epsilon_history = 0.02
@@ -520,6 +522,23 @@ class MarketEconomicsTest(unittest.TestCase):
         self.assertAlmostEqual(author.review_offer_multipliers["low"], 0.97)
         self.assertAlmostEqual(author.review_offer_multipliers["mid"], 1.0)
         self.assertAlmostEqual(author.review_offer_multipliers["high"], 1.0)
+
+    def test_binned_slow_claim_raises_claimer_bin_only(self):
+        author = ScriptAgent("author")
+        author.configure_pricing_policy(
+            "adaptive_multiplier",
+            adaptive_pricing_mode=ADAPTIVE_PRICING_BINNED,
+            learning_rate=0.1,
+            target_market_wait_timesteps=1.0,
+        )
+        veteran = ScriptAgent("veteran")
+        veteran.peer_review_epsilon_history = 0.20
+
+        author.record_review_claim_feedback(3, claimer=veteran)
+
+        self.assertAlmostEqual(author.review_offer_multipliers["high"], 1.2)
+        self.assertAlmostEqual(author.review_offer_multipliers["mid"], 1.0)
+        self.assertAlmostEqual(author.review_offer_multipliers["low"], 1.0)
 
     def test_global_adaptive_feedback_preserves_legacy_behavior(self):
         author = ScriptAgent("author")

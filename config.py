@@ -26,14 +26,14 @@ class SimConfig:
     """Every parameter that defines a single simulation run."""
 
     # --- World -----------------------------------------------------------
-    num_heuristic_agents: int = 10
-    num_rl_agents: int = 100
+    num_heuristic_agents: int = 0
+    num_rl_agents: int = 20
     num_dqn_agents: int = 0
-    num_random_agents: int = 10
+    num_random_agents: int = 0
     num_probabilistic_agents: int = 0
     num_low_talent_rl_agents: int = 0
-    num_timesteps: int = 10000
-    seed: int = 7
+    num_timesteps: int = 5000
+    seed: int = 11
     forecast_horizon_timesteps: int = 30
     output_dir: str = "runs"
 
@@ -50,8 +50,8 @@ class SimConfig:
     # --- Paper economics -------------------------------------------------
     default_accrual_rate: float = 1.0       # base AC gained per timestep, before bumps
     default_review_share: float = 0.005      # legacy fallback when fair-market pricing is off
-    default_max_reviewer_share: float = 0.10       # cap on a single review's share
-    min_offer_share: float = 0.001          # floor on a non-zero review offer
+    default_max_reviewer_share: float = 1.0        # max share per review (100% of author stake)
+    min_offer_share: float = 0.0001          # floor on review offers (0%)
     use_fair_market_pricing: bool = True
     prior_review_epsilon: float = 0.05      # prior reviewer effect before review history exists
     # Author-side pricing policy. ``static_fair_market`` preserves the current
@@ -62,19 +62,18 @@ class SimConfig:
     # ``global``: one author multiplier (legacy). ``binned``: per reputation tier.
     adaptive_pricing_mode: str = "binned"  # "global" | "binned"
     target_market_wait_timesteps: float = 1.0
-    adaptive_pricing_learning_rate: float = 0.03
-    min_author_price_multiplier: float = 0.25
-    max_author_price_multiplier: float = 2.0
+    adaptive_pricing_learning_rate: float = 0.1
+    min_author_price_multiplier: float = 0.0005
+    max_author_price_multiplier: float = 10.0
     # Reputation bins for binned adaptive pricing (len(names) == len(edges) + 1).
     reputation_bin_edges: tuple[float, ...] = (0.08, 0.15)
     reputation_bin_names: tuple[str, ...] = ("low", "mid", "high")
-    # Fast claim (wait <= fast_claim_max_wait) in ``adaptive_raise_bins`` raises
-    # that bin's multiplier; fast claim in ``adaptive_lower_bins`` lowers it.
+    # Legacy tier labels (kept for run metadata / gallery). Binned adaptive
+    # feedback is symmetric per claimer bin: wait <= target lowers that bin's
+    # multiplier; wait > target raises it (same rule as global mode).
     adaptive_raise_bins: tuple[str, ...] = ("high",)
     adaptive_lower_bins: tuple[str, ...] = ("low", "mid")
-    # Slow claims (wait > fast_claim_max_wait) can raise bins in this set.
     adaptive_slow_raise_bins: tuple[str, ...] = ("low", "mid", "high")
-    # None uses ``target_market_wait_timesteps``; 0 means instant claim only.
     fast_claim_max_wait: float | None = 0.0
     # Reviewer's fraction of incremental review surplus in fair-market offers
     # (author keeps ``1 - reviewer_surplus_share`` of the bump-created value).
@@ -96,7 +95,7 @@ class SimConfig:
     quality_sigma: float = 0.20
     min_paper_quality: float = 0.10
     quality_price_scale: float = 1.5    # higher quality -> smaller offered share
-    history_price_scale: float = 0.0    # better reviewer history -> larger offered share
+    history_price_scale: float = 0.5    # better reviewer history -> larger offered share
 
     # --- Effort & reward model -------------------------------------------
     review_paradigm: str = "continuous"       # "continuous" | "discrete"
