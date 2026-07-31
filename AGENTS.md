@@ -43,8 +43,8 @@ CLI flags for one-off overrides.
   paper. Fair-market offers use
   `ε/(1+ε) × (F−A₀)/F × reviewer_surplus_share` (incremental surplus split;
   default 50/50), estimated from reviewer epsilon history and forecast horizon,
-  then adjusted by quality/scarcity/adaptive multipliers and capped at
-  `default_max_reviewer_share`. Author adaptive pricing is controlled only by
+  then adjusted by quality/scarcity/adaptive multipliers and clamped to
+  `[min_offer_share, author share]` (defaults 0--100%). Author adaptive pricing is controlled only by
   `pricing_policy` (`static_fair_market` | `adaptive_multiplier`); scarcity
   pricing is disabled automatically when adaptive pricing is active.
 - **Results display**: `History.to_dict()` exports `agent_group_summary`, and

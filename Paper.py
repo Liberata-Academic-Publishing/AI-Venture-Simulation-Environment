@@ -498,11 +498,11 @@ class Paper:
         a stronger reviewer epsilon history raises it. Fair-market offers use
         ``epsilon/(1+epsilon) * (F-A0)/F * reviewer_surplus_share`` so authors
         pay for incremental bump value, not AC already on the paper. The result
-        is clamped to ``[min_offer_share, author share]`` and the single-review
-        cap. ``fair_market_price`` is retained for logging only.
+        is clamped to ``[min_offer_share, author share]`` (0--100% of the author's
+        stake). ``fair_market_price`` is retained for logging only.
         """
-        author_share = self.share_distribution.get(self.author, 0.0)
-        ceiling = min(self.max_reviewer_share, max(0.0, author_share))
+        author_share = max(0.0, self.share_distribution.get(self.author, 0.0))
+        ceiling = author_share
         if fair_market_price is None:
             fair_market_price = fair_market_price_from_epsilons([PRIOR_REVIEW_EPSILON])
         policy = validate_pricing_policy(pricing_policy)

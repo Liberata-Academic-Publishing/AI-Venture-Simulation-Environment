@@ -403,11 +403,6 @@ class Agent(ABC):
     def _default_bin_multipliers(self) -> dict[str, float]:
         return {name: 1.0 for name in self.reputation_bin_names}
 
-    def _fast_claim_threshold(self) -> float:
-        if self.fast_claim_max_wait is not None:
-            return max(0.0, float(self.fast_claim_max_wait))
-        return max(0.0, self.target_market_wait_timesteps)
-
     def configure_market_economics(
         self,
         *,
@@ -433,10 +428,9 @@ class Agent(ABC):
     ) -> None:
         """Update future author offers from observed claim speed and claimer tier.
 
-        In binned mode, fast claims by reviewers in ``adaptive_raise_bins``
-        raise that bin's multiplier; fast claims in ``adaptive_lower_bins`` lower
-        it. Slow claims can raise bins listed in ``adaptive_slow_raise_bins``.
-        Global mode preserves the legacy single-multiplier behavior.
+        Claims at or below ``target_market_wait_timesteps`` lower the relevant
+        multiplier(s); slower claims raise them. Global mode adjusts one author
+        multiplier; binned mode adjusts the claimer's reputation bin only.
         """
         if self.pricing_policy != PRICING_POLICY_ADAPTIVE:
             return
@@ -466,20 +460,18 @@ class Agent(ABC):
             self.reputation_bin_edges,
             self.reputation_bin_names,
         )
-        fast_threshold = self._fast_claim_threshold()
-        if wait <= fast_threshold:
-            pressure = self._fast_claim_pressure(wait, fast_threshold)
-            if bin_name in self.adaptive_raise_bins:
-                self._update_bin_multiplier(bin_name, 1.0 + lr * pressure)
-            elif bin_name in self.adaptive_lower_bins:
-                self._update_bin_multiplier(bin_name, 1.0 - lr * pressure)
-            return
+        self._apply_binned_adaptive_feedback(wait, target, lr, bin_name)
 
-        if bin_name not in self.adaptive_slow_raise_bins:
-            return
+    @staticmethod
+    def _adaptive_feedback_factor(wait: float, target: float, lr: float) -> float:
+        """Multiplicative nudge from claim wait vs. target (below → lower, above → raise)."""
+        if wait <= target:
+            denom = target if target > 0.0 else 1.0
+            pressure = 1.0 if target == 0.0 else (target - wait) / denom
+            return 1.0 - lr * max(0.0, min(1.0, pressure))
         denom = target if target > 0.0 else 1.0
         pressure = min(2.0, (wait - target) / denom)
-        self._update_bin_multiplier(bin_name, 1.0 + lr * max(0.0, pressure))
+        return 1.0 + lr * max(0.0, pressure)
 
     def _apply_global_adaptive_feedback(
         self,
@@ -487,25 +479,23 @@ class Agent(ABC):
         target: float,
         lr: float,
     ) -> None:
-        if wait <= target:
-            denom = target if target > 0.0 else 1.0
-            pressure = 1.0 if target == 0.0 else (target - wait) / denom
-            factor = 1.0 - lr * max(0.0, min(1.0, pressure))
-        else:
-            denom = target if target > 0.0 else 1.0
-            pressure = min(2.0, (wait - target) / denom)
-            factor = 1.0 + lr * max(0.0, pressure)
-
+        factor = self._adaptive_feedback_factor(wait, target, lr)
         self._global_review_offer_multiplier = self._clamp_offer_multiplier(
             self._global_review_offer_multiplier * factor
         )
         self.review_offer_multiplier_updates += 1
 
-    def _fast_claim_pressure(self, wait: float, fast_threshold: float) -> float:
-        if fast_threshold == 0.0:
-            return 1.0 if wait <= 0.0 else 0.0
-        denom = fast_threshold
-        return max(0.0, min(1.0, (fast_threshold - wait) / denom))
+    def _apply_binned_adaptive_feedback(
+        self,
+        wait: float,
+        target: float,
+        lr: float,
+        bin_name: str,
+    ) -> None:
+        factor = self._adaptive_feedback_factor(wait, target, lr)
+        if factor == 1.0:
+            return
+        self._update_bin_multiplier(bin_name, factor)
 
     def _update_bin_multiplier(self, bin_name: str, factor: float) -> None:
         current = float(self.review_offer_multipliers.get(bin_name, 1.0))
