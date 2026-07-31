@@ -1,6 +1,6 @@
-# AI-Venture-Simulation-Environment
+# Liberata Peer-Review Simulation
 
-This project is an agent-based simulation designed to model the incentive structures, market dynamics, and quality accrual processes within the Liberata academic publishing platform. Agents strategically allocate each timestep between advancing their own research and participating in a single-review peer-review marketplace.
+Academic research project: an agent-based simulation of incentive structures, market dynamics, and quality accrual on the Liberata academic publishing platform. Agents allocate each timestep between advancing their own research and participating in a single-review peer-review marketplace.
 
 ## Single-review marketplace
 

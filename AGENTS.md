@@ -1,11 +1,11 @@
-# AI-Venture-Simulation-Environment
+# Liberata Peer-Review Simulation
 
-Agent brief for the Liberata simulation. This is the source of truth for project
-context; keep it concise and current. `README.md` is the human-facing doc.
+Agent brief for this academic research project. This is the source of truth for
+project context; keep it concise and current. `README.md` is the human-facing doc.
 
 ## What this is
 
-An agent-based simulation of the "Liberata" academic publishing platform. Each
+An agent-based simulation of the Liberata academic publishing platform. Each
 day, every agent chooses how to spend its turn between two activities:
 
 1. **Writing papers** (advancing its own research), and

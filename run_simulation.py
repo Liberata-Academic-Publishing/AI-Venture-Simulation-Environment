@@ -910,8 +910,8 @@ def build_simulation(
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Run the venture simulation. By default, after the run it "
-        "asks whether to save it to the docs/ gallery and what to call it."
+        description="Run the Liberata peer-review simulation. By default, after "
+        "the run it asks whether to save it to the docs/ gallery and what to call it."
     )
     parser.add_argument(
         "--name",
